@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AgentB chat</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/chat.css">
+</head>
+<body class="chat-page">
+  <header class="chat-header">
+    <div class="chat-brand"><img src="/static/assets/mark.svg" alt=""><span>harness</span></div>
+    <div id="chat-binding"></div>
+    <span id="chat-status"></span>
+    <span id="connection" role="status"></span>
+    <button id="chat-stop" class="chat-stop" type="button">Stop</button>
+  </header>
+  <div id="chat-budget" class="chat-budget" aria-label="Context budget"><span class="chat-budget-fill"></span><span class="chat-budget-tip"></span></div>
+  <main id="chat-log" class="chat-log" tabindex="0" aria-live="polite"></main>
+  <footer class="chat-composer">
+    <textarea id="chat-task" rows="1" aria-label="Task" placeholder="Send a task"></textarea>
+    <button id="chat-send" type="button">Send</button>
+    <div id="chat-notice" class="chat-notice" role="status"></div>
+  </footer>
+  <script type="module" src="/static/js/chat.js"></script>
+</body>
+</html>
