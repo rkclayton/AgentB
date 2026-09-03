@@ -46,16 +46,22 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 	if err != nil {
 		return "", err
 	}
+	fail := func(cause error) (string, error) {
+		if prefix != "" {
+			return "", fmt.Errorf("%serror: %v", prefix, cause)
+		}
+		return "", cause
+	}
 	raw, err := os.ReadFile(resolved)
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	sample := raw
 	if len(sample) > 8192 {
 		sample = sample[:8192]
 	}
 	if bytes.IndexByte(sample, 0) >= 0 {
-		return "", fmt.Errorf("binary file refused: %s", cleanRel(path))
+		return fail(fmt.Errorf("binary file refused: %s", cleanRel(path)))
 	}
 	bom := bytes.HasPrefix(raw, []byte{0xef, 0xbb, 0xbf})
 	if bom {
@@ -67,27 +73,27 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 	replacement = normalizeLF(replacement)
 	updated, start, end, note, matched, err := exactTier(text, old, replacement)
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	if !matched {
 		updated, start, end, note, matched, err = whitespaceTier(text, old, replacement, false)
 		if err != nil {
-			return "", err
+			return fail(err)
 		}
 	}
 	if !matched {
 		updated, start, end, note, matched, err = whitespaceTier(text, old, replacement, true)
 		if err != nil {
-			return "", err
+			return fail(err)
 		}
 	}
 	if !matched {
 		if replacement != "" && strings.Count(text, replacement) == 1 {
 			line := lineAt(text, strings.Index(text, replacement))
 			last := line + strings.Count(replacement, "\n")
-			return "", fmt.Errorf("old_string not found, but new_string already exists at lines %d–%d; this edit may already be applied.", line, last)
+			return fail(fmt.Errorf("old_string not found, but new_string already exists at lines %d–%d; this edit may already be applied.", line, last))
 		}
-		return "", nearMiss(path, text, old)
+		return fail(nearMiss(path, text, old))
 	}
 	output := updated
 	if crlf {
@@ -99,7 +105,7 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 	}
 	temp, err := os.CreateTemp(filepath.Dir(resolved), ".agentb-edit-*")
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
@@ -110,10 +116,10 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 		err = closeErr
 	}
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	if err := atomicReplace(tempPath, resolved); err != nil {
-		return "", err
+		return fail(err)
 	}
 	e.coordinator.record(s, resolved)
 	if replacement == "" {

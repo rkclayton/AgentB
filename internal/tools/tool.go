@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"harness/internal/session"
 )
@@ -52,6 +53,9 @@ func (r *Registry) Call(ctx context.Context, s *session.Session, name string, ar
 	}
 	result, err := tool.Call(ctx, s, args)
 	if err != nil {
+		if strings.HasPrefix(err.Error(), "note:") {
+			return err.Error(), false
+		}
 		return "error: " + err.Error(), false
 	}
 	return result, true

@@ -42,7 +42,13 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 - `GET /api/sessions`; `POST /api/sessions {label?,server_id,workspace?}` → 201 `{session}`; `POST /api/sessions/{id} {label}`; `DELETE /api/sessions/{id}?force=1`; `POST /api/sessions/{id}/reset`.
 - `GET /api/servers`; `POST /api/servers/{id}/probe` → 202 and an eventual event.
 - `GET /api/config`; `POST /api/config` deep-merges keys and server entries by immutable `id`, validates, saves, and publishes `config.changed`. The masked API-key sentinel means unchanged. Validation errors are 400 `{error,field}`.
-- `POST /api/message`, `/api/stop`, `/api/tools/{name}`, and `/api/approve` return 501 through prompt 3 and are implemented in later prompts.
+- `POST /api/message`, `/api/stop`, `/api/tools/{name}`, and `/api/approve` drive runs, cancellation, per-session tool toggles, and approval decisions.
+
+## Behavior notes
+
+- A write from one session blocks another session's `write_file` or `edit_file` until that session re-reads the shared path; the refusal identifies the other session and publishes `workspace.conflict`.
+- With `run.queue_depth > 0`, messages posted during a run wait per session and start in order after it ends; `user_stop` discards the remaining messages. Depth `0` keeps the immediate 409 behavior.
+- `run.cycle_window: 0` disables repeated-call cycle detection. `run.max_consecutive_tool_errors: 0` disables the consecutive tool-error stop.
 
 ## Configuration
 

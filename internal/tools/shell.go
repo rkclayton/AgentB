@@ -22,8 +22,8 @@ func (*Shell) Name() string            { return "shell" }
 func (*Shell) Description() string {
 	return "Run a non-interactive shell command from the workspace root with a timeout. Returns the exit code and combined output, cut to head and tail if long."
 }
-func (*Shell) Schema() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}, "timeout_s": map[string]any{"type": "integer"}}, "required": []string{"command"}}
+func (s *Shell) Schema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}, "timeout_s": map[string]any{"type": "integer", "default": s.cfg.TimeoutS, "maximum": s.cfg.MaxTimeoutS}}, "required": []string{"command"}}
 }
 func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string]any) (string, error) {
 	command, ok := args["command"].(string)

@@ -51,3 +51,12 @@
 - With `tokenize=false` and `cached_tokens=false` temporarily applied, the rail rendered two estimated-category outlines, showed a `~` total and `context (estimated)`, and omitted the cached readout. The measured capabilities were restored.
 - Static verification passed for every JS module. CSS contains exactly the six palette values, no uppercase transform, and only the inset recess shadow.
 - Deferred as scoped: State and Timeline content, settings sheet, `/chat`, replay, memory UI, and any additional motion.
+
+## Prompt 6
+
+- Registered `read_file`, `list_dir`, `write_file`, `edit_file`, `grep`, and `shell` in the fixed prefix order. Approval remains `off`, queue depth remains `0`, cycle window remains `8`, and the consecutive tool-error limit remains `3`.
+- The table-driven edit and jail suite passes all required cases on HOMEPC. Atomic replacement, BOM/EOL preservation, indentation recovery, stale-view notes, and cross-session conflict refusal are covered. A live A/B swarm refused A with `session B wrote this file`, published both session ids, then succeeded after A re-read the file.
+- The live model repaired `buggy.go` through `read_file`, `edit_file`, and `shell`; `go run buggy.go` returned `CHECK_OK` and the run stopped `done`. Cached prompt tokens across its four turns were `0`, `1002`, `1106`, and `1260`.
+- Repeating the same successful read published `cycle.detected` and stopped `cycle`. With the window set to `0`, the repeated reads continued to the two-turn ceiling. Three distinct failed reads stopped `tool_errors` with the last error in `detail`.
+- `approval.mode=mutating` paused a live write, published `approval.required`, and resumed through `/api/approve`; mode was restored to `off`. With queue depth `2`, two messages queued in order, the first started automatically, and stopping it discarded the second with `discarded 1 queued message(s)`.
+- A two-second shell timeout returned after 2.079 seconds and killed its spawned child; the child's delayed marker was still absent nine seconds later. `shell` is not a security boundary: OS-level sandboxing remains deferred, as do compaction, exact accounting, memory, settings, chat, and replay.

@@ -82,12 +82,18 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 	if err != nil {
 		return "", err
 	}
+	fail := func(cause error) (string, error) {
+		if prefix != "" {
+			return "", fmt.Errorf("%serror: %v", prefix, cause)
+		}
+		return "", cause
+	}
 	if err := os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
-		return "", err
+		return fail(err)
 	}
 	temp, err := os.CreateTemp(filepath.Dir(resolved), ".agentb-write-*")
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	tempPath := temp.Name()
 	defer os.Remove(tempPath)
@@ -98,10 +104,10 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 		err = closeErr
 	}
 	if err != nil {
-		return "", err
+		return fail(err)
 	}
 	if err := atomicReplace(tempPath, resolved); err != nil {
-		return "", err
+		return fail(err)
 	}
 	w.coordinator.record(s, resolved)
 	lines := 0
