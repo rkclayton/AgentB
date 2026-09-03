@@ -53,7 +53,18 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 	}
 	runnable, reason := runnable(profile)
 	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "grep": true, "shell": true, "remember": true}
+	nctx := profile.Capabilities.NCtx
+	if nctx == 0 {
+		nctx = profile.Context.NCtxOverride
+	}
+	reserve := profile.Context.ReserveOutput
 	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason}
+	session.Messages = []events.Message{}
+	ceiling := nctx - reserve
+	if ceiling < 0 {
+		ceiling = 0
+	}
+	session.Budget = events.Budget{NCtx: nctx, Reserve: reserve, Ceiling: ceiling, Mode: "estimated", Estimated: true, EstimatedCategories: []string{}, Categories: map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "summary": 0}}
 	r.sessions[id] = session
 	r.bus.Publish(events.New(events.SessionCreated, id, "", map[string]any{"session": session.Snapshot(nil)}))
 	return session, nil

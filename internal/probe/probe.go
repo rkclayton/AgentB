@@ -53,6 +53,9 @@ func Probe(ctx context.Context, profile *config.Profile) (config.Capabilities, [
 			findings = append(findings, "models: profile model not listed")
 		}
 	}
+	working := *profile
+	working.Capabilities.Server = caps.Server
+	client = llm.New(&working)
 
 	check, cancel = context.WithTimeout(ctx, 20*time.Second)
 	_, err := client.Tokenize(check, "The quick brown fox", false)
@@ -155,7 +158,9 @@ func probeReasoning(ctx context.Context, client *llm.Client, profile *config.Pro
 			body := clone(base)
 			body["chat_template_kwargs"] = map[string]any{"enable_thinking": true, "reasoning_effort": effort}
 			_, status := present(body)
-			if status == 200 {
+			// This template silently maps the unsupported "high" spelling instead of
+			// rejecting it, so only the model's documented discrete efforts are valid.
+			if status == 200 && effort != "high" {
 				caps.ValidEfforts = append(caps.ValidEfforts, effort)
 			}
 		}
