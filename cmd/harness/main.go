@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
@@ -9,6 +10,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -26,6 +29,10 @@ import (
 func main() {
 	configPath := flag.String("config", "harness.json", "configuration file")
 	flag.Parse()
+	facts := readServingFacts("SERVING.md")
+	if facts.TokenizeBlocksOnSlot == "yes" {
+		log.Printf("tokenize blocks on the generation slot (%d ms measured busy); context.accounting: \"estimated\" avoids it", facts.TokenizeBusyMS)
+	}
 	cfg, migrated, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatal(err)
@@ -104,4 +111,38 @@ func main() {
 			os.Exit(1)
 		}
 	}
+}
+
+type servingFacts struct {
+	TokenizeIdleMS       int
+	TokenizeBusyMS       int
+	TokenizeBlocksOnSlot string
+}
+
+// readServingFacts reads only the accounting facts needed at startup. Missing or
+// malformed values remain zero-valued so a documentation issue cannot stop AgentB.
+func readServingFacts(path string) servingFacts {
+	file, err := os.Open(path)
+	if err != nil {
+		return servingFacts{}
+	}
+	defer file.Close()
+
+	var facts servingFacts
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		key, value, found := strings.Cut(strings.TrimSpace(scanner.Text()), "=")
+		if !found {
+			continue
+		}
+		switch key {
+		case "tokenize_idle_ms":
+			facts.TokenizeIdleMS, _ = strconv.Atoi(value)
+		case "tokenize_busy_ms":
+			facts.TokenizeBusyMS, _ = strconv.Atoi(value)
+		case "tokenize_blocks_on_slot":
+			facts.TokenizeBlocksOnSlot = strings.ToLower(value)
+		}
+	}
+	return facts
 }
