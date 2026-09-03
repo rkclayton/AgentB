@@ -4,7 +4,7 @@ AgentB executes shell commands selected by a model. Use it only where that autho
 
 ## Workspace and shell boundary
 
-The workspace is a boundary for the file tools only. The `shell` tool is not jailed and cannot be contained by its tool-layer wrapper: it can change directories, use absolute paths, invoke network clients, and run any program available to the harness account. As documented in [harness-plan.md §6.4](harness-plan.md#64-the-shell-tool-honestly), the wrapper pins the initial working directory, kills the process tree on timeout, checks a small configurable denylist, and logs the complete call and result. That is all. An OS sandbox is the real isolation boundary and remains deferred.
+The workspace is a boundary for the file tools only. The `shell` tool is not jailed and cannot be contained by its tool-layer wrapper: it can change directories, use absolute paths, invoke network clients, and run any program available to the harness account. As documented in [harness-plan.md §6.4](harness-plan.md#64-the-shell-tool-honestly), the wrapper pins the initial working directory, kills the process tree on timeout, checks a small configurable denylist, and logs the complete call and result. That is all. [Windows host hardening](docs/HARDENING.md) provides a dedicated-account and control-surface ACL runbook to reduce blast radius; it does not jail the shell or replace an OS sandbox.
 
 The default file-routing guard refuses simple shell shapes that duplicate `glob` or `read_file`. It is a routing aid, not a security boundary: it does not restrict what the shell can do and is not a sandbox.
 
