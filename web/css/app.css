@@ -8,3 +8,4 @@
 @keyframes breathe{50%{opacity:.55}}
 @media(max-width:800px){.grid{grid-template-rows:minmax(260px,2fr) minmax(150px,1fr) minmax(120px,1fr)}.flow-well,.rack-well,.state-well,.timeline-well{grid-column:span 12}.state-well,.timeline-well{display:none}.tab{min-width:145px}.rail-labels{display:none}}
 @media(prefers-reduced-motion:reduce){.queued .lamp,.node.active.call-model .node-lamp{animation:none}.travel-dot{display:none}.segment,.switch::after{transition:none}}
+.tab.idle{position:relative;inset:auto;display:flex;place-content:normal;text-align:left;color:var(--ink)}
