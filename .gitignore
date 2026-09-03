@@ -1,6 +1,7 @@
 # Local remote-access material and machine-specific probe output.
 .remote/
 serve/logs/
+serve/probes/results/
 *.log
 
 # Models and generated binaries never belong in source control.
