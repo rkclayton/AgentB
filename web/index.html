@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>AgentB harness</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+  <header class="header">
+    <div class="brand"><img src="/static/assets/mark.svg" alt=""><span>harness</span></div>
+    <div id="connection" role="status"></div>
+    <button id="stop" class="stop" type="button">Stop</button>
+    <button id="settings" class="icon-button" type="button" aria-label="Settings">⚙</button>
+  </header>
+  <nav id="tabs" class="tabs" aria-label="Sessions"></nav>
+  <section id="rail" class="rail" aria-label="Context budget"></section>
+  <main class="grid">
+    <section class="well flow-well">
+      <header class="panel-caption"><span>Flow</span><span id="flow-count"></span></header>
+      <div id="flow" class="flow"></div>
+      <form id="composer" class="composer"><input id="task" autocomplete="off" aria-label="Task" placeholder="Send a task"><button type="submit">Send</button></form>
+    </section>
+    <section class="well rack-well">
+      <header class="panel-caption"><span>Tools</span><span id="tool-count"></span></header>
+      <div id="rack" class="rack"></div>
+    </section>
+    <section class="well state-well"><header class="panel-caption"><span>State</span><span id="state-count"></span></header></section>
+    <section class="well timeline-well"><header class="panel-caption"><span>Timeline</span><span id="timeline-count"></span></header></section>
+  </main>
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>
