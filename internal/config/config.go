@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -170,6 +171,7 @@ func Load(path string) (*Config, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
 	migrated, data, err := migrateV1(data)
 	if err != nil {
 		return nil, false, err
