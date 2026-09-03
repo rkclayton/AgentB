@@ -14,14 +14,28 @@ type Event struct {
 }
 
 const (
-	Snapshot       = "snapshot"
-	SessionCreated = "session.created"
-	SessionRenamed = "session.renamed"
-	SessionReset   = "session.reset"
-	SessionClosed  = "session.closed"
-	ServerProbed   = "server.probed"
-	ConfigChanged  = "config.changed"
-	Error          = "error"
+	Snapshot        = "snapshot"
+	SessionCreated  = "session.created"
+	SessionRenamed  = "session.renamed"
+	SessionReset    = "session.reset"
+	SessionClosed   = "session.closed"
+	ServerProbed    = "server.probed"
+	ConfigChanged   = "config.changed"
+	Error           = "error"
+	RunQueued       = "run.queued"
+	RunStarted      = "run.started"
+	RunStopped      = "run.stopped"
+	Stage           = "stage"
+	ModelRequest    = "model.request"
+	ModelProgress   = "model.progress"
+	ModelDelta      = "model.delta"
+	ModelResponse   = "model.response"
+	ToolCallEvent   = "tool.call"
+	ToolResult      = "tool.result"
+	ToolToggled     = "tool.toggled"
+	MessageAppended = "message.appended"
+	MessageQueued   = "message.queued"
+	BudgetEvent     = "budget"
 )
 
 var Stages = []string{"assemble", "call_model", "parse", "dispatch", "execute", "append", "compact", "wait_user"}

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"harness/internal/agent"
 	"harness/internal/config"
 	"harness/internal/events"
 	"harness/internal/probe"
@@ -23,12 +24,21 @@ type Server struct {
 	bus        *events.Bus
 	registry   *session.Registry
 	webDir     string
+	scheduler  *agent.Scheduler
+	runner     *agent.Runner
+	prompt     *agent.PromptRenderer
 }
 
 func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
 	return &Server{cfg: cfg, configPath: path, webDir: webDir, bus: bus}
 }
 func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry }
+func (s *Server) SetRuntime(scheduler *agent.Scheduler, runner *agent.Runner, prompt *agent.PromptRenderer) {
+	s.scheduler = scheduler
+	s.runner = runner
+	s.prompt = prompt
+}
+func (s *Server) ConfigSnapshot() config.Config { s.mu.RLock(); defer s.mu.RUnlock(); return *s.cfg }
 func (s *Server) Profile(id string) (*config.Profile, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -52,10 +62,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/servers", s.servers)
 	mux.HandleFunc("/api/servers/", s.server)
 	mux.HandleFunc("/api/config", s.config)
-	for _, path := range []string{"/api/message", "/api/stop", "/api/approve"} {
-		mux.HandleFunc(path, notBuilt)
-	}
-	mux.HandleFunc("/api/tools/", notBuilt)
+	mux.HandleFunc("/api/message", s.message)
+	mux.HandleFunc("/api/stop", s.stop)
+	mux.HandleFunc("/api/approve", notBuilt)
+	mux.HandleFunc("/api/tools/", s.toggleTool)
 	return mux
 }
 
@@ -113,6 +123,8 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 	}
 }
 func (s *Server) writeFrame(w http.ResponseWriter, event events.Event) {
+	event.Body = nil
+	event.Raw = nil
 	data, _ := json.Marshal(event)
 	fmt.Fprintf(w, "event: %s\ndata: %s\nid: %d\n\n", event.Type, data, event.Seq)
 }
@@ -175,6 +187,17 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	}
 	id := parts[0]
 	if len(parts) == 2 && parts[1] == "reset" && r.Method == http.MethodPost {
+		if s.scheduler != nil && s.scheduler.Active(id) {
+			if r.URL.Query().Get("force") != "1" {
+				writeError(w, 409, "session is running", "session_id")
+				return
+			}
+			s.scheduler.Stop(id, false)
+			deadline := time.Now().Add(2 * time.Second)
+			for s.scheduler.Active(id) && time.Now().Before(deadline) {
+				time.Sleep(20 * time.Millisecond)
+			}
+		}
 		path, err := s.registry.Reset(id)
 		if err != nil {
 			writeError(w, 409, err.Error(), "session")
@@ -337,11 +360,80 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		s.cfg = &next
 		masked := next.Masked()
 		s.mu.Unlock()
+		if s.prompt != nil {
+			if err := s.prompt.Reload(); err != nil {
+				writeError(w, 500, err.Error(), "prompts/system.md")
+				return
+			}
+		}
 		s.bus.Publish(events.New(events.ConfigChanged, "", "", map[string]any{"config": masked}))
 		writeJSON(w, 200, masked)
 	default:
 		method(w)
 	}
+}
+func (s *Server) message(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	var body struct {
+		SessionID string `json:"session_id"`
+		Text      string `json:"text"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	result, err := s.scheduler.Submit(r.Context(), body.SessionID, body.Text)
+	if err != nil {
+		status := 400
+		if strings.Contains(err.Error(), "in progress") {
+			status = 409
+		}
+		writeError(w, status, err.Error(), "session_id")
+		return
+	}
+	writeJSON(w, 202, result)
+}
+func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	var body struct {
+		SessionID string `json:"session_id"`
+		All       bool   `json:"all"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	writeJSON(w, 200, map[string]any{"stopped": s.scheduler.Stop(body.SessionID, body.All)})
+}
+func (s *Server) toggleTool(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/tools/"), "/")
+	var body struct {
+		SessionID string `json:"session_id"`
+		Enabled   bool   `json:"enabled"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	item, ok := s.registry.Get(body.SessionID)
+	if !ok {
+		writeError(w, 404, "session not found", "session_id")
+		return
+	}
+	if !item.ToggleTool(name, body.Enabled) {
+		writeError(w, 404, "tool not found", "name")
+		return
+	}
+	s.bus.Publish(events.New(events.ToolToggled, item.ID, "", map[string]any{"name": name, "enabled": body.Enabled}))
+	s.runner.PublishBudget(r.Context(), item)
+	writeJSON(w, 200, map[string]any{"name": name, "enabled": body.Enabled})
 }
 func mergeConfig(dst, src map[string]any) {
 	for key, value := range src {

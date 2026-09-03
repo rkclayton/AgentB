@@ -34,7 +34,7 @@ func buildRequest(profile *config.Profile, request Request, stream bool) map[str
 	effortAllowed := len(profile.Reasoning.ValidEfforts) > 0 && contains(profile.Reasoning.ValidEfforts, profile.Reasoning.Effort)
 	switch control {
 	case "chat_template_kwargs":
-		kwargs := map[string]any{"enable_thinking": profile.Reasoning.Enabled}
+		kwargs := map[string]any{"enable_thinking": profile.Reasoning.Enabled, "preserve_thinking": profile.Reasoning.Preserve}
 		if effortAllowed {
 			kwargs["reasoning_effort"] = profile.Reasoning.Effort
 		}
@@ -45,6 +45,10 @@ func buildRequest(profile *config.Profile, request Request, stream bool) map[str
 		}
 	}
 	return body
+}
+
+func BuildRequest(profile *config.Profile, request Request, stream bool) map[string]any {
+	return buildRequest(profile, request, stream)
 }
 func contains(values []string, want string) bool {
 	for _, v := range values {

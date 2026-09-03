@@ -67,3 +67,35 @@ func (s *Session) IsRunning() bool {
 	defer s.mu.Unlock()
 	return s.Run.Status == "running" || s.Run.Status == "queued" || s.Run.Status == "paused" || s.Run.Status == "stopping"
 }
+func (s *Session) Touch(path string) { s.mu.Lock(); s.LastSeen[path] = time.Now().UTC(); s.mu.Unlock() }
+func (s *Session) ToolEnabled(name string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ToolsEnabled[name]
+}
+func (s *Session) ToggleTool(name string, enabled bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.ToolsEnabled[name]; !ok {
+		return false
+	}
+	s.ToolsEnabled[name] = enabled
+	return true
+}
+func (s *Session) EnabledTools() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]bool{}
+	for k, v := range s.ToolsEnabled {
+		out[k] = v
+	}
+	return out
+}
+func (s *Session) Append(message events.Message) {
+	s.mu.Lock()
+	s.Messages = append(s.Messages, message)
+	s.mu.Unlock()
+}
+func (s *Session) SetRun(state RunState)          { s.mu.Lock(); s.Run = state; s.mu.Unlock() }
+func (s *Session) UpdatePartial(partial string)   { s.mu.Lock(); s.Run.Partial = partial; s.mu.Unlock() }
+func (s *Session) SetBudget(budget events.Budget) { s.mu.Lock(); s.Budget = budget; s.mu.Unlock() }

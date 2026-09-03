@@ -45,9 +45,12 @@ type Response struct {
 	PromptProgress bool
 }
 type Delta struct {
-	Kind  string
-	Index int
-	Text  string
+	Kind      string
+	Index     int
+	Text      string
+	Total     int
+	Cache     int
+	Processed int
 }
 type Props struct {
 	BuildInfo                 string `json:"build_info"`

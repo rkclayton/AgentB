@@ -12,10 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"harness/internal/agent"
 	"harness/internal/config"
 	"harness/internal/events"
 	"harness/internal/probe"
 	"harness/internal/session"
+	"harness/internal/tools"
 	webserver "harness/internal/web"
 )
 
@@ -52,6 +54,14 @@ func main() {
 	web := webserver.New(cfg, *configPath, "web", bus)
 	registry := session.NewRegistry(bus, writers, web.Profile, cfg.Run.MaxTurns)
 	web.SetRegistry(registry)
+	renderer, err := agent.LoadTemplate(filepath.Join("prompts", "system.md"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	toolRegistry := tools.New(tools.NewReadFile(cfg.Tools.ReadFile), tools.NewListDir(cfg.Tools.ListDir))
+	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
+	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)
+	web.SetRuntime(scheduler, runner, renderer)
 	if _, err := registry.Create("main", cfg.Servers[0].ID, cfg.Workspace); err != nil {
 		log.Fatal(err)
 	}

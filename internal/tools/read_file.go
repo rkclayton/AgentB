@@ -1,0 +1,86 @@
+package tools
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"os"
+	"strings"
+
+	"harness/internal/config"
+	"harness/internal/session"
+)
+
+type ReadFile struct{ cfg config.ReadFileTool }
+
+func NewReadFile(cfg config.ReadFileTool) *ReadFile { return &ReadFile{cfg: cfg} }
+func (*ReadFile) Name() string                      { return "read_file" }
+func (*ReadFile) Description() string {
+	return "Read a UTF-8 text file in the workspace. Returns lines from offset, at most limit lines; a trailing note says how many lines remain."
+}
+func (r *ReadFile) Schema() map[string]any {
+	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "default": 1}, "limit": map[string]any{"type": "integer", "default": r.cfg.DefaultLimit, "maximum": r.cfg.MaxLimit}}, "required": []string{"path"}}
+}
+func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
+	path, ok := args["path"].(string)
+	if !ok || path == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	resolved, err := Resolve(s.Workspace, path)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return "", err
+	}
+	sample := data
+	if len(sample) > 8192 {
+		sample = sample[:8192]
+	}
+	if strings.IndexByte(string(sample), 0) >= 0 {
+		return "", fmt.Errorf("binary file refused: %s", path)
+	}
+	offset := number(args["offset"], 1)
+	limit := number(args["limit"], r.cfg.DefaultLimit)
+	if offset < 1 {
+		return "", fmt.Errorf("offset must be at least 1")
+	}
+	if limit < 1 {
+		return "", fmt.Errorf("limit must be positive")
+	}
+	limit = int(math.Min(float64(limit), float64(r.cfg.MaxLimit)))
+	text := strings.ReplaceAll(string(data), "\r", "")
+	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
+	if offset > len(lines) {
+		return "", fmt.Errorf("offset %d exceeds file length %d", offset, len(lines))
+	}
+	end := offset - 1 + limit
+	if end > len(lines) {
+		end = len(lines)
+	}
+	selected := append([]string(nil), lines[offset-1:end]...)
+	for i, line := range selected {
+		if len([]rune(line)) > r.cfg.MaxLineChars {
+			selected[i] = string([]rune(line)[:r.cfg.MaxLineChars]) + "…"
+		}
+	}
+	result := strings.Join(selected, "\n")
+	if left := len(lines) - end; left > 0 {
+		result += fmt.Sprintf("\n[… %d more lines; read_file offset=%d]", left, end+1)
+	}
+	s.Touch(path)
+	return result, nil
+}
+func number(value any, fallback int) int {
+	if value == nil {
+		return fallback
+	}
+	if n, ok := value.(float64); ok {
+		return int(n)
+	}
+	if n, ok := value.(int); ok {
+		return n
+	}
+	return fallback
+}

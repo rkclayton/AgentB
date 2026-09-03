@@ -56,6 +56,7 @@ func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(D
 		return Response{}, fmt.Errorf("chat stream HTTP %d: %s", response.StatusCode, raw)
 	}
 	result := Response{Usage: Usage{CachedTokens: -1}}
+	var rawStream bytes.Buffer
 	arguments := map[int]*strings.Builder{}
 	calls := map[int]*ToolCall{}
 	scanner := bufio.NewScanner(response.Body)
@@ -65,6 +66,8 @@ func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(D
 		if !strings.HasPrefix(line, "data: ") || line == "data: [DONE]" {
 			continue
 		}
+		rawStream.WriteString(line)
+		rawStream.WriteByte('\n')
 		var chunk struct {
 			Choices []struct {
 				Delta struct {
@@ -88,7 +91,11 @@ func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(D
 				} `json:"prompt_tokens_details"`
 			} `json:"usage"`
 			Timings        Timings `json:"timings"`
-			PromptProgress any     `json:"prompt_progress"`
+			PromptProgress *struct {
+				Total     int `json:"total"`
+				Cache     int `json:"cache"`
+				Processed int `json:"processed"`
+			} `json:"prompt_progress"`
 		}
 		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &chunk) != nil {
 			continue
@@ -105,6 +112,7 @@ func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(D
 		}
 		if chunk.PromptProgress != nil {
 			result.PromptProgress = true
+			onDelta(Delta{Kind: "progress", Total: chunk.PromptProgress.Total, Cache: chunk.PromptProgress.Cache, Processed: chunk.PromptProgress.Processed})
 		}
 		for _, choice := range chunk.Choices {
 			if choice.Delta.ReasoningContent != "" {
@@ -153,6 +161,7 @@ func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(D
 		result.ToolCalls = append(result.ToolCalls, *call)
 	}
 	result.DurationMS = time.Since(start).Milliseconds()
+	result.Raw = rawStream.Bytes()
 	return result, nil
 }
 
