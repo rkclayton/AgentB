@@ -79,7 +79,23 @@ func (s *Server) snapshot() map[string]any {
 	s.mu.RLock()
 	masked := s.cfg.Masked()
 	s.mu.RUnlock()
-	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Save a durable workspace note."}}}
+	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "serving_facts": servingFacts("SERVING.md"), "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Save a durable workspace note."}}}
+}
+
+func servingFacts(path string) map[string]any {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return map[string]any{}
+	}
+	wanted := map[string]bool{"tokenize_idle_ms": true, "tokenize_busy_ms": true, "tokenize_blocks_on_slot": true}
+	out := map[string]any{}
+	for _, line := range strings.Split(string(data), "\n") {
+		key, value, found := strings.Cut(strings.TrimSpace(line), "=")
+		if found && wanted[key] {
+			out[key] = strings.TrimSpace(value)
+		}
+	}
+	return out
 }
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -168,6 +184,10 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			body.Workspace = s.cfg.Workspace
 			s.mu.RUnlock()
 		}
+		if runnable, reason := s.registry.ProfileRunnable(body.ServerID); !runnable {
+			writeError(w, 400, reason, "server_id")
+			return
+		}
 		item, err := s.registry.Create(body.Label, body.ServerID, body.Workspace)
 		if err != nil {
 			writeError(w, 400, err.Error(), "session")
@@ -253,10 +273,14 @@ func (s *Server) servers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 	tail := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/servers/"), "/")
 	if r.Method == http.MethodDelete && !strings.Contains(tail, "/") {
+		if sessionID, used := s.registry.ProfileInUse(tail); used {
+			writeError(w, 409, "profile in use by session "+sessionID, "server_id")
+			return
+		}
 		s.mu.Lock()
-		if len(s.cfg.Servers) == 1 || s.cfg.Servers[0].ID == tail {
+		if len(s.cfg.Servers) == 1 {
 			s.mu.Unlock()
-			writeError(w, 409, "cannot delete the primary server", "server_id")
+			writeError(w, 409, "cannot delete the last profile", "server_id")
 			return
 		}
 		found := false
@@ -301,8 +325,10 @@ func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runProbe(profile *config.Profile) {
 	caps, findings, err := probe.Probe(contextBackground{}, profile)
 	if err != nil {
-		s.bus.Publish(events.New(events.Error, "", "", map[string]any{"where": "probe", "message": err.Error()}))
-		return
+		caps = profile.Capabilities
+		caps.ProbedAt = time.Now().UTC().Format(time.RFC3339)
+		findings = []string{"probe failed: " + err.Error()}
+		caps.Findings = findings
 	}
 	s.mu.Lock()
 	for i := range s.cfg.Servers {
@@ -316,6 +342,9 @@ func (s *Server) runProbe(profile *config.Profile) {
 	if saveErr != nil {
 		s.bus.Publish(events.New(events.Error, "", "", map[string]any{"where": "config", "message": saveErr.Error()}))
 		return
+	}
+	if s.registry != nil {
+		s.registry.RefreshRunnable()
 	}
 	s.bus.Publish(events.New(events.ServerProbed, "", "", map[string]any{"server_id": profile.ID, "capabilities": caps, "findings": findings}))
 }
@@ -355,7 +384,7 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		config.ApplyDefaults(&next)
 		if err := next.Validate(); err != nil {
 			s.mu.Unlock()
-			writeError(w, 400, err.Error(), strings.SplitN(err.Error(), ":", 2)[0])
+			writeError(w, 400, err.Error(), configField(err, next))
 			return
 		}
 		if err := next.Save(s.configPath); err != nil {
@@ -387,6 +416,22 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 	default:
 		method(w)
 	}
+}
+
+func configField(err error, cfg config.Config) string {
+	field := strings.SplitN(err.Error(), ":", 2)[0]
+	if !strings.HasPrefix(field, "servers[") {
+		return field
+	}
+	end := strings.Index(field, "]")
+	if end < 9 {
+		return field
+	}
+	var index int
+	if _, scanErr := fmt.Sscanf(field[:end+1], "servers[%d]", &index); scanErr != nil || index < 0 || index >= len(cfg.Servers) {
+		return field
+	}
+	return "servers." + cfg.Servers[index].ID + field[end+1:]
 }
 func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

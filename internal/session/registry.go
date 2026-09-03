@@ -94,6 +94,21 @@ func (r *Registry) Label(id string) string {
 	}
 	return id
 }
+func (r *Registry) ProfileInUse(serverID string) (string, bool) {
+	for _, item := range r.List() {
+		if item.ServerID == serverID {
+			return item.ID, true
+		}
+	}
+	return "", false
+}
+func (r *Registry) ProfileRunnable(serverID string) (bool, string) {
+	profile, ok := r.profiles(serverID)
+	if !ok {
+		return false, "unknown profile " + serverID
+	}
+	return runnable(profile, r.config().Context.Accounting)
+}
 func (r *Registry) List() []*Session {
 	r.mu.Lock()
 	defer r.mu.Unlock()

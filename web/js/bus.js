@@ -5,6 +5,7 @@ export const store = {
   config: {},
   flow: { stages: [], edges: [] },
   tools: [],
+  serving_facts: {},
 };
 const listeners = new Set();
 export function subscribe(fn) {
@@ -57,7 +58,16 @@ export function reduce(event) {
       break;
     case "server.probed": {
       const p = store.servers.find((x) => x.id === data.server_id);
-      if (p) p.capabilities = data.capabilities;
+      if (p) {
+        p.capabilities = data.capabilities;
+        p.reasoning.valid_efforts = data.capabilities?.valid_efforts || [];
+        p._probing = false;
+      }
+	  const configured = store.config.servers?.find((x) => x.id === data.server_id);
+	  if (configured) {
+		configured.capabilities = data.capabilities;
+		configured.reasoning.valid_efforts = data.capabilities?.valid_efforts || [];
+	  }
       break;
     }
     case "config.changed":
@@ -197,6 +207,13 @@ export function reduce(event) {
       }
       break;
     case "memory.noted":
+	  if (target) {
+		target.memory_path = data.path || target.memory_path;
+		const line = `- ${data.note}`;
+		target.memory_content = target.memory_content
+		  ? `${target.memory_content.trimEnd()}\n${line}\n`
+		  : `${line}\n`;
+	  }
       break;
   }
   if (target) {
@@ -237,7 +254,13 @@ export async function api(path, body, method = "POST") {
   }
   const response = await fetch(path, options);
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+  if (!response.ok) {
+	const error = new Error(data.error || `HTTP ${response.status}`);
+	error.field = data.field || "";
+	error.status = response.status;
+	error.data = data;
+	throw error;
+  }
   return data;
 }
 const connection = document.getElementById("connection");

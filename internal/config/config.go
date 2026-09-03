@@ -251,13 +251,25 @@ func (c Config) Validate() error {
 			return fmt.Errorf("%s.context.n_ctx_override: required when probe_mode is off", prefix)
 		}
 	}
-	if c.Run.MaxConcurrent < 1 || c.Run.QueueDepth < 0 || c.Run.CycleWindow < 0 || c.Run.MaxConsecutiveToolErrors < 0 {
-		return fmt.Errorf("run: invalid limits")
+	if c.Run.MaxTurns < 1 {
+		return fmt.Errorf("run.max_turns: must be positive")
+	}
+	if c.Run.MaxConcurrent < 1 {
+		return fmt.Errorf("run.max_concurrent: must be positive")
+	}
+	if c.Run.QueueDepth < 0 {
+		return fmt.Errorf("run.queue_depth: cannot be negative")
+	}
+	if c.Run.CycleWindow < 0 {
+		return fmt.Errorf("run.cycle_window: cannot be negative")
+	}
+	if c.Run.MaxConsecutiveToolErrors < 0 {
+		return fmt.Errorf("run.max_consecutive_tool_errors: cannot be negative")
 	}
 	if !oneOf(c.Approval.Mode, "off", "mutating", "all") {
 		return fmt.Errorf("approval.mode: invalid")
 	}
-	if !(c.Context.SoftPct < c.Context.SummaryPct && c.Context.SummaryPct <= 1) {
+	if !(c.Context.SoftPct > 0 && c.Context.SoftPct < c.Context.SummaryPct && c.Context.SummaryPct <= 1) {
 		return fmt.Errorf("context: require soft_pct < summary_pct <= 1")
 	}
 	if !oneOf(c.Context.Accounting, "auto", "exact", "estimated") {
@@ -265,6 +277,33 @@ func (c Config) Validate() error {
 	}
 	if c.Memory.MaxTokens < 0 {
 		return fmt.Errorf("memory.max_tokens: cannot be negative")
+	}
+	if c.Memory.Dir == "" {
+		return fmt.Errorf("memory.dir: required")
+	}
+	if c.Tools.ReadFile.DefaultLimit < 1 {
+		return fmt.Errorf("tools.read_file.default_limit: must be positive")
+	}
+	if c.Tools.ReadFile.MaxLimit < c.Tools.ReadFile.DefaultLimit {
+		return fmt.Errorf("tools.read_file.max_limit: must be at least default_limit")
+	}
+	if c.Tools.ReadFile.MaxLineChars < 1 {
+		return fmt.Errorf("tools.read_file.max_line_chars: must be positive")
+	}
+	if c.Tools.ListDir.MaxEntries < 1 {
+		return fmt.Errorf("tools.list_dir.max_entries: must be positive")
+	}
+	if c.Tools.Grep.MaxMatches < 1 || c.Tools.Grep.MaxLineChars < 1 {
+		return fmt.Errorf("tools.grep: limits must be positive")
+	}
+	if len(c.Shell.Command) == 0 {
+		return fmt.Errorf("shell.command: required")
+	}
+	if c.Shell.TimeoutS < 1 || c.Shell.MaxTimeoutS < c.Shell.TimeoutS {
+		return fmt.Errorf("shell.timeout_s: must be positive and no greater than max_timeout_s")
+	}
+	if c.Shell.MaxOutputLinesHead < 0 || c.Shell.MaxOutputLinesTail < 0 {
+		return fmt.Errorf("shell: output line limits cannot be negative")
 	}
 	return nil
 }

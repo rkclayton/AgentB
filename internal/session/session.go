@@ -35,6 +35,8 @@ type Snapshot struct {
 	Runnable          bool             `json:"runnable"`
 	NotRunnableReason string           `json:"not_runnable_reason"`
 	MemoryPath        string           `json:"memory_path"`
+	MemoryContent     string           `json:"memory_content"`
+	LogPath           string           `json:"log_path"`
 }
 type Session struct {
 	ID, Label, ServerID, Workspace string
@@ -64,7 +66,7 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, SchemaTokens: s.SchemaTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()

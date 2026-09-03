@@ -5,9 +5,11 @@ import { renderFlow } from "./flow.js";
 import { renderRack } from "./rack.js";
 import { renderState } from "./state.js";
 import { renderTimeline } from "./timeline.js";
+import { initSettings } from "./settings.js";
 const form = document.getElementById("composer"),
   input = document.getElementById("task"),
   stop = document.getElementById("stop");
+initSettings();
 subscribe(() => {
   renderTabs();
   renderRail();
