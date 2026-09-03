@@ -1,6 +1,51 @@
-import{store}from"./bus.js";
-const root=document.getElementById("flow"),count=document.getElementById("flow-count");
-export function renderFlow(){const s=store.sessions[store.active];if(!s||(!s.run.run_id&&!(s.messages||[]).length)){root.innerHTML=`<div class="idle"><img src="/static/assets/idle.svg" alt=""><p>Send a task to start the loop.</p></div>`;count.textContent="";return}const stages=store.flow.stages||[],points=layout(stages);const lines=[];for(let i=1;i<points.length;i++)lines.push(`<path class="wire" d="M${points[i-1].x} ${points[i-1].y} L${points[i].x} ${points[i].y}"/>`);const nodes=stages.map((name,index)=>{const p=points[index],active=s._stage===name,done=(s._completedStages||[]).includes(name),readout=active?readoutFor(s,name):"";return`<g class="node ${active?"active":""} ${done?"done":""} ${name.replaceAll("_","-")}" transform="translate(${p.x} ${p.y})"><rect class="node-lamp" width="8" height="8" rx="1"/><text x="14" y="8">${label(name)}</text>${readout?`<text class="readout" x="14" y="26">${readout}</text>`:""}</g>`}).join("");const p=points[Math.max(0,stages.indexOf(s._stage))]||points[0];root.innerHTML=`<svg viewBox="0 0 760 220" role="img" aria-label="Agent flow">${lines.join("")}<circle class="travel-dot" cx="${p.x+4}" cy="${p.y+4}" r="3"/>${nodes}</svg>`;count.textContent=s.run.status==="running"?`turn ${s.run.turn}/${s.run.max_turns}`:s.run.status}
-function layout(stages){const points=[];const top=Math.min(5,stages.length);for(let i=0;i<top;i++)points.push({x:30+i*145,y:48});for(let i=top;i<stages.length;i++)points.push({x:610-(i-top)*190,y:156});return points}
-function readoutFor(s,name){if(name!=="call_model")return"";const p=s._progress;if(p?.total)return`prefill ${p.cache||p.processed||0} / ${p.total}`;const rate=s._timings?.predicted_per_second;return rate?`${Math.round(rate)} tok/s`:""}
-const label=name=>name.replaceAll("_"," ");
+import { store } from "./bus.js";
+const root = document.getElementById("flow"),
+  count = document.getElementById("flow-count");
+export function renderFlow() {
+  const s = store.sessions[store.active];
+  if (!s || (!s.run.run_id && !(s.messages || []).length)) {
+    root.innerHTML = `<div class="idle"><img src="/static/assets/idle.svg" alt=""><p>Send a task to start the loop.</p></div>`;
+    count.textContent = "";
+    return;
+  }
+  const stages = store.flow.stages || [],
+    points = layout(stages);
+  const lines = [];
+  for (let i = 1; i < points.length; i++)
+    lines.push(
+      `<path class="wire" d="M${points[i - 1].x} ${points[i - 1].y} L${points[i].x} ${points[i].y}"/>`,
+    );
+  const nodes = stages
+    .map((name, index) => {
+      const p = points[index],
+        paused = s.run.status === "paused" && name === "dispatch",
+        active = s._stage === name || paused,
+        alarm = name === "dispatch" && s._dispatchAlarm,
+        done = (s._completedStages || []).includes(name),
+        readout = active ? readoutFor(s, name) : "";
+      return `<g class="node ${active ? "active" : ""} ${alarm ? "alarm" : ""} ${done ? "done" : ""} ${name.replaceAll("_", "-")}" transform="translate(${p.x} ${p.y})"><rect class="node-lamp" width="8" height="8" rx="1"/><text x="14" y="8">${label(name)}</text>${readout ? `<text class="readout" x="14" y="26">${readout}</text>` : ""}</g>`;
+    })
+    .join("");
+  const p = points[Math.max(0, stages.indexOf(s._stage))] || points[0];
+  root.innerHTML = `<svg viewBox="0 0 760 220" role="img" aria-label="Agent flow">${lines.join("")}<circle class="travel-dot" cx="${p.x + 4}" cy="${p.y + 4}" r="3"/>${nodes}</svg>`;
+  count.textContent =
+    s.run.status === "running" || s.run.status === "paused"
+      ? `turn ${s.run.turn}/${s.run.max_turns}`
+      : s.run.status;
+}
+function layout(stages) {
+  const points = [];
+  const top = Math.min(5, stages.length);
+  for (let i = 0; i < top; i++) points.push({ x: 30 + i * 145, y: 48 });
+  for (let i = top; i < stages.length; i++)
+    points.push({ x: 610 - (i - top) * 190, y: 156 });
+  return points;
+}
+function readoutFor(s, name) {
+  if (name !== "call_model") return "";
+  const p = s._progress;
+  if (p?.total) return `prefill ${p.cache || p.processed || 0} / ${p.total}`;
+  const rate = s._timings?.predicted_per_second;
+  return rate ? `${Math.round(rate)} tok/s` : "";
+}
+const label = (name) => name.replaceAll("_", " ");
