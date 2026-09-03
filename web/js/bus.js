@@ -140,7 +140,11 @@ export function reduce(event) {
       }
       break;
     case "message.appended":
-      if (target) target.messages.push(data.message);
+      if (target) {
+        if (data.message?.category === "summary")
+          target.messages.splice(1, 0, data.message);
+        else target.messages.push(data.message);
+      }
       break;
     case "message.updated":
       if (target) {
@@ -174,6 +178,24 @@ export function reduce(event) {
       }
       break;
     case "compaction":
+      if (target && data.kind === "summarize") {
+        const removed = new Set(data.affected_ids || []);
+        target.messages = target.messages.filter(
+          (message) => !removed.has(message.id),
+        );
+      }
+      if (target) {
+        target._compacted = true;
+        const compactedTarget = target;
+        setTimeout(() => {
+          compactedTarget._compacted = false;
+          notify({
+            type: "rail.compaction.done",
+            session_id: compactedTarget.id,
+          });
+        }, 160);
+      }
+      break;
     case "memory.noted":
       break;
   }

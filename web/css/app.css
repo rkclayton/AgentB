@@ -138,6 +138,7 @@
   height: 100%;
   background: rgba(216, 221, 227, 0.75);
   min-width: 0;
+  transition: width 160ms ease-in-out;
 }
 .segment.estimated {
   background: transparent;
@@ -171,6 +172,17 @@
   font: 12px/16px var(--mono);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+.rail-drift {
+  color: var(--mute);
+}
+.meter.compacted .fill-edge {
+  animation: rail-pulse 160ms ease-in-out 1;
+}
+@keyframes rail-pulse {
+  50% {
+    width: 3px;
+  }
 }
 .rail-labels {
   display: flex;

@@ -6,6 +6,8 @@ serve/probes/results/
 *.log
 logs/
 memory/
+!internal/memory/
+!internal/memory/*.go
 sandbox/
 serve/probes/reliability/runs/*/workspace-*/
 

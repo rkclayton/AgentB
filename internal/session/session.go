@@ -47,6 +47,9 @@ type Session struct {
 	LogPath                        string
 	Runnable                       bool
 	NotRunnableReason              string
+	MemoryBlock                    string
+	MemoryPath                     string
+	SchemaTokens                   map[string]int
 	queuedMessages                 int
 	mu                             sync.Mutex
 }
@@ -58,10 +61,10 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "grep", "shell", "remember"} {
 		enabled, ok := s.ToolsEnabled[name]
 		if ok {
-			tools = append(tools, ToolState{Name: name, Enabled: enabled})
+			tools = append(tools, ToolState{Name: name, Enabled: enabled, SchemaTokens: s.SchemaTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
@@ -107,3 +110,39 @@ func (s *Session) SetRun(state RunState)          { s.mu.Lock(); s.Run = state; 
 func (s *Session) UpdatePartial(partial string)   { s.mu.Lock(); s.Run.Partial = partial; s.mu.Unlock() }
 func (s *Session) SetBudget(budget events.Budget) { s.mu.Lock(); s.Budget = budget; s.mu.Unlock() }
 func (s *Session) SetQueuedMessages(count int)    { s.mu.Lock(); s.queuedMessages = count; s.mu.Unlock() }
+func (s *Session) SetSchemaTokens(values map[string]int) {
+	s.mu.Lock()
+	s.SchemaTokens = values
+	s.mu.Unlock()
+}
+func (s *Session) SetRunnable(ok bool, reason string) {
+	s.mu.Lock()
+	s.Runnable, s.NotRunnableReason = ok, reason
+	s.mu.Unlock()
+}
+func (s *Session) MessagesCopy() []events.Message {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]events.Message(nil), s.Messages...)
+}
+func (s *Session) ReplaceMessages(messages []events.Message) {
+	s.mu.Lock()
+	s.Messages = append([]events.Message(nil), messages...)
+	s.mu.Unlock()
+}
+
+type MessageCount struct {
+	Tokens    int
+	Estimated bool
+}
+
+func (s *Session) SetMessageCounts(values map[string]MessageCount) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for index := range s.Messages {
+		if value, ok := values[s.Messages[index].ID]; ok {
+			s.Messages[index].Tokens = value.Tokens
+			s.Messages[index].Estimated = value.Estimated
+		}
+	}
+}

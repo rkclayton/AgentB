@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"harness/internal/config"
+	contextmgr "harness/internal/context"
 	"harness/internal/events"
 	"harness/internal/llm"
 	"harness/internal/session"
@@ -23,11 +24,13 @@ type Runner struct {
 	profile func(string) (*config.Profile, bool)
 	cfg     func() config.Config
 	gate    *Gate
+	budget  *Budgeter
+	compact *contextmgr.Compactor
 	ids     atomic.Int64
 }
 
 func NewRunner(bus *events.Bus, registry *tools.Registry, prompt *PromptRenderer, profile func(string) (*config.Profile, bool), cfg func() config.Config) *Runner {
-	return &Runner{bus: bus, tools: registry, prompt: prompt, profile: profile, cfg: cfg, gate: NewGate(bus, cfg)}
+	return &Runner{bus: bus, tools: registry, prompt: prompt, profile: profile, cfg: cfg, gate: NewGate(bus, cfg), budget: NewBudgeter(), compact: contextmgr.New(bus)}
 }
 func (r *Runner) Gate() *Gate             { return r.gate }
 func (r *Runner) id(prefix string) string { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
@@ -62,18 +65,22 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	if !snapshot.Runnable {
 		return "profile_not_runnable", snapshot.NotRunnableReason, 0
 	}
-	client := llm.New(profile)
+	defer r.PublishBudget(context.Background(), s)
 	turn := 0
 	lengthSeen := false
-	lastMeasured := 0
-	cached := -1
 	runCfg := r.cfg().Run
 	guards := newRunGuards(runCfg.CycleWindow, runCfg.MaxConsecutiveToolErrors)
+	currentReasoning := map[string]bool{}
 	for {
 		if ctx.Err() != nil {
 			return "user_stop", "", turn
 		}
 		turn++
+		profile, ok = r.profile(s.ServerID)
+		if !ok {
+			return "profile_not_runnable", "profile not found", turn - 1
+		}
+		client := llm.New(profile)
 		state := s.Snapshot(nil).Run
 		state.Turn = turn
 		s.SetRun(state)
@@ -83,26 +90,47 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		var request llm.Request
 		var body map[string]any
 		system := ""
+		var budget events.Budget
+		var budgetErr error
 		r.stage(s, runID, turn, "assemble", func() {
-			system = r.prompt.Render(profile, s, toolNames, "")
+			systemBase := r.prompt.Render(profile, s, toolNames, "")
+			system = r.prompt.Render(profile, s, toolNames, s.MemoryBlock)
 			messages := []llm.Message{{Role: "system", Content: system}}
-			for _, message := range s.Snapshot(nil).Messages {
+			records := s.MessagesCopy()
+			for _, message := range records {
 				converted := llm.Message{Role: message.Role, Content: message.Content, ToolCallID: message.ToolCallID, Name: message.Name}
 				for _, call := range message.ToolCalls {
 					converted.ToolCalls = append(converted.ToolCalls, llm.ToolCall{ID: call.ID, Type: "function", Function: llm.FunctionCall{Name: call.Name, Arguments: call.Arguments}})
 				}
-				if profile.Reasoning.Preserve {
+				if profile.Reasoning.Preserve && currentReasoning[message.ID] {
 					converted.ReasoningContent = message.Reasoning
 				}
 				messages = append(messages, converted)
 			}
 			request = llm.Request{Messages: messages, Tools: schemas, ToolChoice: "auto", MaxTokens: profile.Context.ReserveOutput, Thinking: profile.Reasoning.Enabled}
 			body = llm.BuildRequest(profile, request, true)
-			data := map[string]any{"turn": turn, "message_count": len(messages), "tool_count": len(schemas), "params": requestParams(profile), "est_prompt_tokens": roughBodyTokens(body), "estimated": true}
+			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, System: system, Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, true)
+			if budgetErr != nil {
+				return
+			}
+			r.bus.Publish(events.New(events.BudgetEvent, s.ID, runID, budget))
+			data := map[string]any{"turn": turn, "message_count": len(messages), "tool_count": len(schemas), "params": requestParams(profile), "est_prompt_tokens": budget.UsedEst, "estimated": budget.Estimated}
 			event := events.New(events.ModelRequest, s.ID, runID, data)
 			event.Body = body
 			r.bus.Publish(event)
 		})
+		if budgetErr != nil {
+			return "model_error", "budget accounting: " + budgetErr.Error(), turn
+		}
+		guardUsed := budget.UsedEst
+		if budget.Mode == "estimated" { guardUsed = int(math.Ceil(float64(guardUsed)*1.10)) }
+		if guardUsed+budget.Reserve > budget.NCtx {
+			if r.compactToFit(ctx,s,runID,profile,currentReasoning,budget) {
+				turn--
+				continue
+			}
+			return "context_ceiling", fmt.Sprintf("prompt %d tokens + reserve %d exceeds n_ctx %d after compaction",guardUsed,budget.Reserve,budget.NCtx),turn
+		}
 		var response llm.Response
 		var callErr error
 		partial := ""
@@ -126,8 +154,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			}
 			return "model_error", callErr.Error(), turn
 		}
-		lastMeasured = response.Usage.PromptTokens
-		cached = response.Usage.CachedTokens
+		r.budget.RecordUsage(s.ID, response.Usage.PromptTokens, response.Usage.CachedTokens)
 		toolCalls := make([]events.ToolCall, 0, len(response.ToolCalls))
 		for _, call := range response.ToolCalls {
 			toolCalls = append(toolCalls, events.ToolCall{ID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments})
@@ -150,13 +177,14 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			}
 			message, _ := r.makeMessage(ctx, profile, "assistant", response.Content, "history", turn)
 			message.Reasoning = response.Reasoning
+			currentReasoning[message.ID] = true
 			s.Append(message)
 			r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
-			r.publishBudget(ctx, s, profile, system, schemas, lastMeasured, cached, runID)
 			return "done", "", turn
 		}
 		assistant, _ := r.makeMessage(ctx, profile, "assistant", response.Content, "history", turn)
 		assistant.Reasoning = response.Reasoning
+		currentReasoning[assistant.ID] = true
 		assistant.ToolCalls = toolCalls
 		type result struct {
 			call    events.ToolCall
@@ -215,7 +243,6 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				s.Append(message)
 				r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
 			}
-			r.publishBudget(ctx, s, profile, system, schemas, lastMeasured, cached, runID)
 		})
 		for _, item := range results {
 			reason, detail, prior := guards.Observe(item.call.ID, item.call.Name, item.args, item.content)
@@ -229,7 +256,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		if turn >= r.cfg().Run.MaxTurns {
 			return "turn_ceiling", "maximum turns reached", turn
 		}
-		r.stage(s, runID, turn, "compact", func() {})
+		r.compactAfterTurn(ctx,s,runID,turn,profile,currentReasoning)
 	}
 }
 
@@ -257,38 +284,48 @@ func (r *Runner) textTokens(ctx context.Context, p *config.Profile, text string)
 	value, _ := r.count(ctx, p, text)
 	return value
 }
-func (r *Runner) publishBudget(ctx context.Context, s *session.Session, p *config.Profile, system string, schemas []any, measured, cached int, runID string) {
-	categories := map[string]int{"system": r.textTokens(ctx, p, system), "memory": 0, "tools": int(math.Ceil(float64(jsonSize(schemas)) / 3.6 * 1.1)), "history": 0, "files": 0, "results": 0, "summary": 0}
-	estimatedCategories := []string{"tools"}
-	for _, message := range s.Snapshot(nil).Messages {
-		categories[message.Category] += message.Tokens
-		if message.Estimated {
-			estimatedCategories = appendUnique(estimatedCategories, message.Category)
-		}
-	}
-	used := 0
-	for _, value := range categories {
-		used += value
-	}
-	nctx := p.Capabilities.NCtx
-	if p.Context.NCtxOverride > 0 {
-		nctx = p.Context.NCtxOverride
-	}
-	var cachePtr *int
-	if cached >= 0 {
-		v := cached
-		cachePtr = &v
-	}
-	budget := events.Budget{NCtx: nctx, Reserve: p.Context.ReserveOutput, Ceiling: nctx - p.Context.ReserveOutput, UsedEst: used, UsedMeasured: measured, Drift: measured - used, CachedLast: cachePtr, Mode: "estimated", Estimated: len(estimatedCategories) > 0, EstimatedCategories: estimatedCategories, Categories: categories}
-	s.SetBudget(budget)
-	r.bus.Publish(events.New(events.BudgetEvent, s.ID, runID, budget))
-}
 func (r *Runner) PublishBudget(ctx context.Context, s *session.Session) {
 	p, ok := r.profile(s.ServerID)
 	if !ok {
 		return
 	}
-	r.publishBudget(ctx, s, p, "", r.tools.Schemas(s.EnabledTools()), s.Snapshot(nil).Budget.UsedMeasured, -1, "")
+	budget, err := r.measureSession(ctx,p,s,nil,false)
+	if err == nil { r.bus.Publish(events.New(events.BudgetEvent,s.ID,"",budget)) }
+}
+func (r *Runner) measureSession(ctx context.Context,p *config.Profile,s *session.Session,currentReasoning map[string]bool,mark bool)(events.Budget,error){
+	enabled := s.EnabledTools()
+	toolNames := r.tools.Names(enabled)
+	schemas := r.tools.Schemas(enabled)
+	base := r.prompt.Render(p, s, toolNames, "")
+	system := r.prompt.Render(p, s, toolNames, s.MemoryBlock)
+	records := s.MessagesCopy()
+	messages := make([]llm.Message, 0, len(records))
+	for _, message := range records {
+		converted := llm.Message{Role: message.Role, Content: message.Content, ToolCallID: message.ToolCallID, Name: message.Name}
+		for _, call := range message.ToolCalls {
+			converted.ToolCalls = append(converted.ToolCalls, llm.ToolCall{ID: call.ID, Type: "function", Function: llm.FunctionCall{Name: call.Name, Arguments: call.Arguments}})
+		}
+		if p.Reasoning.Preserve && currentReasoning != nil && currentReasoning[message.ID] { converted.ReasoningContent=message.Reasoning }
+		messages = append(messages, converted)
+	}
+	return r.budget.Measure(ctx,p,s,r.cfg().Context,budgetInput{SystemBase:base,System:system,Schemas:schemas,AllSchemas:r.tools.AllSchemas(),Messages:messages,Records:records},mark)
+}
+
+func (r *Runner) compactAfterTurn(ctx context.Context,s *session.Session,runID string,turn int,p *config.Profile,current map[string]bool){
+	changed:=r.compact.Supersede(s,runID,turn,func(text string)(int,bool){return r.count(ctx,p,text)})
+	budget,err:=r.measureSession(ctx,p,s,current,false);if err!=nil{return}
+	if budget.Ceiling>0&&budget.UsedEst>=int(float64(budget.Ceiling)*r.cfg().Context.SoftPct){did,_:=r.compact.ElideOld(s,runID,budget.UsedEst,int(float64(budget.Ceiling)*.60),func(text string)(int,bool){return r.count(ctx,p,text)});changed=changed||did;if did{budget,_=r.measureSession(ctx,p,s,current,false)}}
+	if budget.Ceiling>0&&budget.UsedEst>=int(float64(budget.Ceiling)*r.cfg().Context.SummaryPct){changed=r.summarize(ctx,s,runID,p)||changed}
+	if changed{r.bus.Publish(events.New(events.Stage,s.ID,runID,map[string]any{"stage":"compact","state":"enter","turn":turn,"ms":0}));r.bus.Publish(events.New(events.Stage,s.ID,runID,map[string]any{"stage":"compact","state":"exit","turn":turn,"ms":0}));if next,err:=r.measureSession(ctx,p,s,current,false);err==nil{r.bus.Publish(events.New(events.BudgetEvent,s.ID,runID,next))}}
+}
+func (r *Runner) compactToFit(ctx context.Context,s *session.Session,runID string,p *config.Profile,current map[string]bool,budget events.Budget)bool{
+	changed,_:=r.compact.ElideOld(s,runID,budget.UsedEst,int(float64(budget.Ceiling)*.60),func(text string)(int,bool){return r.count(ctx,p,text)})
+	next,err:=r.measureSession(ctx,p,s,current,false);if err==nil{guard:=next.UsedEst;if next.Mode=="estimated"{guard=int(math.Ceil(float64(guard)*1.10))};if guard+next.Reserve>next.NCtx{changed=r.summarize(ctx,s,runID,p)||changed}}
+	if changed{r.bus.Publish(events.New(events.Stage,s.ID,runID,map[string]any{"stage":"compact","state":"enter","turn":s.Snapshot(nil).Run.Turn,"ms":0}));r.bus.Publish(events.New(events.Stage,s.ID,runID,map[string]any{"stage":"compact","state":"exit","turn":s.Snapshot(nil).Run.Turn,"ms":0}))}
+	return changed
+}
+func (r *Runner) summarize(ctx context.Context,s *session.Session,runID string,p *config.Profile)bool{
+	records:=s.MessagesCopy();if len(records)<=7{return false};messages:=[]llm.Message{{Role:"system",Content:r.prompt.Render(p,s,r.tools.Names(s.EnabledTools()),s.MemoryBlock)}};for _,message:=range records{if message.Elided||(message.Category!="history"&&message.Category!="summary"){continue};messages=append(messages,llm.Message{Role:message.Role,Content:message.Content})};messages=append(messages,llm.Message{Role:"user",Content:"Summarize the work so far for your own future reference: the task, files touched and what changed in each, decisions made, and what remains. Under 300 words. No preamble."});summaryProfile:=*p;summaryProfile.Sampling.Thinking.Temperature=.3;summaryProfile.Sampling.Nonthinking.Temperature=.3;if len(summaryProfile.Reasoning.ValidEfforts)>0{summaryProfile.Reasoning.Effort=summaryProfile.Reasoning.ValidEfforts[0]};response,err:=llm.New(&summaryProfile).Chat(ctx,llm.Request{Messages:messages,MaxTokens:800,Thinking:summaryProfile.Reasoning.Enabled});if err!=nil{return false};message,_:=r.makeMessage(ctx,p,"user","Progress note (auto-summary of earlier turns):\n"+response.Content,"summary",0);if !r.compact.Summarize(s,runID,message){return false};r.bus.Publish(events.New(events.MessageAppended,s.ID,runID,map[string]any{"message":message}));return true
 }
 func requestParams(p *config.Profile) map[string]any {
 	s := p.Sampling.Nonthinking

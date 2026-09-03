@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -20,10 +21,15 @@ type Registry struct {
 	bus      *events.Bus
 	writers  *events.Writers
 	maxTurns int
+	config   func() config.Config
+	memory   func(context.Context, string, string) (string, string, error)
 }
 
-func NewRegistry(bus *events.Bus, writers *events.Writers, profiles func(string) (*config.Profile, bool), maxTurns int) *Registry {
-	return &Registry{sessions: map[string]*Session{}, next: 2, profiles: profiles, bus: bus, writers: writers, maxTurns: maxTurns}
+func NewRegistry(bus *events.Bus, writers *events.Writers, profiles func(string) (*config.Profile, bool), maxTurns int, settings func() config.Config) *Registry {
+	return &Registry{sessions: map[string]*Session{}, next: 2, profiles: profiles, bus: bus, writers: writers, maxTurns: maxTurns, config: settings}
+}
+func (r *Registry) SetMemoryLoader(loader func(context.Context, string, string) (string, string, error)) {
+	r.memory = loader
 }
 func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 	r.mu.Lock()
@@ -51,14 +57,21 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	runnable, reason := runnable(profile)
-	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "grep": true, "shell": true}
+	runnable, reason := runnable(profile, r.config().Context.Accounting)
+	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "grep": true, "shell": true, "remember": true}
+	memoryBlock, memoryPath := "", ""
+	if r.memory != nil {
+		memoryBlock, memoryPath, err = r.memory(context.Background(), abs, serverID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	nctx := profile.Capabilities.NCtx
 	if nctx == 0 {
 		nctx = profile.Context.NCtxOverride
 	}
 	reserve := profile.Context.ReserveOutput
-	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason}
+	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}}
 	session.Messages = []events.Message{}
 	ceiling := nctx - reserve
 	if ceiling < 0 {
@@ -118,6 +131,14 @@ func (r *Registry) Reset(id string) (string, error) {
 	s.Messages = nil
 	s.LogPath = path
 	s.Run = RunState{Status: "idle", MaxTurns: r.maxTurns}
+	if r.memory != nil {
+		block, memoryPath, loadErr := r.memory(context.Background(), s.Workspace, s.ServerID)
+		if loadErr != nil {
+			s.mu.Unlock()
+			return "", loadErr
+		}
+		s.MemoryBlock, s.MemoryPath = block, memoryPath
+	}
 	s.mu.Unlock()
 	r.bus.Publish(events.New(events.SessionReset, id, "", map[string]any{"session_id": id, "log_path": path}))
 	return path, nil
@@ -138,7 +159,7 @@ func (r *Registry) Close(id string, force bool) error {
 	r.bus.Publish(events.New(events.SessionClosed, id, "", map[string]any{"session_id": id}))
 	return nil
 }
-func runnable(profile *config.Profile) (bool, string) {
+func runnable(profile *config.Profile, accounting string) (bool, string) {
 	c := profile.Capabilities
 	n := c.NCtx
 	if n == 0 {
@@ -156,5 +177,20 @@ func runnable(profile *config.Profile) (bool, string) {
 	if !c.Streaming {
 		return false, "streaming unavailable"
 	}
+	if accounting == "exact" && !c.Tokenize {
+		return false, "exact accounting requested but this server has no /tokenize"
+	}
 	return true, ""
+}
+
+func (r *Registry) RefreshRunnable() {
+	for _, item := range r.List() {
+		profile, ok := r.profiles(item.ServerID)
+		if !ok {
+			item.SetRunnable(false, "profile not found")
+			continue
+		}
+		ok, reason := runnable(profile, r.config().Context.Accounting)
+		item.SetRunnable(ok, reason)
+	}
 }

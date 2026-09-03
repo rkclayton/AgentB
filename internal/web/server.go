@@ -79,7 +79,7 @@ func (s *Server) snapshot() map[string]any {
 	s.mu.RLock()
 	masked := s.cfg.Masked()
 	s.mu.RUnlock()
-	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}}}
+	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Save a durable workspace note."}}}
 }
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -173,6 +173,9 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, err.Error(), "session")
 			return
 		}
+		if s.runner != nil {
+			s.runner.PublishBudget(r.Context(), item)
+		}
 		writeJSON(w, 201, map[string]any{"session": item.Snapshot(nil)})
 	default:
 		method(w)
@@ -202,6 +205,9 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeError(w, 409, err.Error(), "session")
 			return
+		}
+		if item, ok := s.registry.Get(id); ok && s.runner != nil {
+			s.runner.PublishBudget(r.Context(), item)
 		}
 		writeJSON(w, 200, map[string]string{"log_path": path})
 		return
@@ -360,11 +366,21 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		s.cfg = &next
 		masked := next.Masked()
 		s.mu.Unlock()
+		if s.registry != nil {
+			s.registry.RefreshRunnable()
+		}
 		if s.prompt != nil {
 			if err := s.prompt.Reload(); err != nil {
 				writeError(w, 500, err.Error(), "prompts/system.md")
 				return
 			}
+		}
+		if s.runner != nil {
+			go func() {
+				for _, item := range s.registry.List() {
+					s.runner.PublishBudget(contextBackground{}, item)
+				}
+			}()
 		}
 		s.bus.Publish(events.New(events.ConfigChanged, "", "", map[string]any{"config": masked}))
 		writeJSON(w, 200, masked)

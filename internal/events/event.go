@@ -34,11 +34,14 @@ const (
 	ToolResult        = "tool.result"
 	ToolToggled       = "tool.toggled"
 	MessageAppended   = "message.appended"
+	MessageUpdated    = "message.updated"
 	MessageQueued     = "message.queued"
 	CycleDetected     = "cycle.detected"
 	ApprovalRequired  = "approval.required"
 	ApprovalDecided   = "approval.decided"
 	WorkspaceConflict = "workspace.conflict"
+	MemoryNoted       = "memory.noted"
+	Compaction        = "compaction"
 	BudgetEvent       = "budget"
 )
 

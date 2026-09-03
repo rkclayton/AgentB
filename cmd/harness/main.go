@@ -15,6 +15,8 @@ import (
 	"harness/internal/agent"
 	"harness/internal/config"
 	"harness/internal/events"
+	"harness/internal/llm"
+	"harness/internal/memory"
 	"harness/internal/probe"
 	"harness/internal/session"
 	"harness/internal/tools"
@@ -52,7 +54,15 @@ func main() {
 		bus.Publish(events.New(events.ServerProbed, "", "", map[string]any{"server_id": profile.ID, "capabilities": caps, "findings": findings}))
 	}
 	web := webserver.New(cfg, *configPath, "web", bus)
-	registry := session.NewRegistry(bus, writers, web.Profile, cfg.Run.MaxTurns)
+	memoryManager := memory.New(filepath.Dir(*configPath), web.ConfigSnapshot, func(ctx context.Context, serverID, text string) (int, error) {
+		profile, ok := web.Profile(serverID)
+		if !ok || !profile.Capabilities.Tokenize {
+			return 0, fmt.Errorf("tokenizer unavailable")
+		}
+		return llm.New(profile).Tokenize(ctx, text, false)
+	})
+	registry := session.NewRegistry(bus, writers, web.Profile, cfg.Run.MaxTurns, web.ConfigSnapshot)
+	registry.SetMemoryLoader(memoryManager.Load)
 	web.SetRegistry(registry)
 	renderer, err := agent.LoadTemplate(filepath.Join("prompts", "system.md"))
 	if err != nil {
@@ -67,13 +77,16 @@ func main() {
 		tools.NewEditFile(coordinator),
 		tools.NewGrep(cfg.Tools.Grep, cfg.Tools.ListDir),
 		tools.NewShell(cfg.Shell),
+		tools.NewRemember(memoryManager, bus),
 	)
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)
 	web.SetRuntime(scheduler, runner, renderer)
-	if _, err := registry.Create("main", cfg.Servers[0].ID, cfg.Workspace); err != nil {
+	mainSession, err := registry.Create("main", cfg.Servers[0].ID, cfg.Workspace)
+	if err != nil {
 		log.Fatal(err)
 	}
+	runner.PublishBudget(context.Background(), mainSession)
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: web.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	errors := make(chan error, 1)
 	go func() { log.Printf("AgentB listening on http://%s", cfg.Listen); errors <- httpServer.ListenAndServe() }()

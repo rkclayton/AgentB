@@ -46,6 +46,13 @@ func (r *Registry) Schemas(enabled map[string]bool) []any {
 	}
 	return out
 }
+func (r *Registry) AllSchemas() map[string]any {
+	out := make(map[string]any, len(r.ordered))
+	for _, tool := range r.ordered {
+		out[tool.Name()] = map[string]any{"type": "function", "function": map[string]any{"name": tool.Name(), "description": tool.Description(), "parameters": tool.Schema()}}
+	}
+	return out
+}
 func (r *Registry) Call(ctx context.Context, s *session.Session, name string, args map[string]any) (string, bool) {
 	tool := r.byName[name]
 	if tool == nil || !s.ToolEnabled(name) {
