@@ -64,7 +64,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/config", s.config)
 	mux.HandleFunc("/api/message", s.message)
 	mux.HandleFunc("/api/stop", s.stop)
-	mux.HandleFunc("/api/approve", notBuilt)
+	mux.HandleFunc("/api/approve", s.approve)
 	mux.HandleFunc("/api/tools/", s.toggleTool)
 	return mux
 }
@@ -79,7 +79,7 @@ func (s *Server) snapshot() map[string]any {
 	s.mu.RLock()
 	masked := s.cfg.Masked()
 	s.mu.RUnlock()
-	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Store a memory note."}}}
+	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}}}
 }
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -387,7 +387,7 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 	result, err := s.scheduler.Submit(r.Context(), body.SessionID, body.Text)
 	if err != nil {
 		status := 400
-		if strings.Contains(err.Error(), "in progress") {
+		if strings.Contains(err.Error(), "in progress") || strings.Contains(err.Error(), "queue full") {
 			status = 409
 		}
 		writeError(w, status, err.Error(), "session_id")
@@ -408,6 +408,33 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, map[string]any{"stopped": s.scheduler.Stop(body.SessionID, body.All)})
+}
+func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	var body struct {
+		SessionID string `json:"session_id"`
+		CallID    string `json:"call_id"`
+		Decision  string `json:"decision"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if s.runner == nil {
+		writeError(w, 409, "runtime unavailable", "call_id")
+		return
+	}
+	if err := s.runner.Gate().Decide(body.SessionID, body.CallID, body.Decision); err != nil {
+		status := 400
+		if strings.Contains(err.Error(), "not found") {
+			status = 404
+		}
+		writeError(w, status, err.Error(), "call_id")
+		return
+	}
+	writeJSON(w, 200, map[string]any{"session_id": body.SessionID, "call_id": body.CallID, "decision": body.Decision})
 }
 func (s *Server) toggleTool(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {

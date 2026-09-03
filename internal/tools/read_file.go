@@ -69,7 +69,7 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 	if left := len(lines) - end; left > 0 {
 		result += fmt.Sprintf("\n[… %d more lines; read_file offset=%d]", left, end+1)
 	}
-	s.Touch(path)
+	s.Touch(workspaceRel(s.Workspace, resolved))
 	return result, nil
 }
 func number(value any, fallback int) int {

@@ -58,7 +58,16 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	toolRegistry := tools.New(tools.NewReadFile(cfg.Tools.ReadFile), tools.NewListDir(cfg.Tools.ListDir))
+	workspaces := session.NewWorkspaceRegistry()
+	coordinator := tools.NewFileCoordinator(workspaces, registry.Label, bus)
+	toolRegistry := tools.New(
+		tools.NewReadFile(cfg.Tools.ReadFile),
+		tools.NewListDir(cfg.Tools.ListDir),
+		tools.NewWriteFile(coordinator),
+		tools.NewEditFile(coordinator),
+		tools.NewGrep(cfg.Tools.Grep, cfg.Tools.ListDir),
+		tools.NewShell(cfg.Shell),
+	)
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)
 	web.SetRuntime(scheduler, runner, renderer)

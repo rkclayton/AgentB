@@ -47,6 +47,7 @@ type Session struct {
 	LogPath                        string
 	Runnable                       bool
 	NotRunnableReason              string
+	queuedMessages                 int
 	mu                             sync.Mutex
 }
 
@@ -60,7 +61,7 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
@@ -68,6 +69,12 @@ func (s *Session) IsRunning() bool {
 	return s.Run.Status == "running" || s.Run.Status == "queued" || s.Run.Status == "paused" || s.Run.Status == "stopping"
 }
 func (s *Session) Touch(path string) { s.mu.Lock(); s.LastSeen[path] = time.Now().UTC(); s.mu.Unlock() }
+func (s *Session) LastSeenAt(path string) (time.Time, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, ok := s.LastSeen[path]
+	return value, ok
+}
 func (s *Session) ToolEnabled(name string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -99,3 +106,4 @@ func (s *Session) Append(message events.Message) {
 func (s *Session) SetRun(state RunState)          { s.mu.Lock(); s.Run = state; s.mu.Unlock() }
 func (s *Session) UpdatePartial(partial string)   { s.mu.Lock(); s.Run.Partial = partial; s.mu.Unlock() }
 func (s *Session) SetBudget(budget events.Budget) { s.mu.Lock(); s.Budget = budget; s.mu.Unlock() }
+func (s *Session) SetQueuedMessages(count int)    { s.mu.Lock(); s.queuedMessages = count; s.mu.Unlock() }

@@ -11,9 +11,6 @@ func Resolve(workspace, path string) (string, error) {
 	if path == "" {
 		path = "."
 	}
-	if filepath.IsAbs(path) {
-		return "", fmt.Errorf("path is outside the workspace")
-	}
 	root, err := filepath.Abs(workspace)
 	if err != nil {
 		return "", err
@@ -22,7 +19,11 @@ func Resolve(workspace, path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	candidate := filepath.Clean(filepath.Join(root, filepath.FromSlash(path)))
+	candidate := filepath.FromSlash(path)
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(root, candidate)
+	}
+	candidate = filepath.Clean(candidate)
 	existing := candidate
 	for {
 		if _, err := os.Lstat(existing); err == nil {

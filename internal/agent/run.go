@@ -22,23 +22,35 @@ type Runner struct {
 	prompt  *PromptRenderer
 	profile func(string) (*config.Profile, bool)
 	cfg     func() config.Config
+	gate    *Gate
 	ids     atomic.Int64
 }
 
 func NewRunner(bus *events.Bus, registry *tools.Registry, prompt *PromptRenderer, profile func(string) (*config.Profile, bool), cfg func() config.Config) *Runner {
-	return &Runner{bus: bus, tools: registry, prompt: prompt, profile: profile, cfg: cfg}
+	return &Runner{bus: bus, tools: registry, prompt: prompt, profile: profile, cfg: cfg, gate: NewGate(bus, cfg)}
 }
+func (r *Runner) Gate() *Gate             { return r.gate }
 func (r *Runner) id(prefix string) string { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
 func (r *Runner) AddUser(ctx context.Context, s *session.Session, text string) (events.Message, error) {
+	message, err := r.QueueUser(ctx, s, text)
+	if err != nil {
+		return events.Message{}, err
+	}
+	r.AppendUser(s, message)
+	return message, nil
+}
+func (r *Runner) QueueUser(ctx context.Context, s *session.Session, text string) (events.Message, error) {
 	profile, ok := r.profile(s.ServerID)
 	if !ok {
 		return events.Message{}, fmt.Errorf("profile not found")
 	}
 	tokens, estimated := r.count(ctx, profile, text)
 	message := events.Message{ID: r.id("m"), Role: "user", Content: text, Category: "history", Tokens: tokens, Estimated: estimated}
+	return message, nil
+}
+func (r *Runner) AppendUser(s *session.Session, message events.Message) {
 	s.Append(message)
 	r.bus.Publish(events.New(events.MessageAppended, s.ID, "", map[string]any{"message": message}))
-	return message, nil
 }
 
 func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (string, string, int) {
@@ -55,6 +67,8 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	lengthSeen := false
 	lastMeasured := 0
 	cached := -1
+	runCfg := r.cfg().Run
+	guards := newRunGuards(runCfg.CycleWindow, runCfg.MaxConsecutiveToolErrors)
 	for {
 		if ctx.Err() != nil {
 			return "user_stop", "", turn
@@ -174,7 +188,14 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 					item.content = "error: " + item.argErr.Error()
 					item.ok = false
 				} else {
-					item.content, item.ok = r.tools.Call(ctx, s, item.call.Name, item.args)
+					approved, gateErr := r.gate.Wait(ctx, s, runID, item.call.ID, item.call.Name, item.args)
+					if gateErr != nil {
+						item.content, item.ok = "error: call canceled", false
+					} else if !approved {
+						item.content, item.ok = "error: call denied by user", false
+					} else {
+						item.content, item.ok = r.tools.Call(ctx, s, item.call.Name, item.args)
+					}
 				}
 				item.ms = time.Since(start).Milliseconds()
 				r.bus.Publish(events.New(events.ToolResult, s.ID, runID, map[string]any{"turn": turn, "call_id": item.call.ID, "name": item.call.Name, "ok": item.ok, "ms": item.ms, "bytes": len(item.content), "tokens": r.textTokens(ctx, profile, item.content), "preview": preview(item.content)}))
@@ -196,6 +217,15 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			}
 			r.publishBudget(ctx, s, profile, system, schemas, lastMeasured, cached, runID)
 		})
+		for _, item := range results {
+			reason, detail, prior := guards.Observe(item.call.ID, item.call.Name, item.args, item.content)
+			if reason == "cycle" {
+				r.bus.Publish(events.New(events.CycleDetected, s.ID, runID, map[string]any{"call_id": item.call.ID, "name": item.call.Name, "args": item.args, "prior_call_id": prior}))
+			}
+			if reason != "" {
+				return reason, detail, turn
+			}
+		}
 		if turn >= r.cfg().Run.MaxTurns {
 			return "turn_ceiling", "maximum turns reached", turn
 		}

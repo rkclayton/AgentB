@@ -52,7 +52,7 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 		return nil, err
 	}
 	runnable, reason := runnable(profile)
-	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "grep": true, "shell": true, "remember": true}
+	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "grep": true, "shell": true}
 	nctx := profile.Capabilities.NCtx
 	if nctx == 0 {
 		nctx = profile.Context.NCtxOverride
@@ -74,6 +74,12 @@ func (r *Registry) Get(id string) (*Session, bool) {
 	defer r.mu.Unlock()
 	s, ok := r.sessions[id]
 	return s, ok
+}
+func (r *Registry) Label(id string) string {
+	if s, ok := r.Get(id); ok {
+		return s.Label
+	}
+	return id
 }
 func (r *Registry) List() []*Session {
 	r.mu.Lock()

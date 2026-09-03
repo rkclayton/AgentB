@@ -14,6 +14,7 @@ import (
 type queuedRun struct {
 	s                    *session.Session
 	runID, userMessageID string
+	userMessage          events.Message
 }
 type activeRun struct{ cancel context.CancelFunc }
 type SubmitResult struct {
@@ -29,11 +30,12 @@ type Scheduler struct {
 	cfg      func() config.Config
 	active   map[string]activeRun
 	queue    []queuedRun
+	pending  map[string][]queuedRun
 	ids      atomic.Int64
 }
 
 func NewScheduler(runner *Runner, registry *session.Registry, bus *events.Bus, cfg func() config.Config) *Scheduler {
-	return &Scheduler{runner: runner, registry: registry, bus: bus, cfg: cfg, active: map[string]activeRun{}}
+	return &Scheduler{runner: runner, registry: registry, bus: bus, cfg: cfg, active: map[string]activeRun{}, pending: map[string][]queuedRun{}}
 }
 func (s *Scheduler) Submit(ctx context.Context, sessionID, text string) (SubmitResult, error) {
 	item, ok := s.registry.Get(sessionID)
@@ -43,14 +45,20 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, text string) (SubmitR
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, active := s.active[sessionID]; active || item.IsRunning() {
-		if s.cfg().Run.QueueDepth == 0 {
+		depth := s.cfg().Run.QueueDepth
+		if depth == 0 {
 			return SubmitResult{}, fmt.Errorf("run in progress")
 		}
-		message, err := s.runner.AddUser(ctx, item, text)
+		if len(s.pending[sessionID]) >= depth {
+			return SubmitResult{}, fmt.Errorf("queue full")
+		}
+		message, err := s.runner.QueueUser(ctx, item, text)
 		if err != nil {
 			return SubmitResult{}, err
 		}
-		position := 1
+		s.pending[sessionID] = append(s.pending[sessionID], queuedRun{s: item, userMessageID: message.ID, userMessage: message})
+		position := len(s.pending[sessionID])
+		item.SetQueuedMessages(position)
 		s.bus.Publish(events.New(events.MessageQueued, sessionID, "", map[string]any{"message_id": message.ID, "position": position}))
 		return SubmitResult{Queued: true, Position: position}, nil
 	}
@@ -71,6 +79,10 @@ func (s *Scheduler) Submit(ctx context.Context, sessionID, text string) (SubmitR
 	return SubmitResult{RunID: runID, Queued: true, Position: position}, nil
 }
 func (s *Scheduler) startLocked(entry queuedRun) {
+	if entry.userMessage.ID != "" {
+		s.runner.AppendUser(entry.s, entry.userMessage)
+		entry.userMessage = events.Message{}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	s.active[entry.s.ID] = activeRun{cancel: cancel}
 	entry.s.SetRun(session.RunState{Status: "running", RunID: entry.runID, MaxTurns: s.cfg().Run.MaxTurns})
@@ -81,10 +93,25 @@ func (s *Scheduler) startLocked(entry queuedRun) {
 	}()
 }
 func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
-	entry.s.SetRun(session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns})
-	s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": reason, "detail": detail, "turns": turns}))
 	s.mu.Lock()
 	delete(s.active, entry.s.ID)
+	if reason == "user_stop" {
+		discarded := len(s.pending[entry.s.ID])
+		delete(s.pending, entry.s.ID)
+		entry.s.SetQueuedMessages(0)
+		if discarded > 0 {
+			detail = fmt.Sprintf("discarded %d queued message(s)", discarded)
+		}
+	} else if waiting := s.pending[entry.s.ID]; len(waiting) > 0 {
+		next := waiting[0]
+		s.pending[entry.s.ID] = waiting[1:]
+		entry.s.SetQueuedMessages(len(waiting) - 1)
+		next.runID = fmt.Sprintf("r%d", s.ids.Add(1))
+		next.s.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns})
+		s.queue = append(s.queue, next)
+	}
+	entry.s.SetRun(session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns})
+	s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": reason, "detail": detail, "turns": turns}))
 	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
 		next := s.queue[0]
 		s.queue = s.queue[1:]
@@ -113,8 +140,15 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 	kept := s.queue[:0]
 	for _, entry := range s.queue {
 		if all || entry.s.ID == sessionID {
+			discarded := len(s.pending[entry.s.ID])
+			delete(s.pending, entry.s.ID)
+			entry.s.SetQueuedMessages(0)
 			entry.s.SetRun(session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns})
-			s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": "user_stop", "detail": "", "turns": 0}))
+			detail := ""
+			if discarded > 0 {
+				detail = fmt.Sprintf("discarded %d queued message(s)", discarded)
+			}
+			s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": "user_stop", "detail": detail, "turns": 0}))
 			stopped = append(stopped, entry.s.ID)
 		} else {
 			kept = append(kept, entry)
