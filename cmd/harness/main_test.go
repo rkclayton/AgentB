@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -23,5 +24,15 @@ func TestReadServingFactsCompleteness(t *testing.T) {
 	facts := readServingFacts(path)
 	if !facts.Complete || facts.TokenizeIdleMS != 8 || facts.TokenizeBusyMS != 9 || facts.TokenizeBlocksOnSlot != "no" {
 		t.Fatalf("unexpected facts: %+v", facts)
+	}
+}
+
+func TestStartupElevationGuard(t *testing.T) {
+	if err := startupElevationError(false); err != nil {
+		t.Fatalf("standard token refused: %v", err)
+	}
+	err := startupElevationError(true)
+	if err == nil || !strings.Contains(err.Error(), "refuses to run") || !strings.Contains(err.Error(), "File Explorer") {
+		t.Fatalf("elevated token error = %v", err)
 	}
 }

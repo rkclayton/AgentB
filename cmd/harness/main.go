@@ -30,6 +30,9 @@ import (
 )
 
 func main() {
+	if err := startupElevationError(processIsElevated()); err != nil {
+		log.Fatal(err)
+	}
 	configPath := flag.String("config", "harness.json", "configuration file")
 	replayPaths := flag.String("replay", "", "comma-separated session JSONL files to replay")
 	flag.Parse()
@@ -137,6 +140,13 @@ func main() {
 	if err := serve(cfg, web.Handler()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func startupElevationError(elevated bool) error {
+	if !elevated {
+		return nil
+	}
+	return fmt.Errorf("SECURITY: AgentB refuses to run with an elevated Administrator token; local administrators can launch it normally by double-clicking start-agentb.cmd in File Explorer (do not use Run as administrator)")
 }
 
 func serve(cfg *config.Config, handler http.Handler) error {

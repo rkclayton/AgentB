@@ -2,7 +2,7 @@
 
 These controls reduce the reach of AgentB's model-selected shell. Shell children run under a dedicated local account, that account can write only the selected workspace inside the AgentB tree, and its outbound traffic is limited to IPv4 loopback, Tailscale's `100.64.0.0/10`, and IPv6 loopback. This is blast-radius reduction on a dedicated Windows host, not a sandbox or exploit boundary.
 
-The normal onboarding path is entirely in Settings → Security. Start AgentB normally from Explorer so it remains a non-elevated operator process; Windows UAC then elevates only the narrowly scoped account and hardening scripts. Security reports the harness's elevation state explicitly. If it says **already elevated**, Windows will not show another UAC prompt: stop AgentB and launch `start-agentb.cmd` normally before testing the onboarding boundary. Passwords are write-only, encrypted with user-scoped DPAPI, and never placed in process arguments, responses, or logs.
+The normal onboarding path is entirely in Settings → Security. Start AgentB normally from Explorer so it receives the UAC-filtered token; local Administrators can use this path normally. AgentB refuses to start from **Run as administrator** or an elevated terminal, before it reads configuration or opens its listener. Windows elevation is reserved for the narrowly scoped account and hardening helpers. Passwords are write-only, encrypted with user-scoped DPAPI, and never placed in process arguments, responses, or logs.
 
 ## 1. Configure the model first
 
@@ -22,7 +22,7 @@ Run an approved `whoami` shell command and require the returned identity to end 
 
 ## 3. Apply host protections
 
-Stop active AgentB tasks. In Settings → Security → **Host protections**, confirm the displayed model route, select **Apply + verify**, and respond if Windows presents a UAC prompt. The button remains disabled until the account exists, the credential is stored, and service identity is enabled. No prompt is expected when Security reports that AgentB itself is already elevated; local UAC policy can also suppress consent for trusted Windows binaries. Trust the reported post-condition, not the presence of a dialog. Running the whole harness elevated is not the normal operating mode.
+Stop active AgentB tasks. In Settings → Security → **Host protections**, confirm the displayed model route, select **Apply + verify**, and respond if Windows presents a UAC prompt. The button remains disabled until the account exists, the credential is stored, and service identity is enabled. Local UAC policy can suppress consent for trusted Windows binaries, so trust the reported post-condition rather than the presence of a dialog.
 
 The operation applies and immediately verifies both controls:
 

@@ -6,6 +6,8 @@ Choose one serving path before you start.
 
 On Windows, double-click **`start-agentb.cmd`** for the normal one-step launch. It finds Go on `PATH` or in the ignored local `.tools\go` directory, rebuilds `harness.exe`, starts AgentB, waits for the local UI, and opens it in the default browser. No PowerShell command is required.
 
+AgentB refuses to start with an elevated Administrator token. Membership in the local Administrators group is fine: double-click the launcher normally, without **Run as administrator** and outside an elevated terminal.
+
 ## Path A — an endpoint you already run (~5 minutes)
 
 Prerequisites: Go 1.24+ and an OpenAI-compatible endpoint you already run, such as Ollama, LM Studio, vLLM, or a hosted API. Nothing else is required: no GPU, CUDA, model download, or network access at build time.
