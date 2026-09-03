@@ -43,6 +43,40 @@ All required model layers are GPU-offloaded in the winning configuration. `--fit
 10. **Prior stack:** Ollama is installed, but its API and configured model store were empty. The earlier experience cannot be attributed to a recoverable current `num_ctx`; a small historical context remains plausible but unverified.
 11. **Accounting endpoints:** on the final clean rerun, median `/tokenize` time was 8 ms idle and 8 ms during generation. `/apply-template` was 11 ms idle and 12 ms during generation. Neither blocks on the generation slot. The server log contained neither `forcing full prompt re-processing` nor `failed to truncate`.
 
+## Reliability
+
+C1 was the selected Qwen3.8-27B `UD-Q3_K_XL` configuration at 32,768 context. C2 was `UD-IQ4_XS` at 16,384 context; it loaded with all 99 requested GPU layers and `--fit off`, so the quality comparison did not need partial offload.
+
+### C1 — UD-Q3_K_XL / 32K
+
+| trial | task | completed | wrong_tool | invalid_args | turns | pass |
+|---|---|---:|---:|---:|---:|---:|
+| add-1 | add | true | 0 | 0 | 4 | true |
+| add-2 | add | true | 0 | 0 | 5 | true |
+| add-3 | add | true | 0 | 0 | 4 | true |
+| fix-1 | fix | true | 1 | 1 | 6 | true |
+| fix-2 | fix | true | 0 | 0 | 9 | true |
+| fix-3 | fix | true | 0 | 0 | 6 | true |
+
+Passes: 6/6.
+
+### C2 — UD-IQ4_XS / 16K
+
+| trial | task | completed | wrong_tool | invalid_args | turns | pass |
+|---|---|---:|---:|---:|---:|---:|
+| add-1 | add | true | 0 | 0 | 4 | true |
+| add-2 | add | true | 0 | 0 | 4 | true |
+| add-3 | add | true | 0 | 0 | 4 | true |
+| fix-1 | fix | true | 0 | 0 | 6 | true |
+| fix-2 | fix | true | 0 | 0 | 6 | true |
+| fix-3 | fix | true | 0 | 0 | 6 | true |
+
+Passes: 6/6.
+
+Both configurations cleared the 4/6 bar and tied, so the fixed verdict rule selects C1. The higher quant was not at least two passes better; retaining C1 preserves 32K context and its measured display-GPU margin. No C3 test was triggered.
+
+After the verdict, C1 was restarted and prompt-1 canaries 1, 2, and 8 were rerun: health and props returned HTTP 200 with `n_ctx=32768`; the 34,825-token overflow request returned HTTP 400 without truncation; prompt processing measured 1,729.75 tok/s and generation measured 50.27 tok/s.
+
 ## Facts
 
 os=windows
@@ -76,6 +110,10 @@ return_progress=yes
 tool_call_deltas=incremental
 prompt_tps=1725
 gen_tps=50
+reliability_c1=6/6
+reliability_c2=6/6
+reliability_verdict=C1
+reliability_note=tied; C1 retained for 32K context and GPU margin
 tokenize_idle_ms=8
 tokenize_busy_ms=8
 apply_template_idle_ms=11

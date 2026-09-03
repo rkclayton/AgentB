@@ -4,6 +4,10 @@
 serve/logs/
 serve/probes/results/
 *.log
+logs/
+memory/
+sandbox/
+serve/probes/reliability/runs/*/workspace-*/
 
 # Models and generated binaries never belong in source control.
 *.gguf
