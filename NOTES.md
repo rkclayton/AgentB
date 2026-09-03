@@ -33,3 +33,12 @@
 - v1 migration was exercised with a Windows UTF-8 BOM: old keys were removed, the profile became `servers[local]`, profile context values and global thresholds were preserved, and the required migration log line was emitted.
 - Session create/close, unreachable-profile probing, the `context length unknown` degradation reason, deep config merge, profile removal, and all prompt-3 501 stubs were verified on HOMEPC.
 - Deferred exactly as scoped: agent loop, tools, scheduler, system-prompt template, full frontend, memory, compaction, and replay.
+
+## Prompt 4
+
+- The first live AgentB run called `list_dir` and `read_file` in that order, correctly summarized the README, streamed prompt-progress/content/tool deltas, and stopped `done` after two model turns. Its JSONL contains full `model.request.body`, raw `model.response`, all stage pairs, tool calls/results, messages, and budgets tagged `main`.
+- With `max_concurrent=2`, `main` and the second session entered `call_model` concurrently while llama.cpp `--parallel 1` serialized their actual slot work; the third session queued at position 1 and began when a slot cleared.
+- `stop {all:true}` cancelled two active and one queued run in 0.618 seconds; all three recorded `user_stop`, and a new message was immediately accepted.
+- A one-turn tool task stopped at `turn_ceiling`; disabling `read_file` changed the next request from two schemas to one and removed its name from the rendered prompt; editing and reloading `prompts/system.md` changed the next request and was then reverted.
+- A forced non-runnable profile produced `profile_not_runnable` without a model request. Session reset guards and the prompt-4 APIs were exercised on HOMEPC.
+- Deferred as scoped: write/edit/grep/shell/remember, cycle and tool-error stopping, approvals, compaction/elision, exact accounting, memory injection, queued-message delivery, frontend, and replay.
