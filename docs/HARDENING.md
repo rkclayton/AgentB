@@ -16,7 +16,7 @@ AgentB explicitly gives alternate-identity shell children only system paths, a w
 
 ## 2. Create the service account in Settings
 
-Start AgentB normally and open Settings → Shell. Keep `account` set to `agentb-svc` and `domain` set to `.` unless you deliberately chose another local account name. Under **Local Windows account**, enter the new password twice and select **Create account + enable**. AgentB validates both entries, stores the value in its user-scoped DPAPI credential file, and asks Windows to run only `setup-service-account.ps1` through UAC. Approve the UAC prompt you just initiated.
+Start AgentB normally by double-clicking `start-agentb.cmd`, then open Settings → Shell. Keep `account` set to `agentb-svc` and `domain` set to `.` unless you deliberately chose another local account name. Under **Local Windows account**, enter the new password twice and select **Create account + enable**. AgentB validates both entries, stores the value in its user-scoped DPAPI credential file, and asks Windows to run only `setup-service-account.ps1` through UAC. Approve the UAC prompt you just initiated.
 
 The elevated helper creates a non-administrator account, preserves ordinary Users membership, validates the credential with `LogonUser`, and exits. AgentB then enables the service identity and immediately attempts its no-op alternate-identity spawn. A successful result is reported in the sheet. If the account already exists, the button becomes **Reset password + enable** and performs the same validation/update sequence.
 

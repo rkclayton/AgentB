@@ -4,6 +4,8 @@ AgentB is a small, standard-library Go coding-agent harness for OpenAI-compatibl
 
 Choose one serving path before you start.
 
+On Windows, double-click **`start-agentb.cmd`** for the normal one-step launch. It finds Go on `PATH` or in the ignored local `.tools\go` directory, rebuilds `harness.exe`, starts AgentB, waits for the local UI, and opens it in the default browser. No PowerShell command is required.
+
 ## Path A — an endpoint you already run (~5 minutes)
 
 Prerequisites: Go 1.24+ and an OpenAI-compatible endpoint you already run, such as Ollama, LM Studio, vLLM, or a hosted API. Nothing else is required: no GPU, CUDA, model download, or network access at build time.
@@ -15,7 +17,7 @@ go build ./cmd/harness
 ./harness
 ```
 
-On Windows, run `harness.exe` as `.\harness.exe`. The first start copies `harness.example.json` to the ignored local `harness.json`; open `http://127.0.0.1:8790`, expand **Servers**, set `base_url` and `model` (and `api_key` when needed), then select **Test**. A successful test stays labeled `ready`; choose that profile for the existing session under **Sessions**. Settings → Shell can create or reset the local service account through Windows UAC without running AgentB itself as Administrator; follow the [Windows host hardening](docs/HARDENING.md) sequence. If the endpoint does not report its context size, enter its documented limit in `n_ctx_override`; AgentB refuses to guess a context ceiling.
+The first start copies `harness.example.json` to the ignored local `harness.json`; expand **Servers**, set `base_url` and `model` (and `api_key` when needed), then select **Test**. A successful test stays labeled `ready`; choose that profile for the existing session under **Sessions**. Settings → Shell can create or reset the local service account through Windows UAC without running AgentB itself as Administrator; follow the [Windows host hardening](docs/HARDENING.md) sequence. If the endpoint does not report its context size, enter its documented limit in `n_ctx_override`; AgentB refuses to guess a context ceiling.
 
 Without llama.cpp's accounting endpoints, the budget meter uses calibrated estimation instead of exact categories, the cached-token readout is hidden, and the prefill and tok/s readouts stay dark. The agent loop, tools, approvals, sessions, memory, compaction, chat, and replay remain available once the endpoint passes the baseline profile checks. See [Capability degradation](#capability-degradation) for the complete behavior.
 
