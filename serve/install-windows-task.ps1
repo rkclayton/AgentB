@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$BindAddress,
+    [string]$FirewallLocalAddress,
     [string]$AllowedRemoteAddress,
     [ValidateRange(1, 65535)]
     [int]$Port = 8080,
@@ -14,6 +15,7 @@ $ErrorActionPreference = 'Stop'
 
 if (-not $BindAddress) { throw 'BindAddress is required.' }
 if (-not $AllowedRemoteAddress) { throw 'AllowedRemoteAddress is required.' }
+if (-not $FirewallLocalAddress) { $FirewallLocalAddress = $BindAddress }
 
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = [Security.Principal.WindowsPrincipal]::new($identity)
@@ -47,10 +49,10 @@ if ($rule) {
     $rule | Set-NetFirewallRule -Direction Inbound -Action Allow -Enabled True -Profile Any | Out-Null
     $rule | Get-NetFirewallPortFilter | Set-NetFirewallPortFilter -Protocol TCP -LocalPort $Port | Out-Null
     $rule | Get-NetFirewallAddressFilter | Set-NetFirewallAddressFilter `
-        -LocalAddress $BindAddress -RemoteAddress $AllowedRemoteAddress | Out-Null
+        -LocalAddress $FirewallLocalAddress -RemoteAddress $AllowedRemoteAddress | Out-Null
 } else {
     New-NetFirewallRule -DisplayName $FirewallRule -Direction Inbound -Action Allow -Enabled True `
-        -Profile Any -Protocol TCP -LocalPort $Port -LocalAddress $BindAddress `
+        -Profile Any -Protocol TCP -LocalPort $Port -LocalAddress $FirewallLocalAddress `
         -RemoteAddress $AllowedRemoteAddress | Out-Null
 }
 
@@ -59,6 +61,7 @@ Start-ScheduledTask -TaskName $TaskName
 [pscustomobject]@{
     TaskName = $TaskName
     BindAddress = $BindAddress
+    FirewallLocalAddress = $FirewallLocalAddress
     Port = $Port
     AllowedRemoteAddress = $AllowedRemoteAddress
     FirewallRule = $FirewallRule
