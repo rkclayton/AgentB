@@ -395,6 +395,9 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		s.cfg = &next
 		masked := next.Masked()
 		s.mu.Unlock()
+		if s.runner != nil {
+			s.runner.Configure(next)
+		}
 		if s.registry != nil {
 			s.registry.RefreshRunnable()
 		}

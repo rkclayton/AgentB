@@ -118,10 +118,10 @@ function profileFields(profile, reason) {
     return `<div class="settings-subhead">${title}</div>
       ${number(`${p}.sampling.${name}.temperature`, "temperature", value.temperature, "0.01")}
       ${number(`${p}.sampling.${name}.top_p`, "top_p", value.top_p, "0.01")}
-      ${number(`${p}.sampling.${name}.top_k`, "top_k", value.top_k, "1", !llama, "llama.cpp only")}
-      ${number(`${p}.sampling.${name}.min_p`, "min_p", value.min_p, "0.01", !llama, "llama.cpp only")}
+      ${number(`${p}.sampling.${name}.top_k`, "top_k", value.top_k, "1", !llama, !llama ? "llama.cpp only" : "")}
+      ${number(`${p}.sampling.${name}.min_p`, "min_p", value.min_p, "0.01", !llama, !llama ? "llama.cpp only" : "")}
       ${number(`${p}.sampling.${name}.presence_penalty`, "presence penalty", value.presence_penalty, "0.1")}
-      ${number(`${p}.sampling.${name}.repeat_penalty`, "repeat penalty", value.repeat_penalty, "0.1", !llama, "llama.cpp only")}`;
+      ${number(`${p}.sampling.${name}.repeat_penalty`, "repeat penalty", value.repeat_penalty, "0.1", !llama, !llama ? "llama.cpp only" : "")}`;
   };
   const findings = (caps.findings || [])
     .map((value) => `<li>${html(value)}</li>`)

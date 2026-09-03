@@ -6,12 +6,16 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync"
 
 	"harness/internal/config"
 	"harness/internal/session"
 )
 
-type ReadFile struct{ cfg config.ReadFileTool }
+type ReadFile struct {
+	mu  sync.RWMutex
+	cfg config.ReadFileTool
+}
 
 func NewReadFile(cfg config.ReadFileTool) *ReadFile { return &ReadFile{cfg: cfg} }
 func (*ReadFile) Name() string                      { return "read_file" }
@@ -19,9 +23,11 @@ func (*ReadFile) Description() string {
 	return "Read a UTF-8 text file in the workspace. Returns lines from offset, at most limit lines; a trailing note says how many lines remain."
 }
 func (r *ReadFile) Schema() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "default": 1}, "limit": map[string]any{"type": "integer", "default": r.cfg.DefaultLimit, "maximum": r.cfg.MaxLimit}}, "required": []string{"path"}}
+	cfg := r.config()
+	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "default": 1}, "limit": map[string]any{"type": "integer", "default": cfg.DefaultLimit, "maximum": cfg.MaxLimit}}, "required": []string{"path"}}
 }
 func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
+	cfg := r.config()
 	path, ok := args["path"].(string)
 	if !ok || path == "" {
 		return "", fmt.Errorf("path is required")
@@ -42,14 +48,14 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 		return "", fmt.Errorf("binary file refused: %s", path)
 	}
 	offset := number(args["offset"], 1)
-	limit := number(args["limit"], r.cfg.DefaultLimit)
+	limit := number(args["limit"], cfg.DefaultLimit)
 	if offset < 1 {
 		return "", fmt.Errorf("offset must be at least 1")
 	}
 	if limit < 1 {
 		return "", fmt.Errorf("limit must be positive")
 	}
-	limit = int(math.Min(float64(limit), float64(r.cfg.MaxLimit)))
+	limit = int(math.Min(float64(limit), float64(cfg.MaxLimit)))
 	text := strings.ReplaceAll(string(data), "\r", "")
 	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
 	if offset > len(lines) {
@@ -61,8 +67,8 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 	}
 	selected := append([]string(nil), lines[offset-1:end]...)
 	for i, line := range selected {
-		if len([]rune(line)) > r.cfg.MaxLineChars {
-			selected[i] = string([]rune(line)[:r.cfg.MaxLineChars]) + "…"
+		if len([]rune(line)) > cfg.MaxLineChars {
+			selected[i] = string([]rune(line)[:cfg.MaxLineChars]) + "…"
 		}
 	}
 	result := strings.Join(selected, "\n")
@@ -72,6 +78,12 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 	s.Touch(workspaceRel(s.Workspace, resolved))
 	return result, nil
 }
+func (r *ReadFile) Configure(value config.Config) {
+	r.mu.Lock()
+	r.cfg = value.Tools.ReadFile
+	r.mu.Unlock()
+}
+func (r *ReadFile) config() config.ReadFileTool { r.mu.RLock(); defer r.mu.RUnlock(); return r.cfg }
 func number(value any, fallback int) int {
 	if value == nil {
 		return fallback

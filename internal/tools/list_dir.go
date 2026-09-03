@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"harness/internal/config"
 	"harness/internal/session"
 )
 
 type ListDir struct {
+	mu      sync.RWMutex
 	cfg     config.ListDirTool
 	ignored map[string]bool
 }
@@ -32,6 +34,7 @@ func (*ListDir) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "default": "."}, "depth": map[string]any{"type": "integer", "default": 1, "maximum": 3}}}
 }
 func (t *ListDir) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
+	cfg, ignored := t.config()
 	path, _ := args["path"].(string)
 	if path == "" {
 		path = "."
@@ -65,7 +68,7 @@ func (t *ListDir) Call(ctx context.Context, s *session.Session, args map[string]
 			return strings.ToLower(entries[i].Name()) < strings.ToLower(entries[j].Name())
 		})
 		for _, entry := range entries {
-			if entry.IsDir() && t.ignored[entry.Name()] {
+			if entry.IsDir() && ignored[entry.Name()] {
 				continue
 			}
 			prefix := strings.Repeat("  ", level-1)
@@ -85,10 +88,28 @@ func (t *ListDir) Call(ctx context.Context, s *session.Session, args map[string]
 	if err := walk(root, 1); err != nil {
 		return "", err
 	}
-	if len(all) > t.cfg.MaxEntries {
-		left := len(all) - t.cfg.MaxEntries
-		all = append(all[:t.cfg.MaxEntries], fmt.Sprintf("[… %d more entries]", left))
+	if len(all) > cfg.MaxEntries {
+		left := len(all) - cfg.MaxEntries
+		all = append(all[:cfg.MaxEntries], fmt.Sprintf("[… %d more entries]", left))
 	}
 	s.Touch(path)
 	return strings.Join(all, "\n"), nil
+}
+func (t *ListDir) Configure(value config.Config) {
+	t.mu.Lock()
+	t.cfg = value.Tools.ListDir
+	t.ignored = map[string]bool{"build": true}
+	for _, name := range t.cfg.Ignore {
+		t.ignored[name] = true
+	}
+	t.mu.Unlock()
+}
+func (t *ListDir) config() (config.ListDirTool, map[string]bool) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	ignored := make(map[string]bool, len(t.ignored))
+	for name, value := range t.ignored {
+		ignored[name] = value
+	}
+	return t.cfg, ignored
 }

@@ -15,7 +15,10 @@ import (
 
 // Shell executes commands without an OS sandbox. Its jail, timeout, approval gate,
 // and deny list reduce accidents but are not a security boundary.
-type Shell struct{ cfg config.Shell }
+type Shell struct {
+	mu  sync.RWMutex
+	cfg config.Shell
+}
 
 func NewShell(cfg config.Shell) *Shell { return &Shell{cfg: cfg} }
 func (*Shell) Name() string            { return "shell" }
@@ -23,27 +26,29 @@ func (*Shell) Description() string {
 	return "Run a non-interactive shell command from the workspace root with a timeout. Returns the exit code and combined output, cut to head and tail if long."
 }
 func (s *Shell) Schema() map[string]any {
-	return map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}, "timeout_s": map[string]any{"type": "integer", "default": s.cfg.TimeoutS, "maximum": s.cfg.MaxTimeoutS}}, "required": []string{"command"}}
+	cfg := s.config()
+	return map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}, "timeout_s": map[string]any{"type": "integer", "default": cfg.TimeoutS, "maximum": cfg.MaxTimeoutS}}, "required": []string{"command"}}
 }
 func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string]any) (string, error) {
+	cfg := s.config()
 	command, ok := args["command"].(string)
 	if !ok || strings.TrimSpace(command) == "" {
 		return "", fmt.Errorf("command is required")
 	}
-	for _, denied := range s.cfg.Deny {
+	for _, denied := range cfg.Deny {
 		if denied != "" && strings.Contains(strings.ToLower(command), strings.ToLower(denied)) {
 			return "", fmt.Errorf("command blocked by deny list")
 		}
 	}
-	timeout := number(args["timeout_s"], s.cfg.TimeoutS)
+	timeout := number(args["timeout_s"], cfg.TimeoutS)
 	if timeout <= 0 {
-		timeout = s.cfg.TimeoutS
+		timeout = cfg.TimeoutS
 	}
-	if timeout > s.cfg.MaxTimeoutS {
-		timeout = s.cfg.MaxTimeoutS
+	if timeout > cfg.MaxTimeoutS {
+		timeout = cfg.MaxTimeoutS
 	}
-	argv := append(append([]string(nil), s.cfg.Command[1:]...), command)
-	cmd := exec.Command(s.cfg.Command[0], argv...)
+	argv := append(append([]string(nil), cfg.Command[1:]...), command)
+	cmd := exec.Command(cfg.Command[0], argv...)
 	cmd.Dir = item.Workspace
 	setupProcess(cmd)
 	var output lockedBuffer
@@ -63,7 +68,7 @@ func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string
 	case <-timer.C:
 		killProcessTree(cmd.Process.Pid)
 		<-done
-		partial := cutOutput(output.String(), s.cfg.MaxOutputLinesHead, s.cfg.MaxOutputLinesTail)
+		partial := cutOutput(output.String(), cfg.MaxOutputLinesHead, cfg.MaxOutputLinesTail)
 		if partial != "" {
 			return "", fmt.Errorf("timed out after %ds; partial output:\n%s", timeout, partial)
 		}
@@ -77,13 +82,15 @@ func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string
 				return "", err
 			}
 		}
-		body := cutOutput(output.String(), s.cfg.MaxOutputLinesHead, s.cfg.MaxOutputLinesTail)
+		body := cutOutput(output.String(), cfg.MaxOutputLinesHead, cfg.MaxOutputLinesTail)
 		if body == "" {
 			return fmt.Sprintf("exit=%d", code), nil
 		}
 		return fmt.Sprintf("exit=%d\n%s", code, body), nil
 	}
 }
+func (s *Shell) Configure(value config.Config) { s.mu.Lock(); s.cfg = value.Shell; s.mu.Unlock() }
+func (s *Shell) config() config.Shell          { s.mu.RLock(); defer s.mu.RUnlock(); return s.cfg }
 
 type lockedBuffer struct {
 	mu sync.Mutex

@@ -8,12 +8,14 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"harness/internal/config"
 	"harness/internal/session"
 )
 
 type Grep struct {
+	mu     sync.RWMutex
 	cfg    config.GrepTool
 	ignore map[string]bool
 }
@@ -33,6 +35,7 @@ func (*Grep) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"pattern": map[string]any{"type": "string"}, "path": map[string]any{"type": "string", "default": "."}, "glob": map[string]any{"type": "string"}}, "required": []string{"pattern"}}
 }
 func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
+	cfg, ignore := g.config()
 	pattern, ok := args["pattern"].(string)
 	if !ok || pattern == "" {
 		return "", fmt.Errorf("pattern is required")
@@ -55,7 +58,7 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 	if err != nil {
 		return "", err
 	}
-	matches := make([]string, 0, g.cfg.MaxMatches)
+	matches := make([]string, 0, cfg.MaxMatches)
 	total := 0
 	err = filepath.WalkDir(root, func(filePath string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -65,7 +68,7 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 			return err
 		}
 		if entry.IsDir() {
-			if filePath != root && g.ignore[entry.Name()] {
+			if filePath != root && ignore[entry.Name()] {
 				return filepath.SkipDir
 			}
 			return nil
@@ -93,12 +96,12 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 				continue
 			}
 			total++
-			if len(matches) >= g.cfg.MaxMatches {
+			if len(matches) >= cfg.MaxMatches {
 				continue
 			}
 			runes := []rune(line)
-			if len(runes) > g.cfg.MaxLineChars {
-				line = string(runes[:g.cfg.MaxLineChars]) + "…"
+			if len(runes) > cfg.MaxLineChars {
+				line = string(runes[:cfg.MaxLineChars]) + "…"
 			}
 			matches = append(matches, fmt.Sprintf("%s:%d: %s", filepath.ToSlash(rel), index+1, line))
 		}
@@ -115,4 +118,22 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 		result += fmt.Sprintf("\n[%d of %d matches shown]", len(matches), total)
 	}
 	return result, nil
+}
+func (g *Grep) Configure(value config.Config) {
+	g.mu.Lock()
+	g.cfg = value.Tools.Grep
+	g.ignore = make(map[string]bool, len(value.Tools.ListDir.Ignore))
+	for _, name := range value.Tools.ListDir.Ignore {
+		g.ignore[name] = true
+	}
+	g.mu.Unlock()
+}
+func (g *Grep) config() (config.GrepTool, map[string]bool) {
+	g.mu.RLock()
+	defer g.mu.RUnlock()
+	ignore := make(map[string]bool, len(g.ignore))
+	for name, value := range g.ignore {
+		ignore[name] = value
+	}
+	return g.cfg, ignore
 }

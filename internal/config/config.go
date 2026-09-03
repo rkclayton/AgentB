@@ -241,8 +241,11 @@ func (c Config) Validate() error {
 		if len(p.Reasoning.ValidEfforts) > 0 && !contains(p.Reasoning.ValidEfforts, p.Reasoning.Effort) {
 			return fmt.Errorf("%s.reasoning.effort: not in valid_efforts", prefix)
 		}
-		if p.Context.NCtxOverride < 0 || p.Context.ReserveOutput < 0 {
-			return fmt.Errorf("%s.context: values cannot be negative", prefix)
+		if p.Context.NCtxOverride < 0 {
+			return fmt.Errorf("%s.context.n_ctx_override: cannot be negative", prefix)
+		}
+		if p.Context.ReserveOutput < 0 {
+			return fmt.Errorf("%s.context.reserve_output: cannot be negative", prefix)
 		}
 		if p.Capabilities.Props && p.Context.NCtxOverride > p.Capabilities.NCtx {
 			return fmt.Errorf("%s.context.n_ctx_override: may only lower probed n_ctx", prefix)

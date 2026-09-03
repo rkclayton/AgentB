@@ -32,8 +32,9 @@ type Runner struct {
 func NewRunner(bus *events.Bus, registry *tools.Registry, prompt *PromptRenderer, profile func(string) (*config.Profile, bool), cfg func() config.Config) *Runner {
 	return &Runner{bus: bus, tools: registry, prompt: prompt, profile: profile, cfg: cfg, gate: NewGate(bus, cfg), budget: NewBudgeter(), compact: contextmgr.New(bus)}
 }
-func (r *Runner) Gate() *Gate             { return r.gate }
-func (r *Runner) id(prefix string) string { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
+func (r *Runner) Configure(cfg config.Config) { r.tools.Configure(cfg) }
+func (r *Runner) Gate() *Gate                 { return r.gate }
+func (r *Runner) id(prefix string) string     { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
 func (r *Runner) AddUser(ctx context.Context, s *session.Session, text string) (events.Message, error) {
 	message, err := r.QueueUser(ctx, s, text)
 	if err != nil {

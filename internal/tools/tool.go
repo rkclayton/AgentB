@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"harness/internal/config"
 	"harness/internal/session"
 )
 
@@ -19,6 +20,7 @@ type Registry struct {
 	ordered []Tool
 	byName  map[string]Tool
 }
+type configurable interface{ Configure(config.Config) }
 
 func New(items ...Tool) *Registry {
 	r := &Registry{byName: map[string]Tool{}}
@@ -27,6 +29,13 @@ func New(items ...Tool) *Registry {
 		r.byName[item.Name()] = item
 	}
 	return r
+}
+func (r *Registry) Configure(cfg config.Config) {
+	for _, tool := range r.ordered {
+		if item, ok := tool.(configurable); ok {
+			item.Configure(cfg)
+		}
+	}
 }
 func (r *Registry) Names(enabled map[string]bool) []string {
 	out := []string{}
