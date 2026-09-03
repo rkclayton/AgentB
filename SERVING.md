@@ -1,6 +1,6 @@
 # Serving verification
 
-Verified on 2026-09-02 against HOMEPC over a Tailscale-protected SSH session. The serving endpoint remains loopback-only on HOMEPC; remote administration and probes travel through SSH.
+Verified on 2026-09-02 and deployed for direct tailnet inference on 2026-09-03. AgentB can use the model locally through loopback or remotely at `http://198.51.100.10:8080` from the authorized Tailscale client.
 
 ## Host discovery
 
@@ -14,7 +14,19 @@ Verified on 2026-09-02 against HOMEPC over a Tailscale-protected SSH session. Th
 
 Installed the official Windows CUDA 13.3 assets from llama.cpp release `b10775` to `E:\llama`. The server reports build `10775`, commit `67a17c17c`, and detects `CUDA0: NVIDIA GeForce RTX 5070 Ti (16302 MiB, 15011 MiB free)`.
 
-The packaged CUDA runtime operates correctly with the installed driver despite `nvidia-smi` reporting CUDA 13.1. No command-line flag was rejected. The server is bound to `127.0.0.1`, so its no-key/CORS warning does not expose it to the LAN or tailnet.
+The packaged CUDA runtime operates correctly with the installed driver despite `nvidia-smi` reporting CUDA 13.1. No command-line flag was rejected.
+
+## Tailnet deployment
+
+The `AgentB llama-server` scheduled task runs as SYSTEM at startup, waits 30 seconds for networking, and retries failures. llama-server listens on `0.0.0.0:8080` so HOMEPC's loopback profile still works. The dedicated Windows Firewall allow rule is narrower: local address `198.51.100.10`, remote address `198.51.100.20`, TCP port 8080. No other enabled inbound allow rule targets llama-server, so the endpoint is not opened to HOMEPC's ordinary LAN.
+
+Install or refresh that deployment from an elevated HOMEPC PowerShell:
+
+```text
+powershell -ExecutionPolicy Bypass -File .\serve\install-windows-task.ps1 -BindAddress 0.0.0.0 -FirewallLocalAddress 198.51.100.10 -AllowedRemoteAddress 198.51.100.20 -Port 8080
+```
+
+The task survived a forced stop/start test. From the authorized workstation, `/health`, `/props`, `/v1/models`, non-streaming chat, streaming chat, usage, timings, and prompt-progress frames all passed. The post-restart completion also passed. This endpoint has no application-layer API key; Tailscale membership and the address-restricted host firewall are its access boundary.
 
 ## Model and ladder
 
@@ -87,6 +99,10 @@ driver=591.86
 llama_build=b10775
 llama_path=E:\llama\llama-server.exe
 base_url=http://127.0.0.1:8080
+tailnet_base_url=http://198.51.100.10:8080
+tailnet_allowed_client=198.51.100.20
+windows_task=AgentB llama-server
+firewall_rule=AgentB llama-server (Tailscale)
 model_alias=qwen3.8-27b
 model_file=E:\Models\Qwen3.8-27B\Qwen3.8-27B-UD-Q3_K_XL.gguf
 quant=UD-Q3_K_XL

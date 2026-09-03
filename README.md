@@ -12,6 +12,14 @@ go run ./cmd/harness -config harness.json
 
 Open `http://127.0.0.1:8790/` for the instrument or `http://127.0.0.1:8790/chat?session=main` for chat. `serve/chat-window.ps1 main` or `serve/chat-window.sh main` launches Chrome/Edge in a 520×760 app window when available and otherwise opens the normal browser.
 
+To run AgentB on this workstation while inference stays on HOMEPC, connect both machines to the same tailnet and use the checked-in client profile:
+
+```text
+go run ./cmd/harness -config harness.homepc.json
+```
+
+That profile calls `http://198.51.100.10:8080` directly. HOMEPC runs llama-server as the `AgentB llama-server` startup task; its Windows Firewall rule accepts port 8080 only through HOMEPC's Tailscale address and only from this workstation's Tailscale address. If either Tailscale IP changes, rerun `serve/install-windows-task.ps1` on HOMEPC with the new addresses.
+
 Replay one or more session logs without loading a model or enabling mutations:
 
 ```text

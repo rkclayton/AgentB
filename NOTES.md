@@ -101,3 +101,10 @@
 - Focus/errors/resilience — done: all controls, tabs, close glyphs, rows, chips, links, and 32px-hit-area switches have a 1px Trace focus ring at 2px offset. Transport/reconnect, model error detail, not-runnable reasons, approval controls, and queue notices are visible on both relevant surfaces. Mid-run refresh restoration and stopped-run caret removal were exercised.
 - `serve/chat-window.ps1` found Chrome at `C:\Program Files\Google\Chrome\Application\chrome.exe`; it prefers Chrome, then Edge, and falls back to the normal URL. The POSIX launcher checks Chrome/Chromium/Edge, then `open` or `xdg-open`.
 - Final deferred list: OS-level shell sandbox; API authentication when the bind leaves loopback; MCP; the Discord process; session persistence; orchestration/handoff; Electron/Tauri; image input; and a second local server slot. The existing message/SSE API and `run.queue_depth` are the two documented Discord-facing hooks.
+
+## HOMEPC tailnet deployment
+
+- HOMEPC now runs the selected `qwen3.8-27b` llama.cpp model from the `AgentB llama-server` startup task. A forced task stop/start returned to healthy service and the next completion succeeded, proving the endpoint is not tied to the installation SSH session.
+- llama-server listens on all local interfaces so HOMEPC retains loopback access, while the only matching inbound firewall allow rule restricts TCP 8080 to HOMEPC's Tailscale address `198.51.100.10` and this workstation's Tailscale address `198.51.100.20`.
+- Direct calls from this workstation passed model discovery and reported 32,768 context. Non-streaming chat returned exactly `REMOTE_LOCAL_OK_7`; streaming chat returned exactly `STREAM_LOCAL_OK_11` and included completion, usage, timings, prompt progress, and the terminal SSE marker. After task restart, chat returned exactly `RESTART_LOCAL_OK_17`.
+- AgentB itself was started on this workstation with `harness.homepc.json`. Its full probe kept the profile runnable with exact accounting, and a one-turn streamed run returned exactly `AGENTB_REMOTE_LOCAL_OK_13`, recorded 1,075 prompt and 44 completion tokens with zero drift, and stopped `done` in 1,924 ms.
