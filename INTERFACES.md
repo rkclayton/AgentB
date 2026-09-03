@@ -58,7 +58,7 @@ The main page uses `Ctrl+1` through `Ctrl+9` to switch sessions and Escape to cl
 
 ## Configuration
 
-Every parsed key appears in `harness.example.json`: `listen`, `workspace`, `log_dir`, `servers`; `run.{max_turns,cycle_window,max_consecutive_tool_errors,max_concurrent,queue_depth}`; `approval.mode`; `context.{soft_pct,summary_pct,accounting}`; `memory.{enabled,dir,max_tokens}`; `tools.{read_file,list_dir,grep}`; and `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,deny}`. Files are saved as two-space JSON in this order. A v1 `server` document migrates to `servers[local]`.
+Every parsed key appears in `harness.example.json`: `listen`, `workspace`, `log_dir`, `servers`; `run.{max_turns,cycle_window,max_consecutive_tool_errors,max_concurrent,queue_depth}`; `approval.mode`; `context.{soft_pct,summary_pct,accounting}`; `memory.{enabled,dir,max_tokens}`; `tools.{read_file,list_dir,grep}`; and `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,file_routing_guard,deny}`. Files are saved as two-space JSON in this order. A v1 `server` document migrates to `servers[local]`.
 
 Profiles with `tool_calls=false`, `overflow_behavior=truncate`, `streaming=false`, or unknown context are not runnable. `context.accounting=exact` later refuses profiles without `/tokenize` using `exact accounting requested but this server has no /tokenize`; `auto` chooses exact where possible and calibrated estimation elsewhere; `estimated` forces estimation.
 

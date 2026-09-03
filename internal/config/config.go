@@ -141,6 +141,7 @@ type Shell struct {
 	MaxTimeoutS        int      `json:"max_timeout_s"`
 	MaxOutputLinesHead int      `json:"max_output_lines_head"`
 	MaxOutputLinesTail int      `json:"max_output_lines_tail"`
+	FileRoutingGuard   *bool    `json:"file_routing_guard"`
 	Deny               []string `json:"deny"`
 }
 
@@ -156,7 +157,7 @@ func Defaults(workspace string) Config {
 		Servers: []Profile{{ID: "local", Label: "Local", BaseURL: "http://127.0.0.1:8080", Model: "", RequestTimeoutS: 900, ProbeMode: "full", Sampling: SamplingPair{Thinking: thinking, Nonthinking: nonthinking}, Reasoning: Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}}, Context: Context{ReserveOutput: 10240}, Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}}}},
 		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: "mutating"}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
 		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}},
-		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}},
+		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true)},
 	}
 }
 
@@ -364,6 +365,9 @@ func applyDefaults(c *Config) {
 	if len(c.Shell.Command) == 0 {
 		c.Shell = d.Shell
 	}
+	if c.Shell.FileRoutingGuard == nil {
+		c.Shell.FileRoutingGuard = boolPointer(true)
+	}
 	for i := range c.Servers {
 		p := &c.Servers[i]
 		pd := d.Servers[0]
@@ -395,6 +399,10 @@ func applyDefaults(c *Config) {
 }
 
 func ApplyDefaults(c *Config) { applyDefaults(c) }
+func (s Shell) FileRoutingGuardEnabled() bool {
+	return s.FileRoutingGuard == nil || *s.FileRoutingGuard
+}
+func boolPointer(value bool) *bool { return &value }
 func oneOf(v string, values ...string) bool {
 	for _, x := range values {
 		if v == x {

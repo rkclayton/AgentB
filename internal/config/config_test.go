@@ -46,3 +46,17 @@ func TestLoadCreatesConfigFromExample(t *testing.T) {
 		t.Fatal("existing config reported as created")
 	}
 }
+
+func TestFileRoutingGuardDefaultsOnAndCanBeDisabled(t *testing.T) {
+	cfg := Config{Shell: Shell{Command: []string{"unused"}}}
+	ApplyDefaults(&cfg)
+	if !cfg.Shell.FileRoutingGuardEnabled() {
+		t.Fatal("file routing guard did not default on")
+	}
+	disabled := false
+	cfg.Shell.FileRoutingGuard = &disabled
+	ApplyDefaults(&cfg)
+	if cfg.Shell.FileRoutingGuardEnabled() {
+		t.Fatal("explicitly disabled file routing guard was re-enabled")
+	}
+}

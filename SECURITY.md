@@ -6,6 +6,8 @@ AgentB executes shell commands selected by a model. Use it only where that autho
 
 The workspace is a boundary for the file tools only. The `shell` tool is not jailed and cannot be contained by its tool-layer wrapper: it can change directories, use absolute paths, invoke network clients, and run any program available to the harness account. As documented in [harness-plan.md §6.4](harness-plan.md#64-the-shell-tool-honestly), the wrapper pins the initial working directory, kills the process tree on timeout, checks a small configurable denylist, and logs the complete call and result. That is all. An OS sandbox is the real isolation boundary and remains deferred.
 
+The default file-routing guard refuses simple shell shapes that duplicate `glob` or `read_file`. It is a routing aid, not a security boundary: it does not restrict what the shell can do and is not a sandbox.
+
 The shell inherits the harness process environment. Any credential available there is readable by the agent. Run AgentB under a dedicated low-privilege account with a minimal environment, and use an OS sandbox when the workspace or model input is not fully trusted.
 
 ## Approval and unattended runs
