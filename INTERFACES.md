@@ -6,11 +6,11 @@ This document is the stable contract for prompts 3–10. Later prompts implement
 
 Every event is `{"seq":int,"ts":"RFC3339 with milliseconds","session_id":"","run_id":"","type":"","data":{}}`. Sessionless events are global. SSE uses `event: <type>`, the JSON envelope in `data:`, `id: <seq>`, and a comment ping every 15 seconds. JSONL additionally permits `body` on `model.request` and `raw` on `model.response`; those fields are excluded from SSE. Each session has its own log and global events use the harness log.
 
-On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapshot},servers:[Profile with masked key],config,serving_facts,flow:{stages,edges},tools:[{name,description}]}`. `serving_facts` exposes only the three Prompt 8 accounting measurements needed by the settings sheet: `tokenize_idle_ms`, `tokenize_busy_ms`, and `tokenize_blocks_on_slot`.
+On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapshot},servers:[Profile with masked key],config,replay,serving_facts,flow:{stages,edges},tools:[{name,description}]}`. `replay` is true only for `-replay` servers. `serving_facts` exposes only the three Prompt 8 accounting measurements needed by the settings sheet: `tokenize_idle_ms`, `tokenize_busy_ms`, and `tokenize_blocks_on_slot`.
 
 ## Shared records
 
-`SessionSnapshot` is `{id,label,server_id,workspace,run:{status:idle|queued|running|paused|stopping|replay,run_id,turn,max_turns,queue_position,partial},tools:[{name,enabled,calls,schema_tokens}],messages:[Message],budget:Budget,timeline:[last 200 rows],queued_messages,runnable,not_runnable_reason,memory_path,memory_content,log_path}`. `memory_content` is the read-only injected view for the settings sheet; `log_path` names the current session JSONL. `schema_tokens` and memory fields remain zero/empty until prompt 8.
+`SessionSnapshot` is `{id,label,server_id,workspace,run:{status:idle|queued|running|paused|stopping|replay,run_id,turn,max_turns,queue_position,partial},tools:[{name,enabled,calls,schema_tokens}],messages:[Message],budget:Budget,timeline:[last 500 live rows or recorded replay rows],queued_messages,runnable,not_runnable_reason,memory_path,memory_content,log_path}`. `memory_content` is the read-only injected view for the settings sheet; `log_path` names the current session JSONL. `schema_tokens` and memory fields remain zero/empty until prompt 8.
 
 `Message` is `{id,role:system|user|assistant|tool,content,reasoning?,tool_calls?,tool_call_id?,name?,category:system|memory|tools|history|files|results|summary,tokens,estimated,elided,turn}`.
 
@@ -38,11 +38,17 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 ## HTTP API
 
 - `GET /` and `/chat` serve their page or a placeholder; `GET /static/*` serves `web/`.
-- `GET /api/events` is SSE; `GET /api/state` is `snapshot.data`.
+- `GET /api/events` is SSE; `GET /api/state` is `snapshot.data`. In replay mode each SSE connection receives the initial synthetic snapshot followed by the merged, timestamp-ordered recording at 20 ms per event; `?instant=1` removes the delay.
 - `GET /api/sessions`; `POST /api/sessions {label?,server_id,workspace?}` → 201 `{session}`; `POST /api/sessions/{id} {label}`; `DELETE /api/sessions/{id}?force=1`; `POST /api/sessions/{id}/reset`.
 - `GET /api/servers`; `POST /api/servers/{id}/probe` → 202 and an eventual event.
 - `GET /api/config`; `POST /api/config` deep-merges keys and server entries by immutable `id`, validates, saves, and publishes `config.changed`. The masked API-key sentinel means unchanged. Validation errors are 400 `{error,field}`.
 - `POST /api/message`, `/api/stop`, `/api/tools/{name}`, and `/api/approve` drive runs, cancellation, per-session tool toggles, and approval decisions.
+
+## Replay and keyboard
+
+`go run ./cmd/harness -config harness.json -replay <a.jsonl>[,<b.jsonl>…]` validates every JSONL line, reconstructs one `replay` session per file, renumbers merged events, and starts without probing, model clients, tools, or writers. All API GETs remain available; session/config/profile mutations, messages, stops, approvals, and tool toggles return 409 `{"error":"replay mode"}`.
+
+The main page uses `Ctrl+1` through `Ctrl+9` to switch sessions and Escape to close settings. Chat uses `/` to focus the composer, `Ctrl+.` to stop, Enter to send, Shift+Enter for a newline, and Escape to clear the draft. Every interactive control is in normal Tab order with a visible Trace focus ring.
 
 ## Behavior notes
 
@@ -59,3 +65,7 @@ Profiles with `tool_calls=false`, `overflow_behavior=truncate`, `streaming=false
 ## Deferred: API authentication
 
 The HTTP service binds loopback and has no API authentication. Putting a token into the only practical native `EventSource` transport (`?token=`) would leak it through logs and browser history without protecting against a present network threat. Authentication must be designed when a later Discord/non-loopback transport introduces a real boundary, not added piecemeal.
+
+## Implementation status
+
+Every `[prompt N]` tag and every record/API shape above now has an implementation. The Go replay reducer and browser event reducer carry matching comments so future event-state changes are made in both places.
