@@ -42,3 +42,12 @@
 - A one-turn tool task stopped at `turn_ceiling`; disabling `read_file` changed the next request from two schemas to one and removed its name from the rendered prompt; editing and reloading `prompts/system.md` changed the next request and was then reverted.
 - A forced non-runnable profile produced `profile_not_runnable` without a model request. Session reset guards and the prompt-4 APIs were exercised on HOMEPC.
 - Deferred as scoped: write/edit/grep/shell/remember, cycle and tool-error stopping, approvals, compaction/elision, exact accounting, memory injection, queued-message delivery, frontend, and replay.
+
+## Prompt 5
+
+- `web/DESIGN.md` is the verbatim design contract. IBM Plex Sans and Mono 5.3.0 latin 400/500 WOFF2 assets were downloaded from the official npm registry and are self-hosted.
+- The dependency-free shell was visually verified in headless Chromium at 1440×900 through an SSH tunnel to HOMEPC. It rendered the header, active tab recess, context rail, computed eight-node flow, tool rack, composer, and empty State/Timeline wells without page scrolling.
+- Two concurrent runs showed two Trace tab lamps. Switching tabs during `call model` retained each session's active stage and traveling dot; Stop remained available.
+- With `tokenize=false` and `cached_tokens=false` temporarily applied, the rail rendered two estimated-category outlines, showed a `~` total and `context (estimated)`, and omitted the cached readout. The measured capabilities were restored.
+- Static verification passed for every JS module. CSS contains exactly the six palette values, no uppercase transform, and only the inset recess shadow.
+- Deferred as scoped: State and Timeline content, settings sheet, `/chat`, replay, memory UI, and any additional motion.
