@@ -107,6 +107,7 @@ func main() {
 		tools.NewGrep(cfg.Tools.Grep, cfg.Tools.ListDir),
 		tools.NewShell(cfg.Shell),
 		tools.NewRemember(memoryManager, bus),
+		tools.NewGlob(),
 	)
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)

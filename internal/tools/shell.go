@@ -23,7 +23,7 @@ type Shell struct {
 func NewShell(cfg config.Shell) *Shell { return &Shell{cfg: cfg} }
 func (*Shell) Name() string            { return "shell" }
 func (*Shell) Description() string {
-	return "Run a non-interactive shell command from the workspace root with a timeout. Returns the exit code and combined output, cut to head and tail if long."
+	return "Run a non-interactive shell command from the workspace root with a timeout. Returns the exit code and combined output, cut to head and tail if long. For file listing or reading use list_dir, glob, or read_file."
 }
 func (s *Shell) Schema() map[string]any {
 	cfg := s.config()
