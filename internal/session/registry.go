@@ -134,6 +134,13 @@ func (r *Registry) Close(id string, force bool) error {
 }
 func runnable(profile *config.Profile) (bool, string) {
 	c := profile.Capabilities
+	n := c.NCtx
+	if n == 0 {
+		n = profile.Context.NCtxOverride
+	}
+	if n == 0 {
+		return false, "context length unknown"
+	}
 	if !c.ToolCalls {
 		return false, "tool calling unavailable"
 	}
@@ -142,13 +149,6 @@ func runnable(profile *config.Profile) (bool, string) {
 	}
 	if !c.Streaming {
 		return false, "streaming unavailable"
-	}
-	n := c.NCtx
-	if n == 0 {
-		n = profile.Context.NCtxOverride
-	}
-	if n == 0 {
-		return false, "context length unknown"
 	}
 	return true, ""
 }

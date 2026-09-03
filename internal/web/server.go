@@ -222,11 +222,45 @@ func (s *Server) servers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, masked.Servers)
 }
 func (s *Server) server(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost || !strings.HasSuffix(r.URL.Path, "/probe") {
+	tail := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/servers/"), "/")
+	if r.Method == http.MethodDelete && !strings.Contains(tail, "/") {
+		s.mu.Lock()
+		if len(s.cfg.Servers) == 1 || s.cfg.Servers[0].ID == tail {
+			s.mu.Unlock()
+			writeError(w, 409, "cannot delete the primary server", "server_id")
+			return
+		}
+		found := false
+		kept := s.cfg.Servers[:0]
+		for _, profile := range s.cfg.Servers {
+			if profile.ID == tail {
+				found = true
+				continue
+			}
+			kept = append(kept, profile)
+		}
+		s.cfg.Servers = kept
+		if !found {
+			s.mu.Unlock()
+			writeError(w, 404, "server not found", "server_id")
+			return
+		}
+		err := s.cfg.Save(s.configPath)
+		masked := s.cfg.Masked()
+		s.mu.Unlock()
+		if err != nil {
+			writeError(w, 500, err.Error(), "config")
+			return
+		}
+		s.bus.Publish(events.New(events.ConfigChanged, "", "", map[string]any{"config": masked}))
+		writeJSON(w, 200, map[string]string{"server_id": tail})
+		return
+	}
+	if r.Method != http.MethodPost || !strings.HasSuffix(tail, "/probe") {
 		method(w)
 		return
 	}
-	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/servers/"), "/probe")
+	id := strings.TrimSuffix(tail, "/probe")
 	profile, ok := s.Profile(id)
 	if !ok {
 		writeError(w, 404, "server not found", "server_id")

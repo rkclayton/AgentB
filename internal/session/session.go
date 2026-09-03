@@ -60,7 +60,7 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message(nil), s.Messages...), Budget: s.Budget, Timeline: timeline, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
