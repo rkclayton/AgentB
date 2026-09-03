@@ -109,7 +109,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			}
 			request = llm.Request{Messages: messages, Tools: schemas, ToolChoice: "auto", MaxTokens: profile.Context.ReserveOutput, Thinking: profile.Reasoning.Enabled}
 			body = llm.BuildRequest(profile, request, true)
-			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, System: system, Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, true)
+			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, System: system, Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false)
 			if budgetErr != nil {
 				return
 			}
@@ -120,17 +120,20 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			r.bus.Publish(event)
 		})
 		if budgetErr != nil {
-			return "model_error", "budget accounting: " + budgetErr.Error(), turn
+			return "model_error", "budget accounting: " + budgetErr.Error(), turn - 1
 		}
 		guardUsed := budget.UsedEst
-		if budget.Mode == "estimated" { guardUsed = int(math.Ceil(float64(guardUsed)*1.10)) }
+		if budget.Mode == "estimated" {
+			guardUsed = int(math.Ceil(float64(guardUsed) * 1.10))
+		}
 		if guardUsed+budget.Reserve > budget.NCtx {
-			if r.compactToFit(ctx,s,runID,profile,currentReasoning,budget) {
+			if r.compactToFit(ctx, s, runID, profile, currentReasoning, budget) {
 				turn--
 				continue
 			}
-			return "context_ceiling", fmt.Sprintf("prompt %d tokens + reserve %d exceeds n_ctx %d after compaction",guardUsed,budget.Reserve,budget.NCtx),turn
+			return "context_ceiling", fmt.Sprintf("prompt %d tokens + reserve %d exceeds n_ctx %d after compaction", guardUsed, budget.Reserve, budget.NCtx), turn - 1
 		}
+		r.budget.MarkRequest(s.ID, budget.UsedEst)
 		var response llm.Response
 		var callErr error
 		partial := ""
@@ -256,7 +259,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		if turn >= r.cfg().Run.MaxTurns {
 			return "turn_ceiling", "maximum turns reached", turn
 		}
-		r.compactAfterTurn(ctx,s,runID,turn,profile,currentReasoning)
+		r.compactAfterTurn(ctx, s, runID, turn, profile, currentReasoning)
 	}
 }
 
@@ -289,10 +292,12 @@ func (r *Runner) PublishBudget(ctx context.Context, s *session.Session) {
 	if !ok {
 		return
 	}
-	budget, err := r.measureSession(ctx,p,s,nil,false)
-	if err == nil { r.bus.Publish(events.New(events.BudgetEvent,s.ID,"",budget)) }
+	budget, err := r.measureSession(ctx, p, s, nil, false)
+	if err == nil {
+		r.bus.Publish(events.New(events.BudgetEvent, s.ID, "", budget))
+	}
 }
-func (r *Runner) measureSession(ctx context.Context,p *config.Profile,s *session.Session,currentReasoning map[string]bool,mark bool)(events.Budget,error){
+func (r *Runner) measureSession(ctx context.Context, p *config.Profile, s *session.Session, currentReasoning map[string]bool, mark bool) (events.Budget, error) {
 	enabled := s.EnabledTools()
 	toolNames := r.tools.Names(enabled)
 	schemas := r.tools.Schemas(enabled)
@@ -305,27 +310,85 @@ func (r *Runner) measureSession(ctx context.Context,p *config.Profile,s *session
 		for _, call := range message.ToolCalls {
 			converted.ToolCalls = append(converted.ToolCalls, llm.ToolCall{ID: call.ID, Type: "function", Function: llm.FunctionCall{Name: call.Name, Arguments: call.Arguments}})
 		}
-		if p.Reasoning.Preserve && currentReasoning != nil && currentReasoning[message.ID] { converted.ReasoningContent=message.Reasoning }
+		if p.Reasoning.Preserve && currentReasoning != nil && currentReasoning[message.ID] {
+			converted.ReasoningContent = message.Reasoning
+		}
 		messages = append(messages, converted)
 	}
-	return r.budget.Measure(ctx,p,s,r.cfg().Context,budgetInput{SystemBase:base,System:system,Schemas:schemas,AllSchemas:r.tools.AllSchemas(),Messages:messages,Records:records},mark)
+	return r.budget.Measure(ctx, p, s, r.cfg().Context, budgetInput{SystemBase: base, System: system, Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages, Records: records}, mark)
 }
 
-func (r *Runner) compactAfterTurn(ctx context.Context,s *session.Session,runID string,turn int,p *config.Profile,current map[string]bool){
-	changed:=r.compact.Supersede(s,runID,turn,func(text string)(int,bool){return r.count(ctx,p,text)})
-	budget,err:=r.measureSession(ctx,p,s,current,false);if err!=nil{return}
-	if budget.Ceiling>0&&budget.UsedEst>=int(float64(budget.Ceiling)*r.cfg().Context.SoftPct){did,_:=r.compact.ElideOld(s,runID,budget.UsedEst,int(float64(budget.Ceiling)*.60),func(text string)(int,bool){return r.count(ctx,p,text)});changed=changed||did;if did{budget,_=r.measureSession(ctx,p,s,current,false)}}
-	if budget.Ceiling>0&&budget.UsedEst>=int(float64(budget.Ceiling)*r.cfg().Context.SummaryPct){changed=r.summarize(ctx,s,runID,p)||changed}
-	if changed{r.bus.Publish(events.New(events.Stage,s.ID,runID,map[string]any{"stage":"compact","state":"enter","turn":turn,"ms":0}));r.bus.Publish(events.New(events.Stage,s.ID,runID,map[string]any{"stage":"compact","state":"exit","turn":turn,"ms":0}));if next,err:=r.measureSession(ctx,p,s,current,false);err==nil{r.bus.Publish(events.New(events.BudgetEvent,s.ID,runID,next))}}
+func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID string, turn int, p *config.Profile, current map[string]bool) {
+	changed := r.compact.Supersede(s, runID, turn, func(text string) (int, bool) { return r.count(ctx, p, text) })
+	budget, err := r.measureSession(ctx, p, s, current, false)
+	if err != nil {
+		return
+	}
+	if budget.Ceiling > 0 && budget.UsedEst >= int(float64(budget.Ceiling)*r.cfg().Context.SoftPct) {
+		did, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), func(text string) (int, bool) { return r.count(ctx, p, text) })
+		changed = changed || did
+		if did {
+			budget, _ = r.measureSession(ctx, p, s, current, false)
+		}
+	}
+	if budget.Ceiling > 0 && budget.UsedEst >= int(float64(budget.Ceiling)*r.cfg().Context.SummaryPct) {
+		changed = r.summarize(ctx, s, runID, p) || changed
+	}
+	if changed {
+		r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": "compact", "state": "enter", "turn": turn, "ms": 0}))
+		r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": "compact", "state": "exit", "turn": turn, "ms": 0}))
+		if next, err := r.measureSession(ctx, p, s, current, false); err == nil {
+			r.bus.Publish(events.New(events.BudgetEvent, s.ID, runID, next))
+		}
+	}
 }
-func (r *Runner) compactToFit(ctx context.Context,s *session.Session,runID string,p *config.Profile,current map[string]bool,budget events.Budget)bool{
-	changed,_:=r.compact.ElideOld(s,runID,budget.UsedEst,int(float64(budget.Ceiling)*.60),func(text string)(int,bool){return r.count(ctx,p,text)})
-	next,err:=r.measureSession(ctx,p,s,current,false);if err==nil{guard:=next.UsedEst;if next.Mode=="estimated"{guard=int(math.Ceil(float64(guard)*1.10))};if guard+next.Reserve>next.NCtx{changed=r.summarize(ctx,s,runID,p)||changed}}
-	if changed{r.bus.Publish(events.New(events.Stage,s.ID,runID,map[string]any{"stage":"compact","state":"enter","turn":s.Snapshot(nil).Run.Turn,"ms":0}));r.bus.Publish(events.New(events.Stage,s.ID,runID,map[string]any{"stage":"compact","state":"exit","turn":s.Snapshot(nil).Run.Turn,"ms":0}))}
+func (r *Runner) compactToFit(ctx context.Context, s *session.Session, runID string, p *config.Profile, current map[string]bool, budget events.Budget) bool {
+	changed, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), func(text string) (int, bool) { return r.count(ctx, p, text) })
+	next, err := r.measureSession(ctx, p, s, current, false)
+	if err == nil {
+		guard := next.UsedEst
+		if next.Mode == "estimated" {
+			guard = int(math.Ceil(float64(guard) * 1.10))
+		}
+		if guard+next.Reserve > next.NCtx {
+			changed = r.summarize(ctx, s, runID, p) || changed
+		}
+	}
+	if changed {
+		r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": "compact", "state": "enter", "turn": s.Snapshot(nil).Run.Turn, "ms": 0}))
+		r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": "compact", "state": "exit", "turn": s.Snapshot(nil).Run.Turn, "ms": 0}))
+	}
 	return changed
 }
-func (r *Runner) summarize(ctx context.Context,s *session.Session,runID string,p *config.Profile)bool{
-	records:=s.MessagesCopy();if len(records)<=7{return false};messages:=[]llm.Message{{Role:"system",Content:r.prompt.Render(p,s,r.tools.Names(s.EnabledTools()),s.MemoryBlock)}};for _,message:=range records{if message.Elided||(message.Category!="history"&&message.Category!="summary"){continue};messages=append(messages,llm.Message{Role:message.Role,Content:message.Content})};messages=append(messages,llm.Message{Role:"user",Content:"Summarize the work so far for your own future reference: the task, files touched and what changed in each, decisions made, and what remains. Under 300 words. No preamble."});summaryProfile:=*p;summaryProfile.Sampling.Thinking.Temperature=.3;summaryProfile.Sampling.Nonthinking.Temperature=.3;if len(summaryProfile.Reasoning.ValidEfforts)>0{summaryProfile.Reasoning.Effort=summaryProfile.Reasoning.ValidEfforts[0]};response,err:=llm.New(&summaryProfile).Chat(ctx,llm.Request{Messages:messages,MaxTokens:800,Thinking:summaryProfile.Reasoning.Enabled});if err!=nil{return false};message,_:=r.makeMessage(ctx,p,"user","Progress note (auto-summary of earlier turns):\n"+response.Content,"summary",0);if !r.compact.Summarize(s,runID,message){return false};r.bus.Publish(events.New(events.MessageAppended,s.ID,runID,map[string]any{"message":message}));return true
+func (r *Runner) summarize(ctx context.Context, s *session.Session, runID string, p *config.Profile) bool {
+	records := s.MessagesCopy()
+	if len(records) <= 7 {
+		return false
+	}
+	messages := []llm.Message{{Role: "system", Content: r.prompt.Render(p, s, r.tools.Names(s.EnabledTools()), s.MemoryBlock)}}
+	for _, message := range records {
+		if message.Elided || (message.Category != "history" && message.Category != "summary") {
+			continue
+		}
+		messages = append(messages, llm.Message{Role: message.Role, Content: message.Content})
+	}
+	messages = append(messages, llm.Message{Role: "user", Content: "Summarize the work so far for your own future reference: the task, files touched and what changed in each, decisions made, and what remains. Under 300 words. No preamble."})
+	summaryProfile := *p
+	summaryProfile.Sampling.Thinking.Temperature = .3
+	summaryProfile.Sampling.Nonthinking.Temperature = .3
+	if len(summaryProfile.Reasoning.ValidEfforts) > 0 {
+		summaryProfile.Reasoning.Effort = summaryProfile.Reasoning.ValidEfforts[0]
+	}
+	response, err := llm.New(&summaryProfile).Chat(ctx, llm.Request{Messages: messages, MaxTokens: 800, Thinking: summaryProfile.Reasoning.Enabled})
+	if err != nil {
+		return false
+	}
+	message, _ := r.makeMessage(ctx, p, "user", "Progress note (auto-summary of earlier turns):\n"+response.Content, "summary", 0)
+	if !r.compact.Summarize(s, runID, message) {
+		return false
+	}
+	r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
+	return true
 }
 func requestParams(p *config.Profile) map[string]any {
 	s := p.Sampling.Nonthinking

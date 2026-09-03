@@ -26,6 +26,7 @@ type budgetInput struct {
 type budgetState struct {
 	cpt                    float64
 	lastChars              float64
+	pendingChars           float64
 	requestEstimate        int
 	measured, cached       int
 	hasMeasured, hasCached bool
@@ -63,6 +64,12 @@ func (b *Budgeter) RecordUsage(id string, promptTokens, cached int) {
 			observed := state.lastChars / float64(promptTokens)
 			state.cpt = .5*state.cpt + .5*observed
 		}
+	})
+}
+func (b *Budgeter) MarkRequest(id string, estimate int) {
+	b.save(id, func(state *budgetState) {
+		state.requestEstimate = estimate
+		state.lastChars = state.pendingChars
 	})
 }
 func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
@@ -244,9 +251,13 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 		value := state.cached
 		budget.CachedLast = &value
 	}
-	if markRequest {
-		b.save(s.ID, func(saved *budgetState) { saved.requestEstimate = used; saved.lastChars = effectiveChars })
-	}
+	b.save(s.ID, func(saved *budgetState) {
+		saved.pendingChars = effectiveChars
+		if markRequest {
+			saved.requestEstimate = used
+			saved.lastChars = effectiveChars
+		}
+	})
 	s.SetBudget(budget)
 	return budget, nil
 }
