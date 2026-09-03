@@ -6,6 +6,8 @@ export const store = {
   flow: { stages: [], edges: [] },
   tools: [],
   serving_facts: {},
+	shell_credential: { stored: false, stored_at: "" },
+	shell_identity: { fallback: false, reason: "", since: "" },
   replay: false,
 };
 const listeners = new Set();
@@ -77,6 +79,12 @@ export function reduce(event) {
       store.config = data.config;
       store.servers = data.config.servers || store.servers;
       break;
+	case "shell.identity":
+		store.shell_identity = data;
+		break;
+	case "shell.credential":
+		store.shell_credential = data;
+		break;
     case "error":
       store.error = data;
       break;
@@ -312,6 +320,8 @@ for (const type of [
   "session.closed",
   "server.probed",
   "config.changed",
+	"shell.identity",
+	"shell.credential",
   "error",
   "run.queued",
   "run.started",

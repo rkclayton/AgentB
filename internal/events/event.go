@@ -21,6 +21,8 @@ const (
 	SessionClosed     = "session.closed"
 	ServerProbed      = "server.probed"
 	ConfigChanged     = "config.changed"
+	ShellIdentity     = "shell.identity"
+	ShellCredential   = "shell.credential"
 	Error             = "error"
 	RunQueued         = "run.queued"
 	RunStarted        = "run.started"

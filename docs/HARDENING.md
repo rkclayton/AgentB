@@ -1,16 +1,16 @@
 # Windows host hardening
 
-These scripts reduce the reach of AgentB's model-selected shell by running the harness under a dedicated local account, denying that account writes to selected control files, and documenting a safe outbound-firewall decision. They do not jail `shell`, inspect every process it starts, or contain a determined exploit. Treat them as blast-radius reduction on a dedicated Windows host, not as a sandbox.
+These controls reduce the reach of AgentB's model-selected shell by keeping the harness under the operator identity while launching shell children under a dedicated local account, denying that account writes to selected control files, and documenting a safe outbound-firewall decision. They do not jail `shell`, inspect every process it starts, or contain a determined exploit. Treat them as blast-radius reduction on a dedicated Windows host, not as a sandbox.
 
 Run the commands below from Windows PowerShell opened with **Run as administrator**. Review every `-WhatIf` result before omitting that switch. The scripts never create or store a password; account setup prompts for it interactively only during a real creation.
 
-## 1. Prepare the harness
+## 1. Prepare AgentB
 
-Build or copy the harness binary into the repository root. Create and test `harness.json` before applying ACLs. The service identity will be denied config writes, so use a pre-probed profile with known capabilities and `probe_mode` set to `off`; runtime profile edits, full-probe saves, and settings saves will fail by design.
+Build or copy the harness binary into the repository root. Create and test `harness.json` before applying ACLs. AgentB itself remains the operator process and can continue to save config and append logs; only model-selected shell children use the service identity.
 
-The harness writes its config, JSONL logs, workspace files, and memory notes during normal operation. The shell child has the same identity as the harness, so an ACL cannot let the harness append to `logs/` while denying that same access to shell commands. Log write access is preserved. Put `memory.dir` inside the workspace or disable memory; the ACL script intentionally grants write access only to the workspace.
+The harness writes its config, JSONL logs, workspace files, and memory notes during normal operation. Put `memory.dir` inside the workspace or disable memory; the ACL script grants the service identity write access only to the workspace. The service identity also needs read/execute access to the selected shell executable and ordinary Windows system files.
 
-Keep the launch environment minimal. In particular, do not place credentials in environment variables: the shell inherits and can read every variable available to AgentB.
+AgentB explicitly gives alternate-identity shell children only system paths, a workspace-backed temporary directory, account identity names, and optional locale/`NO_COLOR` values. Consequently, non-system programs such as Git or a locally installed compiler require absolute paths unless the implementation's allowlist is extended deliberately. The disabled/fallback path still inherits the operator environment, so do not place credentials there.
 
 ## 2. Create the service account
 
@@ -21,11 +21,21 @@ Preview, then create the default `agentb-svc` account:
 .\scripts\setup-service-account.ps1
 ```
 
-Use `-AccountName` consistently on all three scripts to choose another name. The script retains ordinary Users membership because removing it can break local or batch launch, ensures a newly created account is not an Administrator, and grants no interactive or Remote Desktop logon rights. Configure Task Scheduler or another service wrapper manually to run `harness.exe` under the account, granting only the logon right that mechanism requires.
+Use `-AccountName` consistently on all three scripts to choose another name. The script retains ordinary Users membership because removing it can break process launch, ensures a newly created account is not an Administrator, and grants no interactive or Remote Desktop logon rights. Do not configure AgentB itself to run under this account: `CreateProcessWithLogonW` launches only shell children and does not require an interactive logon right.
 
 Re-running account setup is an idempotent no-op when the account already exists. If that existing account is an Administrator, the script warns and leaves it unchanged; correct the membership before continuing.
 
-## 3. Apply and verify ACLs
+## 3. Store, enable, and test the credential
+
+Start AgentB as the operator and open Settings → Shell. Enter the service-account password in the write-only field and select **Store**. The UI returns only whether a credential is stored and its file timestamp; the password is encrypted with user-scoped DPAPI in `.agentb-shell-credential.dpapi` beside the selected config and never returns to the browser.
+
+Set the account and domain (`agentb-svc` and `.` by default), enable **service identity**, then select **Test**. A successful test creates and waits for a no-op child under that identity. A missing account, bad credential, missing logon right, or process API failure is reported without revealing the password.
+
+Before applying the remaining controls, run an approved shell call for `whoami` and confirm it returns the service account. Confirm the process owner externally with Task Manager or Process Explorer too. A red **SHELL IDENTITY FALLBACK** banner means shell is running as the operator; stop and correct its stated cause. The alarm clears only after an alternate-identity spawn actually succeeds.
+
+The ACL and firewall controls below do nothing useful until this split is enabled and verified.
+
+## 4. Apply and verify ACLs
 
 Stop AgentB. Preview the exact paths, apply the ACLs, and verify them:
 
@@ -35,11 +45,11 @@ Stop AgentB. Preview the exact paths, apply the ACLs, and verify them:
 .\scripts\apply-acls.ps1 -Verify
 ```
 
-Use `-HarnessDirectory`, `-WorkspaceDirectory`, and `-MemoryDirectory` when your layout differs. The script adds explicit deny ACEs for control-surface writes while preserving inheritance and adds an explicit inheritable Modify allow ACE only to the workspace. Verification reports missing or changed managed ACEs and exits nonzero on enforceable drift. It also repeats the unavoidable shared-identity limitation for logs.
+Use `-HarnessDirectory`, `-WorkspaceDirectory`, and `-MemoryDirectory` when your layout differs. The script adds explicit deny ACEs for control-surface writes while preserving inheritance and adds an explicit inheritable Modify allow ACE only to the workspace. Verification reports missing or changed managed ACEs and exits nonzero on enforceable drift. The current Prompt 16 script still leaves `logs/` writable and prints its now-obsolete shared-identity warning; revising that ACL policy is deliberately outside Prompt 17.
 
 The protected surface is the harness directory entry and harness binary, `prompts/`, `harness.json`, existing `harness.*.json` files, `.git/`, `scripts/`, and `serve/`. An administrator remains able to update these paths.
 
-## 4. Review outbound firewall policy
+## 5. Review outbound firewall policy
 
 Preview the requested account-scoped policy and the model endpoint it must preserve:
 
@@ -60,9 +70,9 @@ If a future reviewed policy creates either reserved rule name, preview and perfo
 
 The predictable names are `AgentB-Svc-Outbound-Block` and `AgentB-Svc-Model-Allow`.
 
-## 5. Launch and verify
+## 6. Launch and verify
 
-Launch AgentB under the service account with only its required environment. Confirm the process owner in Task Manager or Process Explorer, exercise a workspace edit, confirm JSONL append behavior, and run:
+Keep AgentB running under the operator identity. Confirm shell children are owned by the service account, exercise a shell workspace edit, confirm harness JSONL append behavior, and run:
 
 ```powershell
 .\scripts\apply-acls.ps1 -Verify
@@ -75,7 +85,7 @@ Because the firewall script intentionally declines the unsafe block-plus-allow c
 
 Stop AgentB before rollback.
 
-To remove the dedicated account after copying out any service-owned workspace or log data:
+First disable `shell.service_account.enabled` in Settings. Remove the stored credential with Settings → Shell → **Clear**. To remove the dedicated account after copying out any service-owned workspace data:
 
 ```powershell
 Remove-LocalUser -Name 'agentb-svc'

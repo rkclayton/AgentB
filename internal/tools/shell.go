@@ -4,27 +4,46 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
-	"os/exec"
 	pathpkg "path"
 	"strings"
 	"sync"
 	"time"
 
 	"harness/internal/config"
+	"harness/internal/credential"
 	"harness/internal/session"
 )
 
 // Shell executes commands without an OS sandbox. Its jail, timeout, approval gate,
 // and deny list reduce accidents but are not a security boundary.
 type Shell struct {
-	mu  sync.RWMutex
-	cfg config.Shell
+	mu               sync.RWMutex
+	cfg              config.Shell
+	workspace        string
+	credential       shellCredentialReader
+	startService     serviceProcessStarter
+	identityMu       sync.RWMutex
+	identity         ShellIdentityStatus
+	identityReporter func(ShellIdentityStatus)
 }
 
-func NewShell(cfg config.Shell) *Shell { return &Shell{cfg: cfg} }
-func (*Shell) Name() string            { return "shell" }
+type shellCredentialReader interface {
+	Read() ([]byte, error)
+}
+
+type ShellIdentityStatus struct {
+	Fallback bool   `json:"fallback"`
+	Reason   string `json:"reason"`
+	Since    string `json:"since"`
+}
+
+func NewShell(cfg config.Shell) *Shell {
+	return &Shell{cfg: cfg, startService: startServiceAccountProcess}
+}
+func (*Shell) Name() string { return "shell" }
 func (*Shell) Description() string {
 	return "Run a non-interactive shell command from the workspace root with a timeout and bounded output. Direct file discovery and reads are refused; use glob or read_file."
 }
@@ -62,49 +81,182 @@ func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string
 		timeout = cfg.MaxTimeoutS
 	}
 	argv := append(append([]string(nil), cfg.Command[1:]...), command)
-	cmd := exec.Command(cfg.Command[0], argv...)
-	cmd.Dir = item.Workspace
-	setupProcess(cmd)
 	var output lockedBuffer
-	cmd.Stdout, cmd.Stderr = &output, &output
-	if err := cmd.Start(); err != nil {
+	process, err := s.start(cfg, item.Workspace, argv, &output)
+	if err != nil {
 		return "", err
 	}
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	type waitResult struct {
+		code int
+		err  error
+	}
+	done := make(chan waitResult, 1)
+	go func() {
+		code, err := process.Wait()
+		done <- waitResult{code: code, err: err}
+	}()
 	timer := time.NewTimer(time.Duration(timeout) * time.Second)
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
-		killProcessTree(cmd.Process.Pid)
+		process.KillTree()
 		<-done
 		return "", ctx.Err()
 	case <-timer.C:
-		killProcessTree(cmd.Process.Pid)
+		process.KillTree()
 		<-done
 		partial := cutOutput(output.String(), cfg.MaxOutputLinesHead, cfg.MaxOutputLinesTail)
 		if partial != "" {
 			return "", fmt.Errorf("timed out after %ds; partial output:\n%s", timeout, partial)
 		}
 		return "", fmt.Errorf("timed out after %ds; partial output:", timeout)
-	case err := <-done:
-		code := 0
-		if err != nil {
-			if exit, ok := err.(*exec.ExitError); ok {
-				code = exit.ExitCode()
-			} else {
-				return "", err
-			}
+	case result := <-done:
+		if result.err != nil {
+			return "", result.err
 		}
 		body := cutOutput(output.String(), cfg.MaxOutputLinesHead, cfg.MaxOutputLinesTail)
 		if body == "" {
-			return fmt.Sprintf("exit=%d", code), nil
+			return fmt.Sprintf("exit=%d", result.code), nil
 		}
-		return fmt.Sprintf("exit=%d\n%s", code, body), nil
+		return fmt.Sprintf("exit=%d\n%s", result.code, body), nil
 	}
 }
-func (s *Shell) Configure(value config.Config) { s.mu.Lock(); s.cfg = value.Shell; s.mu.Unlock() }
-func (s *Shell) config() config.Shell          { s.mu.RLock(); defer s.mu.RUnlock(); return s.cfg }
+
+func (s *Shell) start(cfg config.Shell, workspace string, argv []string, output *lockedBuffer) (runningShellProcess, error) {
+	service := cfg.ServiceAccount
+	if !service.Enabled {
+		return startHarnessProcess(cfg.Command[0], argv, workspace, output)
+	}
+	reason := ""
+	if s.credential == nil {
+		reason = "service-account credential is not configured"
+	} else {
+		password, err := s.credential.Read()
+		if err == nil {
+			defer clearBytes(password)
+			process, spawnErr := s.startService(cfg.Command[0], argv, workspace, minimalShellEnvironment(service, workspace), service, password, output)
+			if spawnErr == nil {
+				s.setIdentity(ShellIdentityStatus{})
+				return process, nil
+			}
+			reason = serviceSpawnReason(spawnErr)
+		} else if errors.Is(err, credential.ErrNotStored) {
+			reason = "service-account credential is not stored"
+		} else {
+			reason = "service-account credential cannot be decrypted by this harness identity"
+		}
+	}
+	s.setIdentity(ShellIdentityStatus{Fallback: true, Reason: reason, Since: time.Now().UTC().Format(time.RFC3339)})
+	log.Printf("ALARM: shell service-account spawn failed; falling back to harness identity: %s", reason)
+	return startHarnessProcess(cfg.Command[0], argv, workspace, output)
+}
+
+func (s *Shell) TestServiceAccount(ctx context.Context) (string, error) {
+	cfg, workspace := s.configWithWorkspace()
+	if s.credential == nil {
+		return "service-account credential is not configured", errors.New("service-account credential is not configured")
+	}
+	password, err := s.credential.Read()
+	if errors.Is(err, credential.ErrNotStored) {
+		return "service-account credential is not stored", err
+	}
+	if err != nil {
+		return "service-account credential cannot be decrypted by this harness identity", err
+	}
+	defer clearBytes(password)
+	command := shellNoop(cfg.Command[0])
+	argv := append(append([]string(nil), cfg.Command[1:]...), command)
+	var output lockedBuffer
+	process, err := s.startService(cfg.Command[0], argv, workspace, minimalShellEnvironment(cfg.ServiceAccount, workspace), cfg.ServiceAccount, password, &output)
+	if err != nil {
+		return serviceSpawnReason(err), err
+	}
+	type waitResult struct {
+		code int
+		err  error
+	}
+	done := make(chan waitResult, 1)
+	go func() {
+		code, waitErr := process.Wait()
+		done <- waitResult{code: code, err: waitErr}
+	}()
+	select {
+	case <-ctx.Done():
+		process.KillTree()
+		<-done
+		return "service-account test timed out", ctx.Err()
+	case result := <-done:
+		if result.err != nil {
+			return "service-account test process failed", result.err
+		}
+		if result.code != 0 {
+			return fmt.Sprintf("service-account test process exited %d", result.code), errors.New("test process returned nonzero exit")
+		}
+		s.setIdentity(ShellIdentityStatus{})
+		return "service-account shell spawn succeeded", nil
+	}
+}
+
+func (s *Shell) SetCredentialStore(reader shellCredentialReader) {
+	s.mu.Lock()
+	s.credential = reader
+	s.mu.Unlock()
+}
+
+func (s *Shell) SetIdentityReporter(reporter func(ShellIdentityStatus)) {
+	s.identityMu.Lock()
+	s.identityReporter = reporter
+	s.identityMu.Unlock()
+}
+
+func (s *Shell) IdentityStatus() ShellIdentityStatus {
+	s.identityMu.RLock()
+	defer s.identityMu.RUnlock()
+	return s.identity
+}
+
+func (s *Shell) setIdentity(status ShellIdentityStatus) {
+	s.identityMu.Lock()
+	if status.Fallback && s.identity.Fallback && s.identity.Reason == status.Reason {
+		status.Since = s.identity.Since
+	}
+	s.identity = status
+	reporter := s.identityReporter
+	s.identityMu.Unlock()
+	if reporter != nil {
+		reporter(status)
+	}
+}
+
+func (s *Shell) Configure(value config.Config) {
+	s.mu.Lock()
+	s.cfg = value.Shell
+	s.workspace = value.Workspace
+	s.mu.Unlock()
+}
+func (s *Shell) config() config.Shell { s.mu.RLock(); defer s.mu.RUnlock(); return s.cfg }
+func (s *Shell) configWithWorkspace() (config.Shell, string) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.cfg, s.workspace
+}
+
+func clearBytes(value []byte) {
+	for i := range value {
+		value[i] = 0
+	}
+}
+
+func shellNoop(executable string) string {
+	name := shellCommandName(executable)
+	if name == "cmd" {
+		return "exit 0"
+	}
+	if name == "sh" || name == "bash" || name == "zsh" {
+		return ":"
+	}
+	return "$null"
+}
 
 type lockedBuffer struct {
 	mu sync.Mutex

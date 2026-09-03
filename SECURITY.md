@@ -8,7 +8,7 @@ The workspace is a boundary for the file tools only. The `shell` tool is not jai
 
 The default file-routing guard refuses simple shell shapes that duplicate `glob` or `read_file`. It is a routing aid, not a security boundary: it does not restrict what the shell can do and is not a sandbox.
 
-The shell inherits the harness process environment. Any credential available there is readable by the agent. Run AgentB under a dedicated low-privilege account with a minimal environment, and use an OS sandbox when the workspace or model input is not fully trusted.
+When `shell.service_account.enabled` is false, the shell inherits the harness identity and environment as before. When it is true and the stored credential works, AgentB creates shell processes under the configured low-privilege Windows identity with an explicit minimal environment. Its `PATH` contains only Windows system directories and the Windows PowerShell directory, so other tools require absolute paths; widening that list should be an explicit operator decision. A failed alternate-identity launch falls back to the operator identity so the task can continue, logs the reason, and raises a persistent red UI alarm until a service-account spawn succeeds. The alternate path preserves the initial working directory, combined output, timeout, and process-tree termination through a Windows job object, but it could not be exercised on the development machine because that account did not exist. A separate account limits reach; it is not a sandbox and does not contain an exploit. Follow [Windows host hardening](docs/HARDENING.md) before relying on the split.
 
 ## Approval and unattended runs
 

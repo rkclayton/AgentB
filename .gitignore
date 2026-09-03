@@ -4,6 +4,9 @@ harness.json
 harness.*.json
 # The public first-run template must remain tracked.
 !harness.example.json
+# The shell service-account password is a user-scoped DPAPI blob.
+.agentb-shell-credential.dpapi
+.agentb-shell-credential-*
 # Full model traffic and tool results are private runtime logs.
 logs/
 # Model-authored durable notes can contain workspace content.

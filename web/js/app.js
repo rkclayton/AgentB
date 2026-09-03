@@ -17,6 +17,12 @@ subscribe(() => {
   renderRack();
   renderState();
   renderTimeline();
+	const identityAlarm = document.getElementById("shell-identity-alarm");
+	const fallback = store.shell_identity?.fallback;
+	identityAlarm.hidden = !fallback;
+	identityAlarm.textContent = fallback
+		? `SHELL IDENTITY FALLBACK — running as the operator: ${store.shell_identity.reason}`
+		: "";
   const s = store.sessions[store.active],
     busy = s && s.run.status !== "idle";
   input.disabled = !!busy;

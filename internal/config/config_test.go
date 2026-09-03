@@ -60,3 +60,14 @@ func TestFileRoutingGuardDefaultsOnAndCanBeDisabled(t *testing.T) {
 		t.Fatal("explicitly disabled file routing guard was re-enabled")
 	}
 }
+
+func TestServiceAccountSplitDefaultsOffWithLocalAccountDefaults(t *testing.T) {
+	cfg := Config{Shell: Shell{Command: []string{"unused"}}}
+	ApplyDefaults(&cfg)
+	if cfg.Shell.ServiceAccount.Enabled {
+		t.Fatal("service-account split defaulted on")
+	}
+	if cfg.Shell.ServiceAccount.Account != "agentb-svc" || cfg.Shell.ServiceAccount.Domain != "." {
+		t.Fatalf("service-account defaults = %+v", cfg.Shell.ServiceAccount)
+	}
+}

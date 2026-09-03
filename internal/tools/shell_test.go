@@ -8,10 +8,25 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"harness/internal/config"
+	"harness/internal/credential"
 	"harness/internal/session"
 )
+
+type missingShellCredential struct{}
+
+func (missingShellCredential) Read() ([]byte, error) { return nil, credential.ErrNotStored }
+
+type presentShellCredential struct{}
+
+func (presentShellCredential) Read() ([]byte, error) { return []byte{1, 2, 3}, nil }
+
+type completedShellProcess struct{}
+
+func (completedShellProcess) Wait() (int, error) { return 0, nil }
+func (completedShellProcess) KillTree()          {}
 
 func TestShellFileRoutingRefusals(t *testing.T) {
 	discovery := []string{
@@ -48,6 +63,76 @@ func TestShellFileRoutingRefusals(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestShellServiceAccountSpawnFailureFallsBackAndRaisesIdentityAlarm(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root).Shell
+	cfg.ServiceAccount.Enabled = true
+	shell := NewShell(cfg)
+	shell.Configure(config.Config{Workspace: root, Shell: cfg})
+	shell.SetCredentialStore(presentShellCredential{})
+	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
+		return nil, &serviceSpawnError{kind: "service-account authentication failed"}
+	}
+	var reported ShellIdentityStatus
+	shell.SetIdentityReporter(func(status ShellIdentityStatus) { reported = status })
+	command := "printf fallback-ok"
+	if runtime.GOOS == "windows" {
+		command = "Write-Output fallback-ok"
+	}
+	result, err := shell.Call(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "fallback-ok") {
+		t.Fatalf("fallback result = %q", result)
+	}
+	if !reported.Fallback || !strings.Contains(reported.Reason, "authentication failed") || reported.Since == "" {
+		t.Fatalf("identity report = %+v", reported)
+	}
+	if _, err := time.Parse(time.RFC3339, reported.Since); err != nil {
+		t.Fatalf("fallback timestamp = %q: %v", reported.Since, err)
+	}
+}
+
+func TestShellServiceAccountDisabledDoesNotRaiseIdentityAlarm(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root).Shell
+	shell := NewShell(cfg)
+	called := false
+	shell.SetIdentityReporter(func(status ShellIdentityStatus) { called = true })
+	command := "printf disabled-ok"
+	if runtime.GOOS == "windows" {
+		command = "Write-Output disabled-ok"
+	}
+	result, err := shell.Call(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, "disabled-ok") || called || shell.IdentityStatus().Fallback {
+		t.Fatalf("result=%q called=%v status=%+v", result, called, shell.IdentityStatus())
+	}
+}
+
+func TestShellServiceAccountSuccessClearsPersistentFallback(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root).Shell
+	cfg.ServiceAccount.Enabled = true
+	shell := NewShell(cfg)
+	shell.Configure(config.Config{Workspace: root, Shell: cfg})
+	shell.SetCredentialStore(presentShellCredential{})
+	shell.identity = ShellIdentityStatus{Fallback: true, Reason: "earlier failure", Since: time.Now().UTC().Format(time.RFC3339)}
+	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
+		return completedShellProcess{}, nil
+	}
+	message, err := shell.TestServiceAccount(context.Background())
+	if err != nil || !strings.Contains(message, "succeeded") {
+		t.Fatalf("message=%q err=%v", message, err)
+	}
+	if status := shell.IdentityStatus(); status.Fallback || status.Reason != "" || status.Since != "" {
+		t.Fatalf("identity status was not cleared: %+v", status)
 	}
 }
 

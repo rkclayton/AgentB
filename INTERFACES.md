@@ -6,7 +6,7 @@ This document is the stable contract for prompts 3–10. Later prompts implement
 
 Every event is `{"seq":int,"ts":"RFC3339 with milliseconds","session_id":"","run_id":"","type":"","data":{}}`. Sessionless events are global. SSE uses `event: <type>`, the JSON envelope in `data:`, `id: <seq>`, and a comment ping every 15 seconds. JSONL additionally permits `body` on `model.request` and `raw` on `model.response`; those fields are excluded from SSE. Each session has its own log and global events use the harness log.
 
-On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapshot},servers:[Profile with masked key],config,replay,serving_facts,flow:{stages,edges},tools:[{name,description}]}`. `replay` is true only for `-replay` servers. `serving_facts` exposes only the three Prompt 8 accounting measurements needed by the settings sheet: `tokenize_idle_ms`, `tokenize_busy_ms`, and `tokenize_blocks_on_slot`.
+On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapshot},servers:[Profile with masked key],config,replay,shell_credential:{stored,stored_at},shell_identity:{fallback,reason,since},serving_facts,flow:{stages,edges},tools:[{name,description}]}`. `replay` is true only for `-replay` servers. `serving_facts` exposes only the three Prompt 8 accounting measurements needed by the settings sheet: `tokenize_idle_ms`, `tokenize_busy_ms`, and `tokenize_blocks_on_slot`. The credential status never contains the credential.
 
 ## Shared records
 
@@ -24,6 +24,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 
 - `session.created` [prompt 3] `{session}`; `session.renamed` [3] `{session_id,label}`; `session.reset` [3] `{session_id,log_path}`; `session.closed` [3] `{session_id}`.
 - `server.probed` [3] `{server_id,capabilities,findings}`; `config.changed` [3] `{config}` (masked); `error` [3] `{where,message}`.
+- `shell.identity` [17] `{fallback,reason,since}` announces or clears a persistent alternate-identity fallback; `shell.credential` [17] `{stored,stored_at}` reports write-only store status.
 - `run.queued` [4] `{run_id,position}`; `run.started` [4] `{run_id,user_message_id}`; `run.stopped` [4] `{run_id,reason,detail,turns}`. Stop reasons are `done`, `user_stop`, `turn_ceiling`, `cycle`, `tool_errors`, `context_ceiling`, `length`, `model_error`, `profile_not_runnable`.
 - `stage` [4] `{stage,state:enter|exit,turn,ms}`. Stages are `assemble`, `call_model`, `parse`, `dispatch`, `execute`, `append`, `compact`, `wait_user`; compact is initially a no-op.
 - `model.request` [4] `{turn,message_count,tool_count,params:{temperature,top_p,top_k?,min_p?,presence_penalty,repeat_penalty?,max_tokens,reasoning:{control,effort?,enabled?,preserve?}},est_prompt_tokens,estimated}`.
@@ -42,6 +43,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 - `GET /api/sessions`; `POST /api/sessions {label?,server_id,workspace?}` → 201 `{session}`; `POST /api/sessions/{id} {label}`; `DELETE /api/sessions/{id}?force=1`; `POST /api/sessions/{id}/reset`.
 - `GET /api/servers`; `POST /api/servers/{id}/probe` → 202 and an eventual event.
 - `GET /api/config`; `POST /api/config` deep-merges keys and server entries by immutable `id`, validates, saves, and publishes `config.changed`. The masked API-key sentinel means unchanged. Validation errors are 400 `{error,field}`.
+- `POST /api/shell-credential {action:store,password}` writes a user-scoped DPAPI blob; `{action:test}` attempts a no-op service-account process; `{action:clear}` removes it. Responses and events expose status only, never the password.
 - `POST /api/message`, `/api/stop`, `/api/tools/{name}`, and `/api/approve` drive runs, cancellation, per-session tool toggles, and approval decisions.
 
 ## Replay and keyboard
@@ -58,7 +60,7 @@ The main page uses `Ctrl+1` through `Ctrl+9` to switch sessions and Escape to cl
 
 ## Configuration
 
-Every parsed key appears in `harness.example.json`: `listen`, `workspace`, `log_dir`, `servers`; `run.{max_turns,cycle_window,max_consecutive_tool_errors,max_concurrent,queue_depth}`; `approval.mode`; `context.{soft_pct,summary_pct,accounting}`; `memory.{enabled,dir,max_tokens}`; `tools.{read_file,list_dir,grep}`; and `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,file_routing_guard,deny}`. Files are saved as two-space JSON in this order. A v1 `server` document migrates to `servers[local]`.
+Every parsed key appears in `harness.example.json`: `listen`, `workspace`, `log_dir`, `servers`; `run.{max_turns,cycle_window,max_consecutive_tool_errors,max_concurrent,queue_depth}`; `approval.mode`; `context.{soft_pct,summary_pct,accounting}`; `memory.{enabled,dir,max_tokens}`; `tools.{read_file,list_dir,grep}`; and `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,file_routing_guard,service_account:{enabled,account,domain},deny}`. Files are saved as two-space JSON in this order. A v1 `server` document migrates to `servers[local]`.
 
 Profiles with `tool_calls=false`, `overflow_behavior=truncate`, `streaming=false`, or unknown context are not runnable. `context.accounting=exact` later refuses profiles without `/tokenize` using `exact accounting requested but this server has no /tokenize`; `auto` chooses exact where possible and calibrated estimation elsewhere; `estimated` forces estimation.
 

@@ -17,6 +17,7 @@ import (
 
 	"harness/internal/agent"
 	"harness/internal/config"
+	"harness/internal/credential"
 	"harness/internal/events"
 	"harness/internal/llm"
 	"harness/internal/memory"
@@ -99,13 +100,21 @@ func main() {
 	}
 	workspaces := session.NewWorkspaceRegistry()
 	coordinator := tools.NewFileCoordinator(workspaces, registry.Label, bus)
+	credentialStore := credential.New(*configPath)
+	shellTool := tools.NewShell(cfg.Shell)
+	shellTool.Configure(*cfg)
+	shellTool.SetCredentialStore(credentialStore)
+	shellTool.SetIdentityReporter(func(status tools.ShellIdentityStatus) {
+		bus.Publish(events.New(events.ShellIdentity, "", "", status))
+	})
+	web.SetShellSecurity(credentialStore, shellTool)
 	toolRegistry := tools.New(
 		tools.NewReadFile(cfg.Tools.ReadFile),
 		tools.NewListDir(cfg.Tools.ListDir),
 		tools.NewWriteFile(coordinator),
 		tools.NewEditFile(coordinator),
 		tools.NewGrep(cfg.Tools.Grep, cfg.Tools.ListDir),
-		tools.NewShell(cfg.Shell),
+		shellTool,
 		tools.NewRemember(memoryManager, bus),
 		tools.NewGlob(),
 	)

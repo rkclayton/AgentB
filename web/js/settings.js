@@ -9,6 +9,7 @@ const errors = new Map();
 const shownKeys = new Set();
 let open = false;
 let lastFocus = null;
+let shellCredentialMessage = "";
 
 export function initSettings() {
   gear.addEventListener("click", () => (open ? closeSheet() : openSheet()));
@@ -30,6 +31,8 @@ export function initSettings() {
         "snapshot",
         "active.changed",
         "config.changed",
+		"shell.identity",
+		"shell.credential",
         "server.probed",
         "session.created",
         "session.renamed",
@@ -253,7 +256,23 @@ function run() {
 }
 
 function shell() {
+	const service = store.config.shell?.service_account || {};
+	const credential = store.shell_credential || {};
+	const stored = credential.stored
+		? `stored ${credential.stored_at || "(time unavailable)"}`
+		: "not stored";
   return `${text("shell.command", "command", (store.config.shell?.command || []).join(" "), "command")}
+    ${toggle("shell.service_account.enabled", "service identity", service.enabled)}
+    ${text("shell.service_account.account", "account", service.account || "agentb-svc")}
+    ${text("shell.service_account.domain", "domain", service.domain || ".")}
+    ${row("password", '<input id="shell-service-password" type="password" autocomplete="new-password" aria-label="Service-account password">')}
+    <p class="settings-note">write-only credential: ${html(stored)}</p>
+    <div class="settings-actions">
+      <button type="button" data-action="store-shell-credential">Store</button>
+      <button type="button" data-action="test-shell-credential">Test</button>
+      <button type="button" data-action="clear-shell-credential">Clear</button>
+    </div>
+    ${shellCredentialMessage ? `<p class="settings-note">${html(shellCredentialMessage)}</p>` : ""}
     <p class="settings-note">changes apply to new shell calls</p>`;
 }
 
@@ -354,9 +373,43 @@ async function click(event) {
   if (action === "new-session") return newSession();
   if (action === "close-session") return closeSession(id);
   if (action === "reset-session") return resetSession(id);
+	if (action === "store-shell-credential") return storeShellCredential();
+	if (action === "test-shell-credential") return shellCredentialAction("test");
+	if (action === "clear-shell-credential") return shellCredentialAction("clear");
   if (action === "copy") {
     if (button.dataset.value) await navigator.clipboard?.writeText(button.dataset.value);
   }
+}
+
+async function storeShellCredential() {
+	const input = sheet.querySelector("#shell-service-password");
+	const password = input?.value || "";
+	if (input) input.value = "";
+	try {
+		const status = await api("/api/shell-credential", { action: "store", password });
+		store.shell_credential = status;
+		shellCredentialMessage = "credential stored";
+	} catch (error) {
+		shellCredentialMessage = error.message;
+	}
+	render();
+}
+
+async function shellCredentialAction(action) {
+	try {
+		const result = await api("/api/shell-credential", { action });
+		if (action === "clear") {
+			store.shell_credential = result;
+			shellCredentialMessage = "credential removed";
+		} else {
+			store.shell_credential = result.credential || store.shell_credential;
+			store.shell_identity = result.identity || store.shell_identity;
+			shellCredentialMessage = result.message;
+		}
+	} catch (error) {
+		shellCredentialMessage = error.message;
+	}
+	render();
 }
 
 async function blur(event) {

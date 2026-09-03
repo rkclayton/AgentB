@@ -30,6 +30,13 @@
 .header #connection.alarm {
   color: var(--alarm);
 }
+.identity-alarm {
+  padding: 8px 16px;
+  color: var(--well);
+  background: var(--alarm);
+  font-size: 13px;
+  font-weight: 600;
+}
 .stop {
   color: var(--alarm);
   background: transparent;

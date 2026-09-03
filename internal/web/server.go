@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -12,9 +13,11 @@ import (
 
 	"harness/internal/agent"
 	"harness/internal/config"
+	"harness/internal/credential"
 	"harness/internal/events"
 	"harness/internal/probe"
 	"harness/internal/session"
+	"harness/internal/tools"
 )
 
 type Server struct {
@@ -28,6 +31,8 @@ type Server struct {
 	runner     *agent.Runner
 	prompt     *agent.PromptRenderer
 	replay     *events.Replay
+	credential *credential.Store
+	shell      *tools.Shell
 }
 
 func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
@@ -35,6 +40,10 @@ func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
 }
 func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry }
 func (s *Server) SetReplay(replay *events.Replay)        { s.replay = replay }
+func (s *Server) SetShellSecurity(store *credential.Store, shell *tools.Shell) {
+	s.credential = store
+	s.shell = shell
+}
 func (s *Server) SetRuntime(scheduler *agent.Scheduler, runner *agent.Runner, prompt *agent.PromptRenderer) {
 	s.scheduler = scheduler
 	s.runner = runner
@@ -64,6 +73,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/servers", s.servers)
 	mux.HandleFunc("/api/servers/", s.replayGuard(s.server))
 	mux.HandleFunc("/api/config", s.replayGuard(s.config))
+	mux.HandleFunc("/api/shell-credential", s.replayGuard(s.shellCredential))
 	mux.HandleFunc("/api/message", s.replayGuard(s.message))
 	mux.HandleFunc("/api/stop", s.replayGuard(s.stop))
 	mux.HandleFunc("/api/approve", s.replayGuard(s.approve))
@@ -95,7 +105,72 @@ func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any 
 	s.mu.RLock()
 	masked := s.cfg.Masked()
 	s.mu.RUnlock()
-	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "replay": replay, "serving_facts": servingFacts("SERVING.md"), "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Save a durable workspace note."}, {"name": "glob", "description": "Find files by name pattern."}}}
+	credentialStatus := credential.Status{}
+	identityStatus := tools.ShellIdentityStatus{}
+	if s.credential != nil {
+		credentialStatus = s.credential.Status()
+	}
+	if s.shell != nil {
+		identityStatus = s.shell.IdentityStatus()
+	}
+	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "replay": replay, "shell_credential": credentialStatus, "shell_identity": identityStatus, "serving_facts": servingFacts("SERVING.md"), "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Save a durable workspace note."}, {"name": "glob", "description": "Find files by name pattern."}}}
+}
+
+func (s *Server) shellCredential(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	if s.credential == nil || s.shell == nil {
+		writeError(w, http.StatusConflict, "shell credential runtime is unavailable", "shell.service_account")
+		return
+	}
+	var body struct {
+		Action   string `json:"action"`
+		Password string `json:"password"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	switch body.Action {
+	case "store":
+		if body.Password == "" {
+			writeError(w, http.StatusBadRequest, "password is required", "shell.service_account.password")
+			return
+		}
+		password := []byte(body.Password)
+		body.Password = ""
+		err := s.credential.Write(password)
+		for index := range password {
+			password[index] = 0
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error(), "shell.service_account.password")
+			return
+		}
+		status := s.credential.Status()
+		s.bus.Publish(events.New(events.ShellCredential, "", "", status))
+		writeJSON(w, http.StatusOK, status)
+	case "clear":
+		if err := s.credential.Clear(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error(), "shell.service_account.password")
+			return
+		}
+		status := s.credential.Status()
+		s.bus.Publish(events.New(events.ShellCredential, "", "", status))
+		writeJSON(w, http.StatusOK, status)
+	case "test":
+		ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+		defer cancel()
+		message, err := s.shell.TestServiceAccount(ctx)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, message, "shell.service_account")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": message, "credential": s.credential.Status(), "identity": s.shell.IdentityStatus()})
+	default:
+		writeError(w, http.StatusBadRequest, "action must be store, test, or clear", "action")
+	}
 }
 
 func servingFacts(path string) map[string]any {
