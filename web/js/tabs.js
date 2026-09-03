@@ -40,12 +40,7 @@ export function renderTabs() {
     add.textContent = "+";
     add.setAttribute("aria-label", "Open session settings");
     add.onclick = () => {
-      document.getElementById("settings").click();
-      requestAnimationFrame(() =>
-        [...document.querySelectorAll(".settings-group h2")]
-          .find((heading) => heading.textContent === "Sessions")
-          ?.scrollIntoView({ block: "start" }),
-      );
+      document.dispatchEvent(new CustomEvent("settings.open", { detail: { section: "sessions" } }));
     };
     root.append(add);
   }

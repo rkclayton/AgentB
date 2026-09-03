@@ -1,6 +1,6 @@
 import { api, reduce, setActive, store, subscribe } from "./bus.js";
 
-const sheet = document.getElementById("settings-sheet");
+const sheet = document.getElementById("settings-page");
 const gear = document.getElementById("settings");
 const expanded = new Set();
 const armed = new Set();
@@ -10,6 +10,7 @@ const shownKeys = new Set();
 let open = false;
 let lastFocus = null;
 let shellCredentialMessage = "";
+let shellCredentialAlarm = false;
 let serviceAccountStatus = { loaded: false, supported: true, exists: false, administrator: false };
 let serviceAccountBusy = false;
 let serviceAccountMessage = "";
@@ -18,11 +19,25 @@ let hardeningStatus = { loaded: false, supported: true, applied: false };
 let hardeningBusy = false;
 let hardeningMessage = "";
 let hardeningAlarm = false;
+let activeSection = "servers";
+let hardeningServerID = "";
+
+const sectionLabels = [
+  ["servers", "Connections"],
+  ["sessions", "Sessions"],
+  ["tools", "Tools"],
+  ["memory", "Memory"],
+  ["context", "Context"],
+  ["run", "Run & approval"],
+  ["shell", "Security"],
+  ["session", "Current session"],
+];
 
 export function initSettings() {
-  gear.addEventListener("click", () => (open ? closeSheet() : openSheet()));
+  gear.addEventListener("click", () => (open ? closeSettings() : openSettings()));
+  document.addEventListener("settings.open", (event) => openSettings(event.detail?.section));
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && open) closeSheet();
+    if (event.key === "Escape" && open) closeSettings();
   });
   sheet.addEventListener("click", click);
   sheet.addEventListener("focusout", blur);
@@ -53,43 +68,82 @@ export function initSettings() {
       ].includes(event.type)
     )
       render();
+    if (open && event.type === "snapshot") {
+      refreshServiceAccountStatus();
+      refreshHardeningStatus();
+    }
   });
+  const requested = location.hash.match(/^#settings(?:\/([a-z-]+))?$/);
+  if (requested) requestAnimationFrame(() => openSettings(requested[1] || "servers"));
 }
 
-function openSheet() {
+function openSettings(section = "") {
+  if (sectionLabels.some(([id]) => id === section)) activeSection = section;
   open = true;
   lastFocus = document.activeElement;
-  sheet.classList.add("open");
+  sheet.hidden = false;
   sheet.setAttribute("aria-hidden", "false");
   gear.setAttribute("aria-expanded", "true");
+  gear.setAttribute("aria-label", "Close settings");
+  history.replaceState(null, "", `#settings/${activeSection}`);
   render();
   refreshServiceAccountStatus();
 	refreshHardeningStatus();
-  requestAnimationFrame(() => sheet.querySelector("button, input")?.focus());
+  requestAnimationFrame(() => sheet.querySelector(".settings-nav button.selected")?.focus());
 }
 
-function closeSheet() {
+function closeSettings() {
   open = false;
-  sheet.classList.remove("open");
+  sheet.hidden = true;
   sheet.setAttribute("aria-hidden", "true");
   gear.setAttribute("aria-expanded", "false");
+  gear.setAttribute("aria-label", "Settings");
+  history.replaceState(null, "", `${location.pathname}${location.search}`);
   (lastFocus || gear).focus();
 }
 
 function render() {
   const active = store.sessions[store.active];
+  const scrollTop = sheet.querySelector(".settings-content")?.scrollTop || 0;
+  const focusKey = controlKey(document.activeElement);
+  const secretValues = new Map(
+    [...sheet.querySelectorAll('input[type="password"]')]
+      .map((input) => [controlKey(input), input.value])
+      .filter(([key, value]) => key && value),
+  );
+  const content = {
+    servers: () => servers(),
+    sessions: () => sessions(),
+    tools: () => tools(active),
+    memory: () => memory(active),
+    context: () => context(active),
+    run: () => run(),
+    shell: () => shell(active),
+    session: () => sessionControls(active),
+  };
+  const label = sectionLabels.find(([id]) => id === activeSection)?.[1] || "Settings";
   sheet.innerHTML = `
-    <header class="settings-head"><span>Settings</span><button type="button" data-action="close" aria-label="Close settings">×</button></header>
-    <div class="settings-scroll">
-      ${group("Servers", servers())}
-      ${group("Sessions", sessions())}
-      ${group("Tools", tools(active))}
-      ${group("Memory", memory(active))}
-      ${group("Context", context(active))}
-      ${group("Run", run())}
-	  ${group("Shell", shell(active))}
-      ${group("Session", sessionControls(active))}
+    <header class="settings-head"><div><strong>Settings</strong><span>Changes save automatically</span></div><button type="button" data-action="close" aria-label="Close settings">×</button></header>
+    <div class="settings-layout">
+      <nav class="settings-nav" aria-label="Settings sections">
+        ${sectionLabels.map(([id, name]) => `<button type="button" class="${id === activeSection ? "selected" : ""}" data-action="settings-section" data-id="${id}" aria-current="${id === activeSection ? "page" : "false"}">${name}</button>`).join("")}
+      </nav>
+      <div class="settings-content" tabindex="-1">${group(label, content[activeSection]())}</div>
     </div>`;
+  const contentNode = sheet.querySelector(".settings-content");
+  contentNode.scrollTop = scrollTop;
+  for (const input of sheet.querySelectorAll('input[type="password"]')) {
+    const value = secretValues.get(controlKey(input));
+    if (value) input.value = value;
+  }
+  const focusNode = [...sheet.querySelectorAll("button, input, textarea, select, summary")]
+    .find((node) => controlKey(node) === focusKey);
+  focusNode?.focus({ preventScroll: true });
+}
+
+function controlKey(node) {
+  if (!node || !sheet.contains(node)) return "";
+  return node.id || node.dataset?.path || [node.dataset?.action, node.dataset?.id || node.dataset?.setupAction].filter(Boolean).join(":") || node.getAttribute?.("aria-label") || "";
 }
 
 function group(name, content) {
@@ -289,16 +343,16 @@ function shell(active) {
 		: !serviceAccountStatus.supported
 			? "local account setup is available only on Windows"
 			: serviceAccountStatus.exists
-				? `${serviceAccountStatus.enabled ? "enabled" : "disabled"}${serviceAccountStatus.administrator ? " · ADMINISTRATOR — refused" : " · non-admin"}`
+				? `${service.account || "agentb-svc"} · ${serviceAccountStatus.enabled ? "enabled" : "disabled"}${serviceAccountStatus.administrator ? " · ADMINISTRATOR — refused" : " · non-admin"}`
 				: "not created";
 	const setupAction = serviceAccountStatus.exists ? "reset" : "create";
 	const setupLabel = serviceAccountBusy
 		? "Waiting for Windows UAC…"
 		: serviceAccountStatus.exists
-			? "Reset password + enable"
-			: "Create account + enable";
+			? "Reset password"
+			: "Create account";
 	const setupDisabled = serviceAccountBusy || !serviceAccountStatus.loaded || !serviceAccountStatus.supported || serviceAccountStatus.administrator;
-	const profile = store.servers.find((item) => item.id === active?.server_id) || store.servers[0];
+	const profile = store.servers.find((item) => item.id === selectedHardeningServerID());
 	const protectionReady = hardeningStatus.acl?.applied && hardeningStatus.firewall?.applied;
 	const protectionState = !hardeningStatus.loaded
 		? "checking host protections…"
@@ -309,41 +363,54 @@ function shell(active) {
 				: `${hardeningStatus.acl?.summary || "ACL not applied"} · ${hardeningStatus.firewall?.summary || "firewall not applied"}`;
 	const canApply = !hardeningBusy && !serviceAccountBusy && service.enabled && credential.stored && serviceAccountStatus.exists && !serviceAccountStatus.administrator && !!profile;
 	const canInspect = !hardeningBusy && hardeningStatus.loaded && hardeningStatus.supported && serviceAccountStatus.exists;
-  return `${text("shell.command", "command", (store.config.shell?.command || []).join(" "), "command")}
-    ${toggle("shell.service_account.enabled", "service identity", service.enabled)}
-    ${text("shell.service_account.account", "account", service.account || "agentb-svc")}
-    ${text("shell.service_account.domain", "domain", service.domain || ".")}
-    <div class="settings-subhead">Local Windows account</div>
+  return `<div class="settings-subhead">Service identity</div>
     ${row("status", `<span class="account-status"><span class="lamp ${serviceAccountStatus.administrator ? "alarm" : serviceAccountStatus.exists ? "live" : ""}"></span>${html(accountState)}</span>`)}
+    ${row("credential", `<span class="account-status">${html(stored)}</span>`)}
     ${row("new password", `<input id="service-account-setup-password" type="password" autocomplete="new-password" aria-label="New service-account password" ${setupDisabled ? "disabled" : ""}>`)}
     ${row("repeat", `<input id="service-account-setup-confirmation" type="password" autocomplete="new-password" aria-label="Repeat new service-account password" ${setupDisabled ? "disabled" : ""}>`)}
     <div class="settings-actions">
       <button type="button" data-action="setup-service-account" data-setup-action="${setupAction}" ${setupDisabled ? "disabled" : ""}>${setupLabel}</button>
+      <button type="button" data-action="test-shell-credential" ${serviceAccountBusy || !credential.stored ? "disabled" : ""}>Test identity</button>
       <button type="button" data-action="refresh-service-account" ${serviceAccountBusy ? "disabled" : ""}>Refresh</button>
     </div>
-    ${serviceAccountMessage ? `<p class="settings-note ${serviceAccountAlarm ? "alarm" : ""}">${html(serviceAccountMessage)}</p>` : ""}
-    <p class="settings-note">Windows shows UAC for the setup script; AgentB itself stays non-elevated. Passwords must match and contain at least 14 characters.</p>
-    <div class="settings-subhead">Stored credential</div>
-    ${row("password", '<input id="shell-service-password" type="password" autocomplete="new-password" aria-label="Service-account credential">')}
-    <p class="settings-note">write-only credential: ${html(stored)}</p>
-    <div class="settings-actions">
-      <button type="button" data-action="store-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Store</button>
-      <button type="button" data-action="test-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Test</button>
-      <button type="button" data-action="clear-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Clear</button>
-    </div>
-    ${shellCredentialMessage ? `<p class="settings-note">${html(shellCredentialMessage)}</p>` : ""}
+    ${feedback(serviceAccountMessage, serviceAccountAlarm, "Create or reset the non-admin Windows account. Windows will request approval.")}
 	<div class="settings-subhead">Host protections</div>
 	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
-	${row("model route", `<code>${html(profile?.base_url || "no selected model profile")}</code>`)}
+	${row("model route", `<select id="hardening-server" aria-label="Model route for host protections">${hardeningProfiles()}</select>`)}
 	<div class="settings-actions">
 	  <button type="button" data-action="apply-hardening" ${canApply ? "" : "disabled"}>Apply + verify</button>
 	  <button type="button" data-action="verify-hardening" ${canInspect ? "" : "disabled"}>Verify</button>
 	  <button type="button" data-action="refresh-hardening" ${hardeningBusy ? "disabled" : ""}>Refresh</button>
 	  <button type="button" class="${armed.has("hardening:remove") ? "confirm" : ""}" data-action="remove-hardening" ${canInspect ? "" : "disabled"}>${armed.has("hardening:remove") ? "Confirm remove" : "Remove"}</button>
 	</div>
-	${hardeningMessage ? `<p class="settings-note ${hardeningAlarm ? "alarm" : ""}">${html(hardeningMessage)}</p>` : ""}
-	<p class="settings-note">Apply uses one Windows UAC prompt. It makes the application tree read-only to the service identity, leaves only the workspace writable, and blocks that identity's outbound traffic except loopback and Tailscale ranges.</p>
-	<p class="settings-note">changes apply to new shell calls; reapply protections after updating or rebuilding AgentB</p>`;
+	${feedback(hardeningMessage, hardeningAlarm, "Apply requests Windows approval, protects the application tree, and leaves the workspace writable.")}
+    <details class="settings-advanced">
+      <summary>Advanced</summary>
+      ${toggle("shell.service_account.enabled", "service identity", service.enabled)}
+      ${text("shell.command", "shell command", (store.config.shell?.command || []).join(" "), "command")}
+      ${text("shell.service_account.account", "account", service.account || "agentb-svc")}
+      ${text("shell.service_account.domain", "domain", service.domain || ".")}
+      ${row("store credential", '<input id="shell-service-password" type="password" autocomplete="new-password" aria-label="Service-account credential">')}
+      <div class="settings-actions">
+        <button type="button" data-action="store-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Store credential</button>
+        <button type="button" data-action="clear-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Clear credential</button>
+      </div>
+      ${feedback(shellCredentialMessage, shellCredentialAlarm, "Credentials are encrypted for this Windows user and never returned to the browser.")}
+    </details>`;
+}
+
+function feedback(message, alarm, fallback) {
+	const value = message || fallback || "";
+	return `<p class="settings-feedback ${alarm ? "alarm" : ""}" role="status" title="${attr(value)}">${html(value)}</p>`;
+}
+
+function hardeningProfiles() {
+	const selected = selectedHardeningServerID();
+	const options = store.servers
+		.filter((profile) => !profileReason(profile))
+		.map((profile) => `<option value="${attr(profile.id)}" ${profile.id === selected ? "selected" : ""}>${html(profile.label)} · ${html(profile.base_url)}</option>`)
+		.join("");
+	return options || '<option value="">No ready connection</option>';
 }
 
 function sessionControls(active) {
@@ -413,7 +480,12 @@ async function click(event) {
   if (!button) return;
   const action = button.dataset.action;
   const id = button.dataset.id;
-  if (action === "close") return closeSheet();
+  if (action === "close") return closeSettings();
+  if (action === "settings-section") {
+    activeSection = id;
+    history.replaceState(null, "", `#settings/${activeSection}`);
+    return render();
+  }
   if (action === "profile-toggle") {
     expanded.has(id) ? expanded.delete(id) : expanded.add(id);
     return render();
@@ -464,10 +536,14 @@ async function click(event) {
   }
 }
 
-async function refreshServiceAccountStatus() {
+async function refreshServiceAccountStatus(preserveMessage = false) {
 	try {
 		const status = await api("/api/service-account", undefined, "GET");
 		serviceAccountStatus = { ...status, loaded: true };
+		if (!preserveMessage) {
+			serviceAccountMessage = "";
+			serviceAccountAlarm = false;
+		}
 	} catch (error) {
 		serviceAccountStatus = { loaded: true, supported: false, exists: false, administrator: false };
 		serviceAccountMessage = error.message;
@@ -477,10 +553,14 @@ async function refreshServiceAccountStatus() {
 }
 
 function selectedHardeningServerID() {
-	return store.sessions[store.active]?.server_id || store.servers[0]?.id || "";
+	const ready = store.servers.filter((profile) => !profileReason(profile));
+	if (ready.some((profile) => profile.id === hardeningServerID)) return hardeningServerID;
+	const activeID = store.sessions[store.active]?.server_id;
+	hardeningServerID = ready.some((profile) => profile.id === activeID) ? activeID : ready[0]?.id || "";
+	return hardeningServerID;
 }
 
-async function refreshHardeningStatus() {
+async function refreshHardeningStatus(preserveMessage = false) {
 	const serverID = selectedHardeningServerID();
 	if (!serverID) {
 		hardeningStatus = { loaded: true, supported: true, applied: false };
@@ -492,9 +572,12 @@ async function refreshHardeningStatus() {
 	try {
 		const status = await api(`/api/hardening?server_id=${encodeURIComponent(serverID)}`, undefined, "GET");
 		hardeningStatus = { ...status, loaded: true };
-		hardeningAlarm = false;
+		if (!preserveMessage) {
+			hardeningMessage = "";
+			hardeningAlarm = false;
+		}
 	} catch (error) {
-		hardeningStatus = { loaded: true, supported: false, applied: false };
+		hardeningStatus = { loaded: true, supported: true, applied: false };
 		hardeningMessage = error.message;
 		hardeningAlarm = true;
 	}
@@ -517,7 +600,7 @@ async function hardeningAction(action) {
 	} catch (error) {
 		hardeningMessage = error.message;
 		hardeningAlarm = true;
-		await refreshHardeningStatus();
+		await refreshHardeningStatus(true);
 	} finally {
 		hardeningBusy = false;
 		if (open) render();
@@ -557,7 +640,7 @@ async function setupServiceAccount(action) {
 		if (error.data?.credential) store.shell_credential = error.data.credential;
 		serviceAccountMessage = error.message;
 		serviceAccountAlarm = true;
-		await refreshServiceAccountStatus();
+		await refreshServiceAccountStatus(true);
 	} finally {
 		serviceAccountBusy = false;
 		if (open) render();
@@ -572,8 +655,10 @@ async function storeShellCredential() {
 		const status = await api("/api/shell-credential", { action: "store", password });
 		store.shell_credential = status;
 		shellCredentialMessage = "credential stored";
+		shellCredentialAlarm = false;
 	} catch (error) {
 		shellCredentialMessage = error.message;
+		shellCredentialAlarm = true;
 	}
 	render();
 }
@@ -587,10 +672,18 @@ async function shellCredentialAction(action) {
 		} else {
 			store.shell_credential = result.credential || store.shell_credential;
 			store.shell_identity = result.identity || store.shell_identity;
-			shellCredentialMessage = result.message;
+			serviceAccountMessage = result.message;
+			serviceAccountAlarm = false;
 		}
+		shellCredentialAlarm = false;
 	} catch (error) {
-		shellCredentialMessage = error.message;
+		if (action === "test") {
+			serviceAccountMessage = error.message;
+			serviceAccountAlarm = true;
+		} else {
+			shellCredentialMessage = error.message;
+			shellCredentialAlarm = true;
+		}
 	}
 	render();
 }
@@ -619,6 +712,14 @@ async function blur(event) {
 }
 
 async function change(event) {
+  if (event.target.matches("#hardening-server")) {
+    hardeningServerID = event.target.value;
+    hardeningStatus = { loaded: false, supported: true, applied: false };
+    hardeningMessage = "";
+    render();
+    await refreshHardeningStatus();
+    return;
+  }
   const select = event.target.closest("[data-session-server]");
   if (!select) return;
   const id = select.dataset.sessionServer;
