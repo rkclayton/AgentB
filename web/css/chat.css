@@ -193,6 +193,31 @@
   box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.6);
   white-space: pre-wrap;
 }
+.chat-response-content {
+  display: grid;
+  align-content: start;
+  gap: 2px;
+}
+.chat-response-step {
+  min-width: 0;
+}
+.chat-response-answer {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(125, 135, 148, 0.28);
+}
+.chat-response-tool {
+  padding: 1px 0;
+}
+.chat-response-notice {
+  min-height: 20px;
+  padding-top: 2px;
+  color: var(--mute);
+  font-size: 12px;
+}
+.chat-response-notice.alarm {
+  color: var(--alarm);
+}
 .stream-caret {
   display: inline-block;
   width: 2px;

@@ -224,7 +224,27 @@ function buildEntries(session) {
   entries.unshift(...missing.reverse());
   const active = [...entries].reverse().find((entry) => entry.type === "agent" && !entry.done);
   if (session.run.partial && active && session.run.partial.length > active.text.length) active.text = session.run.partial;
-  return entries;
+  return groupResponses(entries);
+}
+
+function groupResponses(entries) {
+  const grouped = [];
+  let response = null;
+  let boundary = "orphan";
+  for (const entry of entries) {
+    if (entry.type === "user") {
+      grouped.push(entry);
+      boundary = entry.key;
+      response = null;
+      continue;
+    }
+    if (!response) {
+      response = { type: "response", key: `response:${boundary}`, items: [] };
+      grouped.push(response);
+    }
+    response.items.push(entry);
+  }
+  return grouped;
 }
 
 function messageCallDetails(messages) {
@@ -254,6 +274,7 @@ const noticeTypes = new Set([
 
 function renderEntry(session, entry) {
   if (entry.type === "notice") return renderNotice(session, entry);
+  if (entry.type === "response") return renderResponse(session, entry);
   const row = document.createElement("section");
   row.className = `chat-entry ${entry.type === "user" ? "chat-user" : entry.type === "tool" ? "tool-entry" : "chat-agent"}`;
   row.tabIndex = 0;
@@ -270,6 +291,46 @@ function renderEntry(session, entry) {
       const caret = document.createElement("span");
       caret.className = "stream-caret";
       content.append(caret);
+    }
+  }
+  row.append(content);
+  return row;
+}
+
+function renderResponse(session, entry) {
+  const row = document.createElement("section");
+  row.className = "chat-entry chat-agent chat-response";
+  row.tabIndex = 0;
+  row.append(speaker("agent"));
+  const content = document.createElement("div");
+  content.className = "chat-content chat-response-content";
+  for (const item of entry.items) {
+    if (item.type === "agent") {
+      const step = document.createElement("div");
+      step.className = "chat-response-step";
+      const tokens = item.reasoningTokens || Math.ceil((item.reasoning || "").length / 3.6);
+      if (tokens > 0 || (!item.done && item.reasoning)) step.append(thinking(item, tokens));
+      if (item.text) {
+        const answer = document.createElement("div");
+        answer.className = "chat-response-answer";
+        renderMarkdown(answer, item.text);
+        step.append(answer);
+      }
+      if (!item.done) {
+        const caret = document.createElement("span");
+        caret.className = "stream-caret";
+        step.append(caret);
+      }
+      content.append(step);
+    } else if (item.type === "tool") {
+      const step = document.createElement("div");
+      step.className = "chat-response-step chat-response-tool";
+      step.append(toolTick(item));
+      content.append(step);
+    } else if (item.type === "notice") {
+      const notice = noticeContent(session, item);
+      notice.classList.add("chat-response-notice");
+      content.append(notice);
     }
   }
   row.append(content);
@@ -338,22 +399,29 @@ function toolTick(entry) {
 }
 
 function renderNotice(session, entry) {
-  const event = entry.event;
-  const data = event.data || {};
   const row = document.createElement("div");
   row.className = "chat-entry chat-notice-row";
+  const content = noticeContent(session, entry);
+  if (content.classList.contains("alarm")) row.classList.add("alarm");
+  row.append(content);
+  return row;
+}
+
+function noticeContent(session, entry) {
+  const event = entry.event;
+  const data = event.data || {};
   const content = document.createElement("div");
   content.className = "chat-content";
   if (event.type === "run.stopped") {
     const reason = (data.reason || "").replaceAll("_", " ");
     content.textContent = `stopped: ${reason}${data.reason === "turn_ceiling" ? ` (${data.turns || session.run.max_turns})` : data.detail ? `, ${data.detail}` : ""}`;
-    if (data.reason !== "done") row.classList.add("alarm");
+    if (data.reason !== "done") content.classList.add("alarm");
   } else if (event.type === "run.queued") content.textContent = `waiting for a slot (position ${data.position})`;
   else if (event.type === "message.queued") content.textContent = `queued (${data.position})`;
   else if (event.type === "compaction") content.textContent = `compacted ${signed((data.after || 0) - (data.before || 0))} tokens`;
   else if (event.type === "workspace.conflict") {
     content.textContent = `conflict: ${data.path} written by ${data.other_label} ${data.age_s} s ago`;
-    row.classList.add("alarm");
+    content.classList.add("alarm");
   } else if (event.type === "memory.noted") content.textContent = "noted for next session";
   else if (event.type === "approval.required") {
     content.className += " chat-approval";
@@ -370,8 +438,7 @@ function renderNotice(session, entry) {
       }
     }
   }
-  row.append(content);
-  return row;
+  return content;
 }
 
 function renderComposer(session) {
