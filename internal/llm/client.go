@@ -252,6 +252,17 @@ func (c *Client) ApplyTemplate(ctx context.Context, messages []Message, tools []
 	if tools != nil {
 		body["tools"] = tools
 	}
+	control := c.profile.Reasoning.Control
+	if control == "auto" {
+		control = c.profile.Capabilities.ReasoningControl
+	}
+	if control == "chat_template_kwargs" {
+		kwargs := map[string]any{"enable_thinking": c.profile.Reasoning.Enabled, "preserve_thinking": c.profile.Reasoning.Preserve}
+		if contains(c.profile.Reasoning.ValidEfforts, c.profile.Reasoning.Effort) {
+			kwargs["reasoning_effort"] = c.profile.Reasoning.Effort
+		}
+		body["chat_template_kwargs"] = kwargs
+	}
 	raw, status, err := c.DoJSON(ctx, http.MethodPost, "/apply-template", body)
 	if err != nil {
 		return "", err
