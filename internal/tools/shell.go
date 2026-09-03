@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	pathpkg "path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -212,6 +214,10 @@ func permissionDeniedOutput(output string) bool {
 
 func (s *Shell) TestServiceAccount(ctx context.Context) (string, error) {
 	cfg, workspace := s.configWithWorkspace()
+	workspace, err := usableShellWorkspace(workspace)
+	if err != nil {
+		return "service-account working directory is unavailable", err
+	}
 	if s.credential == nil {
 		return "service-account credential is not configured", errors.New("service-account credential is not configured")
 	}
@@ -290,14 +296,34 @@ func (s *Shell) setIdentity(status ShellIdentityStatus) {
 }
 
 func (s *Shell) Configure(value config.Config) {
+	workspace := value.Workspace
+	if absolute, err := filepath.Abs(workspace); err == nil {
+		workspace = absolute
+	}
 	s.mu.Lock()
 	s.cfg = value.Shell
-	s.workspace = value.Workspace
+	s.workspace = workspace
 	s.mu.Unlock()
 	if !value.Shell.ServiceAccount.Enabled {
 		s.setIdentity(ShellIdentityStatus{})
 	}
 }
+
+func usableShellWorkspace(workspace string) (string, error) {
+	absolute, err := filepath.Abs(workspace)
+	if err != nil {
+		return "", fmt.Errorf("resolve shell workspace: %w", err)
+	}
+	info, err := os.Stat(absolute)
+	if err != nil {
+		return "", fmt.Errorf("open shell workspace %q: %w", absolute, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("shell workspace %q is not a directory", absolute)
+	}
+	return absolute, nil
+}
+
 func (s *Shell) config() config.Shell { s.mu.RLock(); defer s.mu.RUnlock(); return s.cfg }
 func (s *Shell) configWithWorkspace() (config.Shell, string) {
 	s.mu.RLock()

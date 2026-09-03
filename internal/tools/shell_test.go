@@ -138,6 +138,32 @@ func TestShellServiceAccountSuccessClearsPersistentIdentityAlarm(t *testing.T) {
 	}
 }
 
+func TestShellServiceAccountTestResolvesRelativeWorkspace(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	if err := os.Mkdir(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	cfg := config.Defaults(workspace).Shell
+	cfg.ServiceAccount.Enabled = true
+	shell := NewShell(cfg)
+	shell.Configure(config.Config{Workspace: "./workspace", Shell: cfg})
+	shell.SetCredentialStore(presentShellCredential{})
+	var received string
+	shell.startService = func(_ string, _ []string, got string, _ []string, _ config.ShellServiceAccount, _ []byte, _ *lockedBuffer) (runningShellProcess, error) {
+		received = got
+		return completedShellProcess{}, nil
+	}
+	message, err := shell.TestServiceAccount(context.Background())
+	if err != nil || !strings.Contains(message, "succeeded") {
+		t.Fatalf("message=%q err=%v", message, err)
+	}
+	if received != workspace || !filepath.IsAbs(received) {
+		t.Fatalf("service-account working directory = %q, want absolute %q", received, workspace)
+	}
+}
+
 func TestShellServicePermissionDenialOffersOperatorOverride(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root).Shell
