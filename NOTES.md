@@ -60,3 +60,11 @@
 - Repeating the same successful read published `cycle.detected` and stopped `cycle`. With the window set to `0`, the repeated reads continued to the two-turn ceiling. Three distinct failed reads stopped `tool_errors` with the last error in `detail`.
 - `approval.mode=mutating` paused a live write, published `approval.required`, and resumed through `/api/approve`; mode was restored to `off`. With queue depth `2`, two messages queued in order, the first started automatically, and stopping it discarded the second with `discarded 1 queued message(s)`.
 - A two-second shell timeout returned after 2.079 seconds and killed its spawned child; the child's delayed marker was still absent nine seconds later. `shell` is not a security boundary: OS-level sandboxing remains deferred, as do compaction, exact accounting, memory, settings, chat, and replay.
+
+## Prompt 7
+
+- The active-session State well now renders live and synthetic schema rows, exact/estimated token counts, all seven category filters, elision styling, expandable content, and collapsed reasoning details. The Timeline groups model calls with tool sub-rows and renders approval, conflict, message/run queue, compaction, and stop entries.
+- Headless Chromium verified 16 mounted State rows (15 messages plus schemas), three model rows, two tool rows, Plex Mono expansion blocks, fixed body overflow, and expansion state surviving an A/main/A tab round trip. Every JavaScript module passes `node --check` and the page reported no script or resource failures beyond the ignored browser favicon request.
+- A live conflict emitted while the page was connected appeared in both A and B timelines with the same path, writer label, session ids, and age. A live mutating call showed `paused`; clicking the Timeline's Approve control produced `approve`, resumed the run, and mode was restored to `off`.
+- The earlier queue-depth exercise renders both `message.queued` ledger rows and the later runs in order. Cycle and tool-error stop rows retain Alarm state until the next run, paused dispatch holds Trace, and a conflict flashes the active tool lamp for 600 ms.
+- Defaults were retained. Deferred as scoped: compaction production, exact accounting, memory, settings, `/chat`, and replay.
