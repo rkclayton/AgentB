@@ -1,5 +1,56 @@
 # Implementation notes
 
+## Prompt 12 — repo audit
+
+Audit performed before changing the worktree. This is a Git repository rooted at `C:\projects\AgentB`. It has remote `origin` at `https://github.com/rkclayton/AgentB.git`, and history has been pushed: local `main`, `origin/main`, and the remote-advertised `refs/heads/main` all pointed to `6f92ba3247f2eecafbae48ff899e07d6f21830e1` at audit time.
+
+The following requested paths have been committed and pushed:
+
+- `harness.json`
+  - added by `7a0ea34203bc497f03980e7c5f13fb49f2c9b8d8` (`feat: establish harness foundation`)
+  - modified by `d2165ea8549971a0776b36b29faa3633ebc3a223` (`docs: record verified harness foundation`)
+  - both historical versions have `servers[local].api_key` present but empty. The config format stores a nonempty API key as plaintext on disk even though API responses mask it; this audit found no nonempty key in the committed `harness.json` versions.
+- Reliability-canary implementation fixture JSONLs, added by `5bf91153206527c96532be20cd4c65a056cff912` (`feat: add model reliability canary`):
+  - `serve/probes/reliability/testdata/score/fail.jsonl`
+  - `serve/probes/reliability/testdata/score/pass.jsonl`
+- Reliability-canary run directory, added by `86a01ab029d69347d76b5a22633824fd0757dce5` (`test: qualify model reliability verdict`):
+  - `serve/probes/reliability/runs/c1/add-1.jsonl`
+  - `serve/probes/reliability/runs/c1/add-2.jsonl`
+  - `serve/probes/reliability/runs/c1/add-3.jsonl`
+  - `serve/probes/reliability/runs/c1/fix-1.jsonl`
+  - `serve/probes/reliability/runs/c1/fix-2.jsonl`
+  - `serve/probes/reliability/runs/c1/fix-3.jsonl`
+  - `serve/probes/reliability/runs/c1/score.md`
+  - `serve/probes/reliability/runs/c2/add-1.jsonl`
+  - `serve/probes/reliability/runs/c2/add-2.jsonl`
+  - `serve/probes/reliability/runs/c2/add-3.jsonl`
+  - `serve/probes/reliability/runs/c2/fix-1.jsonl`
+  - `serve/probes/reliability/runs/c2/fix-2.jsonl`
+  - `serve/probes/reliability/runs/c2/fix-3.jsonl`
+  - `serve/probes/reliability/runs/c2/score.md`
+  - `serve/probes/reliability/runs/summary.json`
+- `serve/probes/samples/stream-toolcall.txt`, added by `e26284c7382fb9efc3780debcbeeea04e1b16750` (`feat: verify and pin local model serving`).
+- `SERVING.md`
+  - added by `e26284c7382fb9efc3780debcbeeea04e1b16750`
+  - modified by `86a01ab029d69347d76b5a22633824fd0757dce5`
+  - modified by `bb8c4f4cc72936a308945472935b53ab532f90eb` (`docs: verify HOMEPC tailnet inference`)
+- `NOTES.md`
+  - added by `e26284c7382fb9efc3780debcbeeea04e1b16750`
+  - modified by `86a01ab029d69347d76b5a22633824fd0757dce5`
+  - modified by `d2165ea8549971a0776b36b29faa3633ebc3a223`
+  - modified by `bf63b81222e0fd9fd2b057b8a6064e3a91d55e59` (`docs: record live agent loop verification`)
+  - modified by `18490efbc7897d00ec8ecdb7468bfb1666de1101` (`docs: record frontend verification`)
+  - modified by `6e7ba4fc37d7be87b4694379b584e9876dc1ca81` (`docs: record guarded tool verification`)
+  - modified by `f67352f72f12ac2e1609cdf24656cc0113e8c7be` (`docs: record panel verification`)
+  - modified by `35a046bca8315638ff6285b98d0439ef07b872f8` (`docs: record accounting and memory verification`)
+  - modified by `d68b5111086a7a79059da67cc9de50bb9105f006` (`docs: record settings verification`)
+  - modified by `296d7bd4ad71ab425f4f59941c9968a0a3c02f6a` (`docs: finish AgentB operating guide`)
+  - modified by `bb8c4f4cc72936a308945472935b53ab532f90eb`
+
+No path under `logs/` or `memory/` has ever been committed on any reachable ref. Therefore the live `logs/*.jsonl` files containing verbatim model requests/responses, file reads, and shell results are currently untracked rather than present in Git history. The committed reliability-run JSONLs do contain the canary's request bodies and tool results, and `.gitignore` cannot remove those existing blobs from history.
+
+Because listed JSONLs and `harness.json` are already in pushed history, removing them from all history requires either (1) a coordinated `git filter-repo` rewrite followed by force-pushing every rewritten ref and replacing or carefully rebasing every existing clone, or (2) creating a fresh repository from a sanitized tree and retiring the current repository. No history rewrite has been run; owner choice is required first.
+
 ## Prompt 1 assumptions and deviations
 
 - HOMEPC is the target serving machine. Work was performed remotely over Tailscale and Windows OpenSSH because the repository workspace is on another Windows machine.
