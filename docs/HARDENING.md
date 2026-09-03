@@ -12,7 +12,7 @@ AgentB gives alternate-identity shell children only Windows system paths, a work
 
 ## 2. Create and verify the service identity
 
-In Settings → Security, enter a new password twice under **Service identity**, select **Create account**, and approve the Windows UAC prompt you initiated. The default local account is `agentb-svc`; its advanced account and domain fields are available only when a different identity is intentional.
+In Settings → Security, enter a new password twice under **Service identity**, select **Create account**, and respond if Windows presents a UAC prompt. The default local account is `agentb-svc`; its advanced account and domain fields are available only when a different identity is intentional.
 
 The helper creates a non-administrator local account, retains ordinary Users membership, validates the credential with Windows, stores the DPAPI credential, enables the identity split, and tests a no-op alternate-identity process. If the account already exists, the button becomes **Reset password**.
 
@@ -22,7 +22,7 @@ Run an approved `whoami` shell command and require the returned identity to end 
 
 ## 3. Apply host protections
 
-Stop active AgentB tasks. In Settings → Security → **Host protections**, confirm the displayed model route, select **Apply + verify**, and approve the single UAC prompt. The button remains disabled until the account exists, the credential is stored, and service identity is enabled. No prompt is expected when Security reports that AgentB itself is already elevated; running the whole harness elevated is not the normal operating mode.
+Stop active AgentB tasks. In Settings → Security → **Host protections**, confirm the displayed model route, select **Apply + verify**, and respond if Windows presents a UAC prompt. The button remains disabled until the account exists, the credential is stored, and service identity is enabled. No prompt is expected when Security reports that AgentB itself is already elevated; local UAC policy can also suppress consent for trusted Windows binaries. Trust the reported post-condition, not the presence of a dialog. Running the whole harness elevated is not the normal operating mode.
 
 The operation applies and immediately verifies both controls:
 

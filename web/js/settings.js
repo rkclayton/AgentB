@@ -358,7 +358,7 @@ function shell(active) {
 		? "checking process elevation…"
 		: hardeningStatus.harness_elevated
 			? "already elevated · Windows will not show UAC"
-			: "standard user token · Windows will request UAC";
+			: "standard user token · Windows may request UAC";
 	const protectionState = !hardeningStatus.loaded
 		? "checking host protections…"
 		: !hardeningStatus.supported
@@ -378,7 +378,7 @@ function shell(active) {
       <button type="button" data-action="test-shell-credential" ${serviceAccountBusy || !credential.stored ? "disabled" : ""}>Test identity</button>
       <button type="button" data-action="refresh-service-account" ${serviceAccountBusy ? "disabled" : ""}>Refresh</button>
     </div>
-    ${feedback(serviceAccountMessage, serviceAccountAlarm, "Create or reset the non-admin Windows account. Windows will request approval.")}
+    ${feedback(serviceAccountMessage, serviceAccountAlarm, "Create or reset the non-admin Windows account. Windows may request approval.")}
 	<div class="settings-subhead">Host protections</div>
 	${row("AgentB", `<span class="account-status ${hardeningStatus.harness_elevated ? "alarm" : ""}">${html(elevationState)}</span>`)}
 	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
@@ -598,7 +598,7 @@ async function hardeningAction(action) {
 		? "Verifying ACL and outbound policy…"
 		: hardeningStatus.harness_elevated
 			? "AgentB is already elevated; applying directly without a UAC prompt."
-			: "Approve the Windows UAC prompt to update host protections.";
+			: "Windows elevation requested. Respond if a UAC prompt appears.";
 	render();
 	try {
 		const result = await api("/api/hardening", { action, server_id: serverID });
