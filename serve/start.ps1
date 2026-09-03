@@ -7,6 +7,7 @@ param(
     [string]$KV_TYPE = 'q8_0',
     [ValidateRange(1, 65535)]
     [int]$PORT = 8080,
+    [string]$BIND_ADDRESS = '127.0.0.1',
     [ValidateSet('on', 'off')]
     [string]$MTP = 'off',
     [ValidateSet('on', 'off')]
@@ -30,7 +31,7 @@ if (-not (Test-Path -LiteralPath $MODEL_PATH -PathType Leaf)) {
 $serverArgs = @(
     '-m', $MODEL_PATH,
     '--alias', 'qwen3.8-27b',
-    '--host', '127.0.0.1',
+    '--host', $BIND_ADDRESS,
     '--port', [string]$PORT,
     '-c', [string]$CTX,
     '-ngl', '99',
@@ -74,7 +75,7 @@ if ($MTP -eq 'on') {
     }
 }
 
-Write-Host "Starting llama-server on http://127.0.0.1:$PORT"
+Write-Host "Starting llama-server on http://${BIND_ADDRESS}:$PORT"
 Write-Host "Model: $MODEL_PATH"
 Write-Host "Context: $CTX; KV: $KV_TYPE; MTP: $MTP; token embedding on CPU: $TOKEN_EMBEDDING_CPU; fit: $FIT"
 & $LLAMA_SERVER @serverArgs
