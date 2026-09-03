@@ -18,7 +18,25 @@
       "reasoning": { "control": "auto", "enabled": true, "effort": "medium", "valid_efforts": [], "preserve": false },
       "context": { "n_ctx_override": 0, "reserve_output": 10240 },
       "system_prompt_override": "",
-      "capabilities": {}
+      "capabilities": {
+        "server": "",
+        "props": false,
+        "n_ctx": 0,
+        "tokenize": false,
+        "apply_template": false,
+        "apply_template_tools": false,
+        "streaming": false,
+        "tool_calls": false,
+        "grammar_constrained": false,
+        "cached_tokens": false,
+        "timings": false,
+        "prompt_progress": false,
+        "reasoning_control": "",
+        "valid_efforts": [],
+        "overflow_behavior": "",
+        "probed_at": "",
+        "findings": []
+      }
     }
   ],
   "run": { "max_turns": 40, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },

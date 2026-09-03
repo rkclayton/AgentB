@@ -24,3 +24,12 @@
 - C1 (`UD-Q3_K_XL`, 32K) and C2 (`UD-IQ4_XS`, 16K) each passed 6/6 trials. The prescribed tie rule retains C1. C2 loaded with `--fit off` and did not need partial offload.
 - C2 was downloaded directly from `unsloth/Qwen3.8-27B-GGUF` with `curl` and is 14,252,845,984 bytes. The end-to-end runner wall time was 18.51 minutes, of which about 15.8 minutes was the 13.27 GiB download.
 - The final C1 rerun passed canaries 1, 2, and 8 at 32,768 context: health HTTP 200, overflow HTTP 400, 1,729.75 prompt tok/s, and 50.27 generated tok/s.
+
+## Prompt 3
+
+- The harness foundation uses Go 1.27.1 with only the standard library. It binds to `127.0.0.1:8790`, uses `E:\AgentB\sandbox`, creates session `main`, masks API keys, and persists per-session/global JSONL.
+- The full `local` probe found: `props` and 32,768 context; tokenizer and plain/tool template application; cached-token accounting and timings; streaming and prompt progress; native grammar-constrained tool calls; `chat_template_kwargs` reasoning with `low, medium, xhigh`; and overflow errors.
+- Minimal mode was exercised and updated `probed_at` while explicitly marking generated-token checks as assumed. Full mode was restored. SSE delivered `snapshot`, `server.probed`, and session events.
+- v1 migration was exercised with a Windows UTF-8 BOM: old keys were removed, the profile became `servers[local]`, profile context values and global thresholds were preserved, and the required migration log line was emitted.
+- Session create/close, unreachable-profile probing, the `context length unknown` degradation reason, deep config merge, profile removal, and all prompt-3 501 stubs were verified on HOMEPC.
+- Deferred exactly as scoped: agent loop, tools, scheduler, system-prompt template, full frontend, memory, compaction, and replay.

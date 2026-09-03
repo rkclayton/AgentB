@@ -15,10 +15,42 @@
         "thinking": { "temperature": 0.6, "top_p": 0.95, "top_k": 20, "min_p": 0.0, "presence_penalty": 0.0, "repeat_penalty": 1.0 },
         "nonthinking": { "temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5, "repeat_penalty": 1.0 }
       },
-      "reasoning": { "control": "auto", "enabled": true, "effort": "medium", "valid_efforts": [], "preserve": false },
+      "reasoning": { "control": "auto", "enabled": true, "effort": "medium", "valid_efforts": ["low", "medium", "xhigh"], "preserve": false },
       "context": { "n_ctx_override": 0, "reserve_output": 10240 },
       "system_prompt_override": "",
-      "capabilities": {}
+      "capabilities": {
+        "server": "llama.cpp",
+        "props": true,
+        "n_ctx": 32768,
+        "tokenize": true,
+        "apply_template": true,
+        "apply_template_tools": true,
+        "streaming": true,
+        "tool_calls": true,
+        "grammar_constrained": true,
+        "cached_tokens": true,
+        "timings": true,
+        "prompt_progress": true,
+        "reasoning_control": "chat_template_kwargs",
+        "valid_efforts": ["low", "medium", "xhigh"],
+        "overflow_behavior": "error",
+        "probed_at": "2026-09-03T04:50:40Z",
+        "findings": [
+          "props: available; server llama.cpp; n_ctx 32768",
+          "tokenize: available",
+          "apply-template: available",
+          "apply-template tools: available",
+          "cached tokens: available",
+          "timings: available",
+          "streaming: available",
+          "prompt progress: available",
+          "tool calls: available",
+          "grammar constrained: available",
+          "reasoning control: chat_template_kwargs",
+          "valid efforts: low, medium, xhigh",
+          "overflow: error"
+        ]
+      }
     }
   ],
   "run": { "max_turns": 40, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },
