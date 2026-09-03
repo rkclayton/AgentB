@@ -1,0 +1,9 @@
+# Local remote-access material and machine-specific probe output.
+.remote/
+serve/logs/
+*.log
+
+# Models and generated binaries never belong in source control.
+*.gguf
+*.exe
+*.dll
