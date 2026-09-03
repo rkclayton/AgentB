@@ -27,12 +27,14 @@ type Server struct {
 	scheduler  *agent.Scheduler
 	runner     *agent.Runner
 	prompt     *agent.PromptRenderer
+	replay     *events.Replay
 }
 
 func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
 	return &Server{cfg: cfg, configPath: path, webDir: webDir, bus: bus}
 }
 func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry }
+func (s *Server) SetReplay(replay *events.Replay)        { s.replay = replay }
 func (s *Server) SetRuntime(scheduler *agent.Scheduler, runner *agent.Runner, prompt *agent.PromptRenderer) {
 	s.scheduler = scheduler
 	s.runner = runner
@@ -57,29 +59,43 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(s.webDir))))
 	mux.HandleFunc("/api/events", s.sse)
 	mux.HandleFunc("/api/state", s.state)
-	mux.HandleFunc("/api/sessions", s.sessions)
-	mux.HandleFunc("/api/sessions/", s.session)
+	mux.HandleFunc("/api/sessions", s.replayGuard(s.sessions))
+	mux.HandleFunc("/api/sessions/", s.replayGuard(s.session))
 	mux.HandleFunc("/api/servers", s.servers)
-	mux.HandleFunc("/api/servers/", s.server)
-	mux.HandleFunc("/api/config", s.config)
-	mux.HandleFunc("/api/message", s.message)
-	mux.HandleFunc("/api/stop", s.stop)
-	mux.HandleFunc("/api/approve", s.approve)
-	mux.HandleFunc("/api/tools/", s.toggleTool)
+	mux.HandleFunc("/api/servers/", s.replayGuard(s.server))
+	mux.HandleFunc("/api/config", s.replayGuard(s.config))
+	mux.HandleFunc("/api/message", s.replayGuard(s.message))
+	mux.HandleFunc("/api/stop", s.replayGuard(s.stop))
+	mux.HandleFunc("/api/approve", s.replayGuard(s.approve))
+	mux.HandleFunc("/api/tools/", s.replayGuard(s.toggleTool))
 	return mux
 }
 
-func (s *Server) snapshot() map[string]any {
-	sessions := map[string]session.Snapshot{}
-	if s.registry != nil {
-		for _, item := range s.registry.List() {
-			sessions[item.ID] = item.Snapshot(s.bus.Recent(item.ID))
+func (s *Server) replayGuard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.replay != nil && r.Method != http.MethodGet {
+			writeJSON(w, http.StatusConflict, map[string]string{"error": "replay mode"})
+			return
 		}
+		next(w, r)
 	}
+}
+
+func (s *Server) snapshot() map[string]any {
+	if s.replay != nil {
+		return s.snapshotWithSessions(s.replay.Sessions, true)
+	}
+	sessions := map[string]session.Snapshot{}
+	for _, item := range s.registry.List() {
+		sessions[item.ID] = item.Snapshot(s.bus.Recent(item.ID))
+	}
+	return s.snapshotWithSessions(sessions, false)
+}
+func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any {
 	s.mu.RLock()
 	masked := s.cfg.Masked()
 	s.mu.RUnlock()
-	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "serving_facts": servingFacts("SERVING.md"), "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Save a durable workspace note."}}}
+	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "replay": replay, "serving_facts": servingFacts("SERVING.md"), "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Save a durable workspace note."}}}
 }
 
 func servingFacts(path string) map[string]any {
@@ -116,6 +132,10 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
+	if s.replay != nil {
+		s.replaySSE(w, r, flusher)
+		return
+	}
 	ch, unsubscribe := s.bus.Subscribe()
 	defer unsubscribe()
 	s.writeFrame(w, events.New(events.Snapshot, "", "", s.snapshot()))
@@ -130,6 +150,36 @@ func (s *Server) sse(w http.ResponseWriter, r *http.Request) {
 			}
 			s.writeFrame(w, event)
 			flusher.Flush()
+		case <-ticker.C:
+			fmt.Fprint(w, ": ping\n\n")
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+func (s *Server) replaySSE(w http.ResponseWriter, r *http.Request, flusher http.Flusher) {
+	s.writeFrame(w, events.New(events.Snapshot, "", "", s.snapshotWithSessions(s.replay.Initial, true)))
+	flusher.Flush()
+	instant := r.URL.Query().Get("instant") == "1"
+	for _, recorded := range s.replay.Events {
+		if !instant {
+			timer := time.NewTimer(20 * time.Millisecond)
+			select {
+			case <-timer.C:
+			case <-r.Context().Done():
+				timer.Stop()
+				return
+			}
+		}
+		s.writeFrame(w, recorded)
+		flusher.Flush()
+	}
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
 		case <-ticker.C:
 			fmt.Fprint(w, ": ping\n\n")
 			flusher.Flush()

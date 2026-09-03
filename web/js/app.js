@@ -20,6 +20,8 @@ subscribe(() => {
   const s = store.sessions[store.active],
     busy = s && s.run.status !== "idle";
   input.disabled = !!busy;
+	stop.hidden = !!store.replay;
+	document.getElementById("mode").textContent = store.replay ? "replay" : "";
   input.placeholder =
     s?.run.status === "queued"
       ? "Queued"
@@ -31,7 +33,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const s = store.sessions[store.active],
     text = input.value.trim();
-  if (!s || !text) return;
+  if (!s || !text || store.replay) return;
   input.value = "";
   try {
     await api("/api/message", { session_id: s.id, text });

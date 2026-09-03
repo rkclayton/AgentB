@@ -28,6 +28,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "harness.json", "configuration file")
+	replayPaths := flag.String("replay", "", "comma-separated session JSONL files to replay")
 	flag.Parse()
 	facts := readServingFacts("SERVING.md")
 	if facts.TokenizeBlocksOnSlot == "yes" {
@@ -39,6 +40,18 @@ func main() {
 	}
 	if migrated {
 		log.Printf("migrated %s: server → servers[local]", filepath.Base(*configPath))
+	}
+	if strings.TrimSpace(*replayPaths) != "" {
+		replay, loadErr := events.LoadReplay(strings.Split(*replayPaths, ","))
+		if loadErr != nil {
+			log.Fatal(loadErr)
+		}
+		web := webserver.New(cfg, *configPath, "web", events.NewBus())
+		web.SetReplay(replay)
+		if err := serve(cfg, web.Handler()); err != nil {
+			log.Fatal(err)
+		}
+		return
 	}
 	writers, err := events.NewWriters(cfg.LogDir)
 	if err != nil {
@@ -94,7 +107,13 @@ func main() {
 		log.Fatal(err)
 	}
 	runner.PublishBudget(context.Background(), mainSession)
-	httpServer := &http.Server{Addr: cfg.Listen, Handler: web.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	if err := serve(cfg, web.Handler()); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func serve(cfg *config.Config, handler http.Handler) error {
+	httpServer := &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	errors := make(chan error, 1)
 	go func() { log.Printf("AgentB listening on http://%s", cfg.Listen); errors <- httpServer.ListenAndServe() }()
 	signals := make(chan os.Signal, 1)
@@ -104,12 +123,12 @@ func main() {
 		log.Printf("stopping on %s", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		_ = httpServer.Shutdown(ctx)
+		return httpServer.Shutdown(ctx)
 	case err := <-errors:
 		if err != nil && err != http.ErrServerClosed {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
+			return err
 		}
+		return nil
 	}
 }
 

@@ -6,6 +6,7 @@ export const store = {
   flow: { stages: [], edges: [] },
   tools: [],
   serving_facts: {},
+  replay: false,
 };
 const listeners = new Set();
 export function subscribe(fn) {
@@ -22,6 +23,7 @@ function session(event) {
 function mergeRun(target, patch) {
   target.run = Object.assign({}, target.run, patch);
 }
+// Keep event-state changes synchronized with internal/events/ReduceReplay.
 export function reduce(event) {
   const data = event.data || {};
   if (event.type === "snapshot") {
@@ -38,6 +40,7 @@ export function reduce(event) {
   switch (event.type) {
     case "session.created":
       store.sessions[data.session.id] = data.session;
+	  if (store.replay) store.sessions[data.session.id].run.status = "replay";
       hydrate(data.session);
       if (!store.active) store.active = data.session.id;
       break;
@@ -52,7 +55,7 @@ export function reduce(event) {
       }
       break;
     case "session.closed":
-      delete store.sessions[data.session_id];
+	  if (!store.replay) delete store.sessions[data.session_id];
       if (store.active === data.session_id)
         store.active = Object.keys(store.sessions)[0] || "";
       break;
@@ -80,7 +83,7 @@ export function reduce(event) {
     case "run.queued":
       if (target)
         mergeRun(target, {
-          status: "queued",
+		  status: store.replay ? "replay" : "queued",
           run_id: data.run_id,
           queue_position: data.position,
         });
@@ -88,7 +91,7 @@ export function reduce(event) {
     case "run.started":
       if (target) {
         mergeRun(target, {
-          status: "running",
+		  status: store.replay ? "replay" : "running",
           run_id: data.run_id,
           turn: 0,
           queue_position: 0,
@@ -100,7 +103,7 @@ export function reduce(event) {
       break;
     case "run.stopped":
       if (target) {
-        mergeRun(target, { status: "idle", partial: "" });
+		mergeRun(target, { status: store.replay ? "replay" : "idle", partial: "" });
         target._lastStop = data.reason;
         target._stage = "wait_user";
         if (data.reason === "tool_errors") target._dispatchAlarm = true;
