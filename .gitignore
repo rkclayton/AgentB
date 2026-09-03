@@ -1,5 +1,6 @@
 # Local remote-access material and machine-specific probe output.
 .remote/
+.tools/
 serve/logs/
 serve/probes/results/
 *.log

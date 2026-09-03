@@ -11,6 +11,8 @@ param(
     [string]$MTP = 'off',
     [ValidateSet('on', 'off')]
     [string]$TOKEN_EMBEDDING_CPU = 'off',
+    [ValidateSet('on', 'off')]
+    [string]$FIT = 'off',
     [string]$LLAMA_SERVER = 'E:\llama\llama-server.exe',
     [string]$MTP_MODEL_PATH = 'E:\Models\Qwen3.8-27B\MTP\mtp-Qwen3.8-27B-Q4_0.gguf',
     [string]$LOG_FILE = ''
@@ -35,7 +37,7 @@ $serverArgs = @(
     '-fa', 'on',
     '-ctk', $KV_TYPE,
     '-ctv', $KV_TYPE,
-    '--fit', 'off',
+    '--fit', $FIT,
     '--no-mmproj',
     '--parallel', '1',
     '--jinja',
@@ -74,6 +76,6 @@ if ($MTP -eq 'on') {
 
 Write-Host "Starting llama-server on http://127.0.0.1:$PORT"
 Write-Host "Model: $MODEL_PATH"
-Write-Host "Context: $CTX; KV: $KV_TYPE; MTP: $MTP; token embedding on CPU: $TOKEN_EMBEDDING_CPU"
+Write-Host "Context: $CTX; KV: $KV_TYPE; MTP: $MTP; token embedding on CPU: $TOKEN_EMBEDDING_CPU; fit: $FIT"
 & $LLAMA_SERVER @serverArgs
 exit $LASTEXITCODE

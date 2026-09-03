@@ -1,0 +1,7 @@
+{"event":"request","turn":1,"task":"fix","body":{}}
+{"event":"response","turn":1,"status":200,"body":{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"function":{"name":"read_file","arguments":"{\"path\":\"calc/ops.go\"}"}}]}}]}}
+{"event":"tool","turn":1,"task":"fix","name":"read_file","args":{"path":"calc/ops.go"},"result":"package calc","ok":true}
+{"event":"response","turn":2,"status":200,"body":{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"function":{"name":"edit_file","arguments":"{}"}}]}}]}}
+{"event":"tool","turn":2,"task":"fix","name":"edit_file","args":{"path":"calc/ops.go"},"result":"ok: edited calc/ops.go","ok":true}
+{"event":"stop","reason":"text","turns":2}
+{"event":"final","task":"fix","check_exit":0,"check_output":"exit=0\nOK 5 checks"}
