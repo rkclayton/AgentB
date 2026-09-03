@@ -2,7 +2,9 @@
 
 These controls reduce the reach of AgentB's model-selected shell by keeping the harness under the operator identity while launching shell children under a dedicated local account, denying that account writes to selected control files, and documenting a safe outbound-firewall decision. They do not jail `shell`, inspect every process it starts, or contain a determined exploit. Treat them as blast-radius reduction on a dedicated Windows host, not as a sandbox.
 
-Run the commands below from Windows PowerShell opened with **Run as administrator**. Review every `-WhatIf` result before omitting that switch. The scripts never create or store a password; account setup prompts for it interactively only during a real creation.
+Run the commands below from Windows PowerShell opened with **Run as administrator**. Review every `-WhatIf` result before omitting that switch. The scripts never generate or store a password; account setup accepts it only through a non-echoing interactive prompt.
+
+Run every command that can prompt as a separate paste, and wait for it to finish before entering another command. The scripts now detect and drain queued console input, then abort, because a pasted following line could otherwise be consumed as a password or confirmation. Redirected/non-interactive input is also refused; there is intentionally no command-line password parameter.
 
 ## 1. Prepare AgentB
 
@@ -18,12 +20,31 @@ Preview, then create the default `agentb-svc` account:
 
 ```powershell
 .\scripts\setup-service-account.ps1 -WhatIf
+```
+
+Run this prompting command by itself:
+
+```powershell
 .\scripts\setup-service-account.ps1
 ```
 
 Use `-AccountName` consistently on all three scripts to choose another name. The script retains ordinary Users membership because removing it can break process launch, ensures a newly created account is not an Administrator, and grants no interactive or Remote Desktop logon rights. Do not configure AgentB itself to run under this account: `CreateProcessWithLogonW` launches only shell children and does not require an interactive logon right.
 
-Re-running account setup is an idempotent no-op when the account already exists. If that existing account is an Administrator, the script warns and leaves it unchanged; correct the membership before continuing.
+Re-running account setup without `-ResetPassword` leaves an existing account unchanged and prints a warning that its password is unknown and unverified. If that account is an Administrator, the script also warns; correct the membership before continuing.
+
+If the account exists but its password is unknown, preview the recovery path first. The preview still asks for two matching entries so the complete prompt path is checked, but `-WhatIf` applies nothing and skips credential validation:
+
+```powershell
+.\scripts\setup-service-account.ps1 -ResetPassword -WhatIf
+```
+
+Then run this prompting command by itself. It asks twice, rejects empty/short/command-shaped or mismatched entries, changes only a separate non-administrator service account, and validates the resulting credential with Windows `LogonUser` before reporting success:
+
+```powershell
+.\scripts\setup-service-account.ps1 -ResetPassword
+```
+
+Without `-ResetPassword`, an existing account is only reported as an unverified warning; its password is never silently changed or treated as known.
 
 ## 3. Store, enable, and test the credential
 
@@ -41,11 +62,21 @@ Stop AgentB. Preview the exact paths, apply the ACLs, and verify them:
 
 ```powershell
 .\scripts\apply-acls.ps1 -WhatIf
+```
+
+The real application uses PowerShell confirmations; run it by itself:
+
+```powershell
 .\scripts\apply-acls.ps1
+```
+
+After it finishes, verify separately:
+
+```powershell
 .\scripts\apply-acls.ps1 -Verify
 ```
 
-Use `-HarnessDirectory`, `-WorkspaceDirectory`, and `-MemoryDirectory` when your layout differs. The script adds explicit deny ACEs for control-surface writes while preserving inheritance and adds an explicit inheritable Modify allow ACE only to the workspace. Verification reports missing or changed managed ACEs and exits nonzero on enforceable drift. The current Prompt 16 script still leaves `logs/` writable and prints its now-obsolete shared-identity warning; revising that ACL policy is deliberately outside Prompt 17.
+Use `-HarnessDirectory`, `-WorkspaceDirectory`, and `-MemoryDirectory` when your layout differs. The script adds explicit deny ACEs for control-surface writes while preserving inheritance and adds an explicit inheritable Modify allow ACE only to the workspace. Verification reports missing or changed managed ACEs and exits nonzero on enforceable drift. The current Prompt 16 policy still leaves `logs/` and `memory/` unmanaged; it now reports that limitation without repeating the obsolete shared-identity claim.
 
 The protected surface is the harness directory entry and harness binary, `prompts/`, `harness.json`, existing `harness.*.json` files, `.git/`, `scripts/`, and `serve/`. An administrator remains able to update these paths.
 
@@ -65,6 +96,11 @@ If a future reviewed policy creates either reserved rule name, preview and perfo
 
 ```powershell
 .\scripts\apply-firewall-rule.ps1 -Remove -WhatIf
+```
+
+Run the potentially prompting removal by itself:
+
+```powershell
 .\scripts\apply-firewall-rule.ps1 -Remove
 ```
 
