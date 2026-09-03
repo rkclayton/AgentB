@@ -9,6 +9,9 @@ memory/
 !internal/memory/
 !internal/memory/*.go
 sandbox/
+!sandbox/
+sandbox/*
+!sandbox/go.mod
 serve/probes/reliability/runs/*/workspace-*/
 
 # Models and generated binaries never belong in source control.
