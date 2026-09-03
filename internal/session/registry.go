@@ -66,18 +66,9 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 			return nil, err
 		}
 	}
-	nctx := profile.Capabilities.NCtx
-	if nctx == 0 {
-		nctx = profile.Context.NCtxOverride
-	}
-	reserve := profile.Context.ReserveOutput
 	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}}
 	session.Messages = []events.Message{}
-	ceiling := nctx - reserve
-	if ceiling < 0 {
-		ceiling = 0
-	}
-	session.Budget = events.Budget{NCtx: nctx, Reserve: reserve, Ceiling: ceiling, Mode: "estimated", Estimated: true, EstimatedCategories: []string{}, Categories: map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "summary": 0}}
+	session.Budget = initialBudget(profile)
 	r.sessions[id] = session
 	r.bus.Publish(events.New(events.SessionCreated, id, "", map[string]any{"session": session.Snapshot(nil)}))
 	return session, nil
@@ -128,6 +119,58 @@ func (r *Registry) Rename(id, label string) error {
 	s.Label = label
 	s.mu.Unlock()
 	r.bus.Publish(events.New(events.SessionRenamed, id, "", map[string]any{"session_id": id, "label": label}))
+	return nil
+}
+func (r *Registry) SetServer(id, serverID string) error {
+	s, ok := r.Get(id)
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+	profile, ok := r.profiles(serverID)
+	if !ok {
+		return fmt.Errorf("server_id: unknown profile %s", serverID)
+	}
+	runnable, reason := runnable(profile, r.config().Context.Accounting)
+	if !runnable {
+		return fmt.Errorf("server_id: %s", reason)
+	}
+
+	s.mu.Lock()
+	if s.Run.Status != "idle" {
+		s.mu.Unlock()
+		return fmt.Errorf("session is running")
+	}
+	workspace := s.Workspace
+	memoryBlock, memoryPath := s.MemoryBlock, s.MemoryPath
+	s.mu.Unlock()
+
+	if r.memory != nil {
+		var err error
+		memoryBlock, memoryPath, err = r.memory(context.Background(), workspace, serverID)
+		if err != nil {
+			return err
+		}
+	}
+
+	s.mu.Lock()
+	if s.Run.Status != "idle" {
+		s.mu.Unlock()
+		return fmt.Errorf("session is running")
+	}
+	s.ServerID = serverID
+	s.Runnable, s.NotRunnableReason = true, ""
+	s.MemoryBlock, s.MemoryPath = memoryBlock, memoryPath
+	s.Budget = initialBudget(profile)
+	s.mu.Unlock()
+
+	r.bus.Publish(events.New(events.SessionUpdated, id, "", map[string]any{
+		"session_id":          id,
+		"server_id":           serverID,
+		"runnable":            true,
+		"not_runnable_reason": "",
+		"memory_path":         memoryPath,
+		"memory_content":      memoryBlock,
+	}))
 	return nil
 }
 func (r *Registry) Reset(id string) (string, error) {
@@ -199,6 +242,22 @@ func runnable(profile *config.Profile, accounting string) (bool, string) {
 		return false, "exact accounting requested but this server has no /tokenize"
 	}
 	return true, ""
+}
+
+func initialBudget(profile *config.Profile) events.Budget {
+	nctx := profile.Capabilities.NCtx
+	if nctx == 0 {
+		nctx = profile.Context.NCtxOverride
+	}
+	ceiling := nctx - profile.Context.ReserveOutput
+	if ceiling < 0 {
+		ceiling = 0
+	}
+	return events.Budget{
+		NCtx: nctx, Reserve: profile.Context.ReserveOutput, Ceiling: ceiling,
+		Mode: "estimated", Estimated: true, EstimatedCategories: []string{},
+		Categories: map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "summary": 0},
+	}
 }
 
 func (r *Registry) RefreshRunnable() {

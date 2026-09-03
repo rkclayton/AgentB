@@ -360,16 +360,44 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodPost:
 		var body struct {
-			Label string `json:"label"`
+			Label    *string `json:"label"`
+			ServerID *string `json:"server_id"`
 		}
 		if !decode(w, r, &body) {
 			return
 		}
-		if err := s.registry.Rename(id, body.Label); err != nil {
-			writeError(w, 404, err.Error(), "session")
+		if body.Label == nil && body.ServerID == nil {
+			writeError(w, 400, "label or server_id is required", "session")
 			return
 		}
-		writeJSON(w, 200, map[string]any{"session_id": id, "label": body.Label})
+		if body.ServerID != nil {
+			if err := s.registry.SetServer(id, *body.ServerID); err != nil {
+				status := http.StatusBadRequest
+				field := "server_id"
+				if strings.Contains(err.Error(), "not found") {
+					status, field = http.StatusNotFound, "session"
+				} else if strings.Contains(err.Error(), "running") {
+					status, field = http.StatusConflict, "session"
+				}
+				writeError(w, status, err.Error(), field)
+				return
+			}
+		}
+		if body.Label != nil {
+			if err := s.registry.Rename(id, *body.Label); err != nil {
+				writeError(w, 404, err.Error(), "session")
+				return
+			}
+		}
+		item, ok := s.registry.Get(id)
+		if !ok {
+			writeError(w, 404, "session not found", "session")
+			return
+		}
+		if body.ServerID != nil && s.runner != nil {
+			s.runner.PublishBudget(r.Context(), item)
+		}
+		writeJSON(w, 200, map[string]any{"session": item.Snapshot(nil)})
 	case http.MethodDelete:
 		err := s.registry.Close(id, r.URL.Query().Get("force") == "1")
 		if err != nil {

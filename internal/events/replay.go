@@ -175,6 +175,12 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 		}
 	case SessionRenamed:
 		item.Label = replayString(data["label"])
+	case SessionUpdated:
+		item.ServerID = replayString(data["server_id"])
+		item.Runnable = replayBool(data["runnable"])
+		item.NotRunnableReason = replayString(data["not_runnable_reason"])
+		item.MemoryPath = replayString(data["memory_path"])
+		item.MemoryContent = replayString(data["memory_content"])
 	case SessionReset:
 		item.Messages = []Message{}
 		item.Timeline = []Event{}

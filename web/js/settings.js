@@ -36,6 +36,7 @@ export function initSettings() {
         "server.probed",
         "session.created",
         "session.renamed",
+        "session.updated",
         "session.closed",
         "session.reset",
         "memory.noted",
@@ -93,13 +94,20 @@ function servers() {
       const failed = (profile.capabilities?.findings || []).some((x) =>
         x.startsWith("probe failed:"),
       );
+      const testState = profile._probing
+        ? "testing"
+        : failed
+          ? "failed"
+          : !reason && profile.capabilities?.probed_at
+            ? "ready"
+            : "not tested";
       const lamp = profile._probing ? "live" : failed || reason ? "alarm" : "";
       return `<div class="profile ${isOpen ? "expanded" : ""}">
         <div class="profile-row">
           <button type="button" class="profile-summary" data-action="profile-toggle" data-id="${attr(profile.id)}">
-            <span class="lamp ${lamp}"></span><span>${html(profile.label)}</span><span class="profile-url">${html(profile.base_url)}</span>
+            <span class="lamp ${lamp}"></span><span>${html(profile.label)}</span><span class="profile-url">${html(profile.base_url)}</span><span class="profile-state">${testState}</span>
           </button>
-          <button type="button" data-action="probe" data-id="${attr(profile.id)}">Test</button>
+          <button type="button" data-action="probe" data-id="${attr(profile.id)}" ${profile._probing ? "disabled" : ""}>${profile._probing ? "Testing…" : "Test"}</button>
         </div>
         <div class="profile-expansion"><div class="profile-fields">
           ${profileFields(profile, reason)}
@@ -161,12 +169,17 @@ function sessions() {
   const profiles = store.servers.filter((profile) => !profileReason(profile));
   const items = Object.values(store.sessions)
     .map((item) => {
-      const profile = store.servers.find((x) => x.id === item.server_id);
       const running = item.run.status !== "idle";
       const key = `session:${item.id}`;
+      const profileOptions = store.servers
+        .map((candidate) => {
+          const problem = profileReason(candidate);
+          return `<option value="${attr(candidate.id)}" ${candidate.id === item.server_id ? "selected" : ""} ${problem ? "disabled" : ""}>${html(candidate.label)}</option>`;
+        })
+        .join("");
       return `<div class="session-row">
         <input class="session-label" data-session-label="${attr(item.id)}" value="${attr(item.label)}" aria-label="${attr(item.id)} label">
-        <span>${html(profile?.label || item.server_id)}</span><span class="path" title="${attr(item.workspace)}">${html(item.workspace)}</span>
+        <select data-session-server="${attr(item.id)}" aria-label="${attr(item.id)} server" ${running || store.replay ? "disabled" : ""}>${profileOptions}</select><span class="path" title="${attr(item.workspace)}">${html(item.workspace)}</span>
         <span>${html(item.run.status)}</span>
         <button type="button" class="${armed.has(key) ? "confirm" : ""}" data-action="close-session" data-id="${attr(item.id)}">${running && armed.has(key) ? "Confirm" : "Close"}</button>
       </div>${issue(`session.${item.id}`) ? `<p class="field-error">${html(issue(`session.${item.id}`))}</p>` : ""}`;
@@ -435,7 +448,22 @@ async function blur(event) {
   }
 }
 
-function change() {}
+async function change(event) {
+  const select = event.target.closest("[data-session-server]");
+  if (!select) return;
+  const id = select.dataset.sessionServer;
+  try {
+    const result = await api(`/api/sessions/${encodeURIComponent(id)}`, { server_id: select.value });
+    errors.delete(`session.${id}`);
+    if (result.session) {
+      reduce({ type: "session.updated", session_id: id, data: result.session });
+      setActive(id);
+    }
+  } catch (error) {
+    errors.set(`session.${id}`, error.message);
+    render();
+  }
+}
 
 async function update(path, value) {
   try {

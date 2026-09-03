@@ -22,7 +22,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 
 ## Events
 
-- `session.created` [prompt 3] `{session}`; `session.renamed` [3] `{session_id,label}`; `session.reset` [3] `{session_id,log_path}`; `session.closed` [3] `{session_id}`.
+- `session.created` [prompt 3] `{session}`; `session.renamed` [3] `{session_id,label}`; `session.updated` `{session_id,server_id,runnable,not_runnable_reason,memory_path,memory_content}`; `session.reset` [3] `{session_id,log_path}`; `session.closed` [3] `{session_id}`.
 - `server.probed` [3] `{server_id,capabilities,findings}`; `config.changed` [3] `{config}` (masked); `error` [3] `{where,message}`.
 - `shell.identity` [17] `{fallback,reason,since}` announces or clears a persistent alternate-identity fallback; `shell.credential` [17] `{stored,stored_at}` reports write-only store status.
 - `run.queued` [4] `{run_id,position}`; `run.started` [4] `{run_id,user_message_id}`; `run.stopped` [4] `{run_id,reason,detail,turns}`. Stop reasons are `done`, `user_stop`, `turn_ceiling`, `cycle`, `tool_errors`, `context_ceiling`, `length`, `model_error`, `profile_not_runnable`.
@@ -40,7 +40,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 
 - `GET /` and `/chat` serve their page or a placeholder; `GET /static/*` serves `web/`.
 - `GET /api/events` is SSE; `GET /api/state` is `snapshot.data`. In replay mode each SSE connection receives the initial synthetic snapshot followed by the merged, timestamp-ordered recording at 20 ms per event; `?instant=1` removes the delay.
-- `GET /api/sessions`; `POST /api/sessions {label?,server_id,workspace?}` → 201 `{session}`; `POST /api/sessions/{id} {label}`; `DELETE /api/sessions/{id}?force=1`; `POST /api/sessions/{id}/reset`.
+- `GET /api/sessions`; `POST /api/sessions {label?,server_id,workspace?}` → 201 `{session}`; `POST /api/sessions/{id} {label?,server_id?}` → 200 `{session}` (server reassignment requires an idle session and a runnable profile); `DELETE /api/sessions/{id}?force=1`; `POST /api/sessions/{id}/reset`.
 - `GET /api/servers`; `POST /api/servers/{id}/probe` → 202 and an eventual event.
 - `GET /api/config`; `POST /api/config` deep-merges keys and server entries by immutable `id`, validates, saves, and publishes `config.changed`. The masked API-key sentinel means unchanged. Validation errors are 400 `{error,field}`.
 - `POST /api/shell-credential {action:store,password}` writes a user-scoped DPAPI blob; `{action:test}` attempts a no-op service-account process; `{action:clear}` removes it. Responses and events expose status only, never the password.

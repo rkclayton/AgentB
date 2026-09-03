@@ -17,6 +17,7 @@ const (
 	Snapshot          = "snapshot"
 	SessionCreated    = "session.created"
 	SessionRenamed    = "session.renamed"
+	SessionUpdated    = "session.updated"
 	SessionReset      = "session.reset"
 	SessionClosed     = "session.closed"
 	ServerProbed      = "server.probed"

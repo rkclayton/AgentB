@@ -1,6 +1,6 @@
 # AgentB
 
-AgentB is a small, standard-library Go coding-agent harness for OpenAI-compatible model servers. It provides observable multi-session runs, seven guarded workspace tools, exact-or-labeled context accounting, compaction, durable workspace notes, an industrial-console UI, and a standalone chat window.
+AgentB is a small, standard-library Go coding-agent harness for OpenAI-compatible model servers. It provides observable multi-session runs, eight guarded workspace tools, exact-or-labeled context accounting, compaction, durable workspace notes, an industrial-console UI, and a standalone chat window.
 
 Choose one serving path before you start.
 
@@ -15,7 +15,7 @@ go build ./cmd/harness
 ./harness
 ```
 
-On Windows, run `harness.exe` as `.\harness.exe`. The first start copies `harness.example.json` to the ignored local `harness.json`; open `http://127.0.0.1:8790`, expand **Servers**, set `base_url` and `model` (and `api_key` when needed), then select **Test**. If the endpoint does not report its context size, enter its documented limit in `n_ctx_override`; AgentB refuses to guess a context ceiling.
+On Windows, run `harness.exe` as `.\harness.exe`. The first start copies `harness.example.json` to the ignored local `harness.json`; open `http://127.0.0.1:8790`, expand **Servers**, set `base_url` and `model` (and `api_key` when needed), then select **Test**. A successful test stays labeled `ready`; choose that profile for the existing session under **Sessions**. If the endpoint does not report its context size, enter its documented limit in `n_ctx_override`; AgentB refuses to guess a context ceiling.
 
 Without llama.cpp's accounting endpoints, the budget meter uses calibrated estimation instead of exact categories, the cached-token readout is hidden, and the prefill and tok/s readouts stay dark. The agent loop, tools, approvals, sessions, memory, compaction, chat, and replay remain available once the endpoint passes the baseline profile checks. See [Capability degradation](#capability-degradation) for the complete behavior.
 
@@ -83,11 +83,11 @@ The generated JSONL, workspaces, server logs, score sheets, and summary stay und
 | Context and memory | `context.{soft_pct,summary_pct,accounting}`, `memory.{enabled,dir,max_tokens}` |
 | Tool caps | `tools.{read_file,list_dir,grep}`, `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,file_routing_guard,service_account,deny}` (`file_routing_guard` defaults on; `service_account.enabled` defaults off) |
 
-See [web/DESIGN.md](web/DESIGN.md) for the UI contract, [INTERFACES.md](INTERFACES.md) for events and APIs, and [SECURITY.md](SECURITY.md) before granting a model shell access. The UI uses only the six-color industrial-console system; artwork and vendored fonts live under `web/assets/`.
+See [web/DESIGN.md](web/DESIGN.md) for the UI contract, [INTERFACES.md](INTERFACES.md) for events and APIs, and [SECURITY.md](SECURITY.md) plus [Windows host hardening](docs/HARDENING.md) before granting a model shell access. The UI uses only the six-color industrial-console system; artwork and vendored fonts live under `web/assets/`.
 
 ## Deferred boundaries
 
-- OS-level shell sandboxing; the current jail, deny list, approvals, and process-tree timeout are not a security boundary.
+- OS-level shell sandboxing; the shell is not jailed, and its file routing, deny list, approvals, and process-tree timeout are not a security boundary.
 - API authentication. AgentB intentionally binds loopback; an EventSource query-string token was rejected because it leaks through logs/history without addressing a present network threat. Authentication must be designed when `listen` moves off loopback.
 - MCP tools and the Discord process. The two Discord integration hooks are the existing `/api/message` plus SSE client surface, and `run.queue_depth`/`message.queued` for chat backpressure; no bot process is included.
 - Session persistence across restarts and orchestration or handoff between sessions.

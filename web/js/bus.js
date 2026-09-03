@@ -49,6 +49,15 @@ export function reduce(event) {
     case "session.renamed":
       if (target) target.label = data.label;
       break;
+    case "session.updated":
+      if (target) {
+        target.server_id = data.server_id;
+        target.runnable = data.runnable;
+        target.not_runnable_reason = data.not_runnable_reason;
+        target.memory_path = data.memory_path;
+        target.memory_content = data.memory_content;
+      }
+      break;
     case "session.reset":
       if (target) {
         target.messages = [];
@@ -316,6 +325,7 @@ for (const type of [
   "snapshot",
   "session.created",
   "session.renamed",
+  "session.updated",
   "session.reset",
   "session.closed",
   "server.probed",

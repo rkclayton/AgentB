@@ -761,10 +761,14 @@
   padding: 0;
   background: transparent;
   display: grid;
-  grid-template-columns: 8px minmax(76px, auto) minmax(0, 1fr);
+  grid-template-columns: 8px minmax(76px, auto) minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   text-align: left;
+}
+.profile-state {
+  color: var(--mute);
+  font-size: 12px;
 }
 .profile-url {
   overflow: hidden;
@@ -853,12 +857,18 @@
   border-bottom: 1px solid rgba(125, 135, 148, 0.28);
   font-size: 12px;
 }
-.session-row input {
+.session-row input,
+.session-row select {
   min-width: 0;
   width: 100%;
   color: var(--ink);
   background: transparent;
   border: 0;
+}
+.session-row select {
+  padding: 2px 4px;
+  border: 1px solid rgba(125, 135, 148, 0.28);
+  font: 12px/20px var(--sans);
 }
 .session-row .path {
   overflow: hidden;
