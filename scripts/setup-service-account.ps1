@@ -3,7 +3,15 @@ param(
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
     [string]$AccountName = 'agentb-svc',
 
-    [switch]$ResetPassword
+    [switch]$ResetPassword,
+
+    # Internal web-onboarding path. The file contains a user-scoped DPAPI blob,
+    # never plaintext; its path is safe to pass across the UAC boundary.
+    [string]$CredentialStore,
+
+    [switch]$Inspect,
+
+    [switch]$ValidateCredentialStore
 )
 
 $ErrorActionPreference = 'Stop'
@@ -130,6 +138,42 @@ function Test-PasswordShape {
 
 function Read-VerifiedPassword {
     param([string]$QualifiedName)
+    if ($CredentialStore) {
+        if (-not [IO.Path]::IsPathRooted($CredentialStore) -or -not (Test-Path -LiteralPath $CredentialStore -PathType Leaf)) {
+            [Console]::Error.WriteLine('PASSWORD REFUSED: the AgentB credential store is missing or is not an absolute file path.')
+            return $null
+        }
+        $protected = [IO.File]::ReadAllBytes($CredentialStore)
+        $plain = $null
+        $characters = $null
+        try {
+            Add-Type -AssemblyName System.Security
+            $plain = [Security.Cryptography.ProtectedData]::Unprotect(
+                $protected,
+                $null,
+                [Security.Cryptography.DataProtectionScope]::CurrentUser
+            )
+            $characters = [Text.Encoding]::UTF8.GetChars($plain)
+            $stored = [Security.SecureString]::new()
+            foreach ($character in $characters) { $stored.AppendChar($character) }
+            $stored.MakeReadOnly()
+            if (-not (Test-PasswordShape -Value $stored)) {
+                $stored.Dispose()
+                return $null
+            }
+            # The browser and Go handler require two matching entries before
+            # this UAC-only path is launched. The encrypted blob carries the
+            # already-confirmed value without putting it on a command line.
+            return $stored
+        } catch {
+            [Console]::Error.WriteLine("PASSWORD REFUSED: the AgentB credential store could not be decrypted for this Windows user ($($_.Exception.Message)).")
+            return $null
+        } finally {
+            if ($characters) { [Array]::Clear($characters, 0, $characters.Length) }
+            if ($plain) { [Array]::Clear($plain, 0, $plain.Length) }
+            if ($protected) { [Array]::Clear($protected, 0, $protected.Length) }
+        }
+    }
     Assert-SafeInteractiveInput
     $first = Read-Host "Enter the password for $QualifiedName" -AsSecureString
     if (-not (Test-PasswordShape -Value $first)) {
@@ -193,6 +237,42 @@ trap {
     [Console]::Error.WriteLine("SETUP FAILED: $($_.Exception.Message)")
     Write-SetupSummary -Changed @($script:changeState) -NotChanged @('no additional change is claimed after the failure') -Next @('inspect the account state before retrying; use -ResetPassword if the account now exists')
     exit 1
+}
+
+if ($Inspect) {
+    if ($CredentialStore -or $ResetPassword -or $ValidateCredentialStore) {
+        [Console]::Error.WriteLine('INSPECTION FAILED: -Inspect cannot be combined with credential or mutation options.')
+        exit 1
+    }
+    $inspected = Get-LocalUser -Name $AccountName -ErrorAction SilentlyContinue
+    $isAdministrator = $false
+    if ($inspected) {
+        $administrators = Get-BuiltinGroupName -SidType BuiltinAdministratorsSid
+        $isAdministrator = [bool](Get-LocalGroupMember -Group $administrators -ErrorAction SilentlyContinue |
+            Where-Object { $_.SID -eq $inspected.SID })
+    }
+    $status = [ordered]@{
+        supported = $true
+        account = $AccountName
+        exists = [bool]$inspected
+        enabled = [bool]($inspected -and $inspected.Enabled)
+        administrator = $isAdministrator
+        harness_elevated = (Test-IsAdministrator)
+    }
+    Write-Output "AGENTB_ACCOUNT_STATUS=$($status | ConvertTo-Json -Compress)"
+    exit 0
+}
+
+if ($ValidateCredentialStore) {
+    if (-not $CredentialStore -or $ResetPassword) {
+        [Console]::Error.WriteLine('CREDENTIAL CHECK FAILED: supply only -CredentialStore with -ValidateCredentialStore.')
+        exit 1
+    }
+    $checkedPassword = Read-VerifiedPassword -QualifiedName "$env:COMPUTERNAME\$AccountName"
+    if (-not $checkedPassword) { exit 2 }
+    $checkedPassword.Dispose()
+    Write-Output 'AGENTB_CREDENTIAL_STORE_VALID'
+    exit 0
 }
 
 if (-not (Test-IsAdministrator)) {

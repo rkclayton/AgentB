@@ -16,6 +16,7 @@ import (
 	"harness/internal/credential"
 	"harness/internal/events"
 	"harness/internal/probe"
+	"harness/internal/serviceaccount"
 	"harness/internal/session"
 	"harness/internal/tools"
 )
@@ -33,6 +34,9 @@ type Server struct {
 	replay     *events.Replay
 	credential *credential.Store
 	shell      *tools.Shell
+	account    serviceaccount.Manager
+	shellTest  func(context.Context) (string, error)
+	accountMu  sync.Mutex
 }
 
 func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
@@ -43,7 +47,9 @@ func (s *Server) SetReplay(replay *events.Replay)        { s.replay = replay }
 func (s *Server) SetShellSecurity(store *credential.Store, shell *tools.Shell) {
 	s.credential = store
 	s.shell = shell
+	s.shellTest = shell.TestServiceAccount
 }
+func (s *Server) SetServiceAccountManager(manager serviceaccount.Manager) { s.account = manager }
 func (s *Server) SetRuntime(scheduler *agent.Scheduler, runner *agent.Runner, prompt *agent.PromptRenderer) {
 	s.scheduler = scheduler
 	s.runner = runner
@@ -74,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/servers/", s.replayGuard(s.server))
 	mux.HandleFunc("/api/config", s.replayGuard(s.config))
 	mux.HandleFunc("/api/shell-credential", s.replayGuard(s.shellCredential))
+	mux.HandleFunc("/api/service-account", s.replayGuard(s.serviceAccount))
 	mux.HandleFunc("/api/message", s.replayGuard(s.message))
 	mux.HandleFunc("/api/stop", s.replayGuard(s.stop))
 	mux.HandleFunc("/api/approve", s.replayGuard(s.approve))
@@ -121,6 +128,11 @@ func (s *Server) shellCredential(w http.ResponseWriter, r *http.Request) {
 		method(w)
 		return
 	}
+	if !s.accountMu.TryLock() {
+		writeError(w, http.StatusConflict, "service-account setup or credential update is already in progress", "shell.service_account")
+		return
+	}
+	defer s.accountMu.Unlock()
 	if s.credential == nil || s.shell == nil {
 		writeError(w, http.StatusConflict, "shell credential runtime is unavailable", "shell.service_account")
 		return

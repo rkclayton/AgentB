@@ -10,6 +10,10 @@ const shownKeys = new Set();
 let open = false;
 let lastFocus = null;
 let shellCredentialMessage = "";
+let serviceAccountStatus = { loaded: false, supported: true, exists: false, administrator: false };
+let serviceAccountBusy = false;
+let serviceAccountMessage = "";
+let serviceAccountAlarm = false;
 
 export function initSettings() {
   gear.addEventListener("click", () => (open ? closeSheet() : openSheet()));
@@ -55,6 +59,7 @@ function openSheet() {
   sheet.setAttribute("aria-hidden", "false");
   gear.setAttribute("aria-expanded", "true");
   render();
+  refreshServiceAccountStatus();
   requestAnimationFrame(() => sheet.querySelector("button, input")?.focus());
 }
 
@@ -274,16 +279,41 @@ function shell() {
 	const stored = credential.stored
 		? `stored ${credential.stored_at || "(time unavailable)"}`
 		: "not stored";
+	const accountState = !serviceAccountStatus.loaded
+		? "checking local account…"
+		: !serviceAccountStatus.supported
+			? "local account setup is available only on Windows"
+			: serviceAccountStatus.exists
+				? `${serviceAccountStatus.enabled ? "enabled" : "disabled"}${serviceAccountStatus.administrator ? " · ADMINISTRATOR — refused" : " · non-admin"}`
+				: "not created";
+	const setupAction = serviceAccountStatus.exists ? "reset" : "create";
+	const setupLabel = serviceAccountBusy
+		? "Waiting for Windows UAC…"
+		: serviceAccountStatus.exists
+			? "Reset password + enable"
+			: "Create account + enable";
+	const setupDisabled = serviceAccountBusy || !serviceAccountStatus.loaded || !serviceAccountStatus.supported || serviceAccountStatus.administrator;
   return `${text("shell.command", "command", (store.config.shell?.command || []).join(" "), "command")}
     ${toggle("shell.service_account.enabled", "service identity", service.enabled)}
     ${text("shell.service_account.account", "account", service.account || "agentb-svc")}
     ${text("shell.service_account.domain", "domain", service.domain || ".")}
-    ${row("password", '<input id="shell-service-password" type="password" autocomplete="new-password" aria-label="Service-account password">')}
+    <div class="settings-subhead">Local Windows account</div>
+    ${row("status", `<span class="account-status"><span class="lamp ${serviceAccountStatus.administrator ? "alarm" : serviceAccountStatus.exists ? "live" : ""}"></span>${html(accountState)}</span>`)}
+    ${row("new password", `<input id="service-account-setup-password" type="password" autocomplete="new-password" aria-label="New service-account password" ${setupDisabled ? "disabled" : ""}>`)}
+    ${row("repeat", `<input id="service-account-setup-confirmation" type="password" autocomplete="new-password" aria-label="Repeat new service-account password" ${setupDisabled ? "disabled" : ""}>`)}
+    <div class="settings-actions">
+      <button type="button" data-action="setup-service-account" data-setup-action="${setupAction}" ${setupDisabled ? "disabled" : ""}>${setupLabel}</button>
+      <button type="button" data-action="refresh-service-account" ${serviceAccountBusy ? "disabled" : ""}>Refresh</button>
+    </div>
+    ${serviceAccountMessage ? `<p class="settings-note ${serviceAccountAlarm ? "alarm" : ""}">${html(serviceAccountMessage)}</p>` : ""}
+    <p class="settings-note">Windows shows UAC for the setup script; AgentB itself stays non-elevated. Passwords must match and contain at least 14 characters.</p>
+    <div class="settings-subhead">Stored credential</div>
+    ${row("password", '<input id="shell-service-password" type="password" autocomplete="new-password" aria-label="Service-account credential">')}
     <p class="settings-note">write-only credential: ${html(stored)}</p>
     <div class="settings-actions">
-      <button type="button" data-action="store-shell-credential">Store</button>
-      <button type="button" data-action="test-shell-credential">Test</button>
-      <button type="button" data-action="clear-shell-credential">Clear</button>
+      <button type="button" data-action="store-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Store</button>
+      <button type="button" data-action="test-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Test</button>
+      <button type="button" data-action="clear-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Clear</button>
     </div>
     ${shellCredentialMessage ? `<p class="settings-note">${html(shellCredentialMessage)}</p>` : ""}
     <p class="settings-note">changes apply to new shell calls</p>`;
@@ -389,9 +419,62 @@ async function click(event) {
 	if (action === "store-shell-credential") return storeShellCredential();
 	if (action === "test-shell-credential") return shellCredentialAction("test");
 	if (action === "clear-shell-credential") return shellCredentialAction("clear");
+	if (action === "setup-service-account") return setupServiceAccount(button.dataset.setupAction);
+	if (action === "refresh-service-account") return refreshServiceAccountStatus();
   if (action === "copy") {
     if (button.dataset.value) await navigator.clipboard?.writeText(button.dataset.value);
   }
+}
+
+async function refreshServiceAccountStatus() {
+	try {
+		const status = await api("/api/service-account", undefined, "GET");
+		serviceAccountStatus = { ...status, loaded: true };
+	} catch (error) {
+		serviceAccountStatus = { loaded: true, supported: false, exists: false, administrator: false };
+		serviceAccountMessage = error.message;
+		serviceAccountAlarm = true;
+	}
+	if (open) render();
+}
+
+async function setupServiceAccount(action) {
+	const passwordInput = sheet.querySelector("#service-account-setup-password");
+	const confirmationInput = sheet.querySelector("#service-account-setup-confirmation");
+	const password = passwordInput?.value || "";
+	const confirmation = confirmationInput?.value || "";
+	if (passwordInput) passwordInput.value = "";
+	if (confirmationInput) confirmationInput.value = "";
+	if (!password || password.length < 14 || password !== confirmation) {
+		serviceAccountMessage = !password
+			? "password is required"
+			: password.length < 14
+				? "password must contain at least 14 characters"
+				: "the two password entries do not match";
+		serviceAccountAlarm = true;
+		return render();
+	}
+	serviceAccountBusy = true;
+	serviceAccountAlarm = false;
+	serviceAccountMessage = "Approve the Windows UAC prompt to run the account setup script.";
+	render();
+	try {
+		const result = await api("/api/service-account", { action, password, confirmation });
+		serviceAccountStatus = { ...(result.account || serviceAccountStatus), loaded: true };
+		store.shell_credential = result.credential || store.shell_credential;
+		store.shell_identity = result.identity || store.shell_identity;
+		if (result.config) reduce({ type: "config.changed", data: { config: result.config } });
+		serviceAccountMessage = result.message;
+		serviceAccountAlarm = !result.ok;
+	} catch (error) {
+		if (error.data?.credential) store.shell_credential = error.data.credential;
+		serviceAccountMessage = error.message;
+		serviceAccountAlarm = true;
+		await refreshServiceAccountStatus();
+	} finally {
+		serviceAccountBusy = false;
+		if (open) render();
+	}
 }
 
 async function storeShellCredential() {
@@ -471,6 +554,8 @@ async function update(path, value) {
     drafts.delete(path);
     errors.delete(path);
     reduce({ type: "config.changed", data: { config: result } });
+    if (path === "shell.service_account.account" || path === "shell.service_account.domain")
+      await refreshServiceAccountStatus();
   } catch (error) {
     errors.set(error.field || path, error.message);
     render();

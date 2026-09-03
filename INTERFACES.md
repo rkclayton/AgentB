@@ -44,6 +44,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 - `GET /api/servers`; `POST /api/servers/{id}/probe` → 202 and an eventual event.
 - `GET /api/config`; `POST /api/config` deep-merges keys and server entries by immutable `id`, validates, saves, and publishes `config.changed`. The masked API-key sentinel means unchanged. Validation errors are 400 `{error,field}`.
 - `POST /api/shell-credential {action:store,password}` writes a user-scoped DPAPI blob; `{action:test}` attempts a no-op service-account process; `{action:clear}` removes it. Responses and events expose status only, never the password.
+- `GET /api/service-account` inspects the configured local account without elevation. `POST /api/service-account {action:create|reset,password,confirmation}` requires matching write-only values, stores the DPAPI credential, launches `setup-service-account.ps1` through Windows UAC, enables the split, and attempts the no-op service-account spawn. It never returns either password field. A canceled or unavailable UAC prompt makes no account change and restores the previous credential; a failure after the elevated helper starts is reported as potentially partial.
 - `POST /api/message`, `/api/stop`, `/api/tools/{name}`, and `/api/approve` drive runs, cancellation, per-session tool toggles, and approval decisions.
 
 ## Replay and keyboard

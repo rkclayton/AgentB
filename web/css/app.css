@@ -734,6 +734,9 @@
 .settings-note.inline {
   margin: 0;
 }
+.settings-note.alarm {
+  color: var(--alarm);
+}
 .field-error {
   color: var(--alarm);
 }
@@ -835,6 +838,13 @@
 .settings-actions.vertical {
   flex-direction: column;
   align-items: stretch;
+}
+.account-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--mute);
+  font: 12px/20px var(--mono);
 }
 .text-action {
   margin-top: 8px;

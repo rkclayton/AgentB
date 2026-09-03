@@ -22,6 +22,7 @@ import (
 	"harness/internal/llm"
 	"harness/internal/memory"
 	"harness/internal/probe"
+	"harness/internal/serviceaccount"
 	"harness/internal/session"
 	"harness/internal/tools"
 	webserver "harness/internal/web"
@@ -108,6 +109,7 @@ func main() {
 		bus.Publish(events.New(events.ShellIdentity, "", "", status))
 	})
 	web.SetShellSecurity(credentialStore, shellTool)
+	web.SetServiceAccountManager(serviceaccount.New(filepath.Join("scripts", "setup-service-account.ps1")))
 	toolRegistry := tools.New(
 		tools.NewReadFile(cfg.Tools.ReadFile),
 		tools.NewListDir(cfg.Tools.ListDir),

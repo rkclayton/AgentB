@@ -2,7 +2,7 @@
 
 These controls reduce the reach of AgentB's model-selected shell by keeping the harness under the operator identity while launching shell children under a dedicated local account, denying that account writes to selected control files, and documenting a safe outbound-firewall decision. They do not jail `shell`, inspect every process it starts, or contain a determined exploit. Treat them as blast-radius reduction on a dedicated Windows host, not as a sandbox.
 
-Run the commands below from Windows PowerShell opened with **Run as administrator**. Review every `-WhatIf` result before omitting that switch. The scripts never generate or store a password; account setup accepts it only through a non-echoing interactive prompt.
+Use the Settings flow below for normal onboarding. It keeps AgentB under the ordinary operator identity and elevates only the account script through Windows UAC. Open Windows PowerShell with **Run as administrator** only for the later ACL/firewall commands or for the manual account-setup fallback. Review every `-WhatIf` result before omitting that switch.
 
 Run every command that can prompt as a separate paste, and wait for it to finish before entering another command. The scripts now detect and drain queued console input, then abort, because a pasted following line could otherwise be consumed as a password or confirmation. Redirected/non-interactive input is also refused; there is intentionally no command-line password parameter.
 
@@ -14,7 +14,15 @@ The harness writes its config, JSONL logs, workspace files, and memory notes dur
 
 AgentB explicitly gives alternate-identity shell children only system paths, a workspace-backed temporary directory, account identity names, and optional locale/`NO_COLOR` values. Consequently, non-system programs such as Git or a locally installed compiler require absolute paths unless the implementation's allowlist is extended deliberately. The disabled/fallback path still inherits the operator environment, so do not place credentials there.
 
-## 2. Create the service account
+## 2. Create the service account in Settings
+
+Start AgentB normally and open Settings → Shell. Keep `account` set to `agentb-svc` and `domain` set to `.` unless you deliberately chose another local account name. Under **Local Windows account**, enter the new password twice and select **Create account + enable**. AgentB validates both entries, stores the value in its user-scoped DPAPI credential file, and asks Windows to run only `setup-service-account.ps1` through UAC. Approve the UAC prompt you just initiated.
+
+The elevated helper creates a non-administrator account, preserves ordinary Users membership, validates the credential with `LogonUser`, and exits. AgentB then enables the service identity and immediately attempts its no-op alternate-identity spawn. A successful result is reported in the sheet. If the account already exists, the button becomes **Reset password + enable** and performs the same validation/update sequence.
+
+Canceling UAC starts no account operation and restores the credential that was present before the attempt. If the elevated helper starts and then fails, AgentB deliberately retains the submitted credential because the password may already have changed; refresh account status, inspect the displayed failure, and use **Reset password + enable** to recover. Passwords never appear in process arguments, responses, or logs. The DPAPI blob is decrypted by the elevated helper as the same Windows operator; supplying different administrator credentials at the UAC boundary will fail safely because that other user cannot decrypt it.
+
+The commands below remain a manual fallback. Run each prompting command alone in an elevated Windows PowerShell:
 
 Preview, then create the default `agentb-svc` account:
 
@@ -46,9 +54,9 @@ Then run this prompting command by itself. It asks twice, rejects empty/short/co
 
 Without `-ResetPassword`, an existing account is only reported as an unverified warning; its password is never silently changed or treated as known.
 
-## 3. Store, enable, and test the credential
+## 3. Verify the stored credential and identity
 
-Start AgentB as the operator and open Settings → Shell. Enter the service-account password in the write-only field and select **Store**. The UI returns only whether a credential is stored and its file timestamp; the password is encrypted with user-scoped DPAPI in `.agentb-shell-credential.dpapi` beside the selected config and never returns to the browser.
+The integrated account flow already stores the credential and enables the split. For a manually created account, open Settings → Shell, enter the service-account password in the write-only **Stored credential** field, select **Store**, enable **service identity**, and select **Test**. The UI returns only whether a credential is stored and its file timestamp; the password is encrypted with user-scoped DPAPI in `.agentb-shell-credential.dpapi` beside the selected config and never returns to the browser.
 
 Set the account and domain (`agentb-svc` and `.` by default), enable **service identity**, then select **Test**. A successful test creates and waits for a no-op child under that identity. A missing account, bad credential, missing logon right, or process API failure is reported without revealing the password.
 
