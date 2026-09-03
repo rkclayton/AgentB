@@ -16,6 +16,26 @@ type Tool interface {
 	Schema() map[string]any
 	Call(context.Context, *session.Session, map[string]any) (string, error)
 }
+
+// CallOutcome carries dispatcher-only control information that is deliberately
+// absent from the model-facing tool schema and result text.
+type CallOutcome struct {
+	Content                   string
+	OK                        bool
+	OperatorOverrideAvailable bool
+}
+
+// DetailedTool is optional. It lets a tool report that a narrowly scoped,
+// user-approved retry is available without exposing that retry to the model.
+type DetailedTool interface {
+	CallDetailed(context.Context, *session.Session, map[string]any) (string, error, bool)
+}
+
+// OperatorOverrideTool is optional and is called only by the dispatcher after
+// its unconditional approval gate succeeds.
+type OperatorOverrideTool interface {
+	CallAsOperator(context.Context, *session.Session, map[string]any) (string, error)
+}
 type Registry struct {
 	ordered []Tool
 	byName  map[string]Tool
@@ -63,15 +83,41 @@ func (r *Registry) AllSchemas() map[string]any {
 	return out
 }
 func (r *Registry) Call(ctx context.Context, s *session.Session, name string, args map[string]any) (string, bool) {
+	outcome := r.CallDetailed(ctx, s, name, args)
+	return outcome.Content, outcome.OK
+}
+func (r *Registry) CallDetailed(ctx context.Context, s *session.Session, name string, args map[string]any) CallOutcome {
+	tool := r.byName[name]
+	if tool == nil || !s.ToolEnabled(name) {
+		return CallOutcome{Content: fmt.Sprintf("error: tool %s is not available", name)}
+	}
+	var result string
+	var err error
+	override := false
+	if detailed, ok := tool.(DetailedTool); ok {
+		result, err, override = detailed.CallDetailed(ctx, s, args)
+	} else {
+		result, err = tool.Call(ctx, s, args)
+	}
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "note:") {
+			return CallOutcome{Content: err.Error()}
+		}
+		return CallOutcome{Content: "error: " + err.Error()}
+	}
+	return CallOutcome{Content: result, OK: true, OperatorOverrideAvailable: override}
+}
+func (r *Registry) CallAsOperator(ctx context.Context, s *session.Session, name string, args map[string]any) (string, bool) {
 	tool := r.byName[name]
 	if tool == nil || !s.ToolEnabled(name) {
 		return fmt.Sprintf("error: tool %s is not available", name), false
 	}
-	result, err := tool.Call(ctx, s, args)
+	override, ok := tool.(OperatorOverrideTool)
+	if !ok {
+		return fmt.Sprintf("error: tool %s has no operator-identity override", name), false
+	}
+	result, err := override.CallAsOperator(ctx, s, args)
 	if err != nil {
-		if strings.HasPrefix(err.Error(), "note:") {
-			return err.Error(), false
-		}
 		return "error: " + err.Error(), false
 	}
 	return result, true

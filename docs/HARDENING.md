@@ -14,6 +14,8 @@ The harness writes its config, JSONL logs, workspace files, and memory notes dur
 
 AgentB explicitly gives alternate-identity shell children only system paths, a workspace-backed temporary directory, account identity names, and optional locale/`NO_COLOR` values. Consequently, non-system programs such as Git or a locally installed compiler require absolute paths unless the implementation's allowlist is extended deliberately. The disabled/fallback path still inherits the operator environment, so do not place credentials there.
 
+An expected ACL denial is recoverable without changing the ACL: AgentB can pause and offer **Run once as operator** for the exact failed shell command. Use it sparingly. The retry runs with the account and environment that launched AgentB, is not Administrator elevation, and bypasses protections scoped only to the service account for that one process. Commands that truly require elevation must still be performed manually outside AgentB.
+
 ## 2. Create the service account in Settings
 
 Start AgentB normally by double-clicking `start-agentb.cmd`, then open Settings → Shell. Keep `account` set to `agentb-svc` and `domain` set to `.` unless you deliberately chose another local account name. Under **Local Windows account**, enter the new password twice and select **Create account + enable**. AgentB validates both entries, stores the value in its user-scoped DPAPI credential file, and asks Windows to run only `setup-service-account.ps1` through UAC. Approve the UAC prompt you just initiated.

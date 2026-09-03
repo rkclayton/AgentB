@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"sync/atomic"
@@ -221,14 +222,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 					item.content = "error: " + item.argErr.Error()
 					item.ok = false
 				} else {
-					approved, gateErr := r.gate.Wait(ctx, s, runID, item.call.ID, item.call.Name, item.args)
-					if gateErr != nil {
-						item.content, item.ok = "error: call canceled", false
-					} else if !approved {
-						item.content, item.ok = "error: call denied by user", false
-					} else {
-						item.content, item.ok = r.tools.Call(ctx, s, item.call.Name, item.args)
-					}
+					item.content, item.ok = r.executeTool(ctx, s, runID, item.call.ID, item.call.Name, item.args)
 				}
 				item.ms = time.Since(start).Milliseconds()
 				r.bus.Publish(events.New(events.ToolResult, s.ID, runID, map[string]any{"turn": turn, "call_id": item.call.ID, "name": item.call.Name, "ok": item.ok, "ms": item.ms, "bytes": len(item.content), "tokens": r.textTokens(ctx, profile, item.content), "preview": preview(item.content)}))
@@ -263,6 +257,39 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		}
 		r.compactAfterTurn(ctx, s, runID, turn, profile, currentReasoning)
 	}
+}
+
+func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) (string, bool) {
+	approved, gateErr := r.gate.Wait(ctx, s, runID, callID, name, args)
+	if gateErr != nil {
+		return "error: call canceled", false
+	}
+	if !approved {
+		return "error: call denied by user", false
+	}
+	outcome := r.tools.CallDetailed(ctx, s, name, args)
+	if !outcome.OperatorOverrideAvailable {
+		return outcome.Content, outcome.OK
+	}
+	command, _ := args["command"].(string)
+	overrideID := callID + ":operator"
+	overrideArgs := map[string]any{
+		"command":  command,
+		"identity": "harness operator (not Administrator)",
+		"reason":   "service account was denied permission",
+		"scope":    "rerun this exact command once",
+	}
+	overrideApproved, overrideErr := r.gate.WaitRequired(ctx, s, runID, overrideID, "shell.operator_override", overrideArgs)
+	if overrideErr != nil {
+		return outcome.Content + "\n\noperator-identity override canceled", false
+	}
+	if !overrideApproved {
+		log.Printf("shell operator-identity override denied: session=%s call=%s command=%q", s.ID, callID, command)
+		return outcome.Content + "\n\noperator-identity override was offered and denied by the user", outcome.OK
+	}
+	log.Printf("SECURITY: shell operator-identity override approved: session=%s call=%s command=%q", s.ID, callID, command)
+	overrideContent, overrideOK := r.tools.CallAsOperator(ctx, s, name, args)
+	return outcome.Content + "\n\noperator-identity override approved; exact command rerun once:\n" + overrideContent, overrideOK
 }
 
 func (r *Runner) stage(s *session.Session, runID string, turn int, name string, fn func()) {

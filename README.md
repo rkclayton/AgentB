@@ -45,6 +45,8 @@ Profiles hold an endpoint, model, sampling, reasoning, context settings, and mea
 
 Sessions are ephemeral views onto a workspace and may use different profiles. Point several sessions at one workspace for a swarm; file-write conflicts force a re-read instead of silently overwriting another session. AgentB schedules two runs by default, but a llama.cpp server started with `--parallel 1` interleaves their slot work instead of decoding two requests simultaneously.
 
+With the service-account split enabled, a shell command that reports a permission denial pauses and offers **Run once as operator**. That action reruns only the displayed command once under the Windows account running AgentB, is required even when normal approvals are off, and is logged. It does not grant a lasting permission or run as Administrator; work requiring elevation remains an operator task outside AgentB.
+
 ## Bring your own model
 
 `serve/probes/reliability/` is an onboarding check for the question “can my model handle tool calling well enough?” It generates a small Go repair fixture, runs two tool-using tasks three times each, and reports a score as passes out of six using explicit completion, tool-choice, argument, and turn-count rules.

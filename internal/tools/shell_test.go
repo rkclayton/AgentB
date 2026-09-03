@@ -28,6 +28,11 @@ type completedShellProcess struct{}
 func (completedShellProcess) Wait() (int, error) { return 0, nil }
 func (completedShellProcess) KillTree()          {}
 
+type exitedShellProcess struct{ code int }
+
+func (p exitedShellProcess) Wait() (int, error) { return p.code, nil }
+func (exitedShellProcess) KillTree()            {}
+
 func TestShellFileRoutingRefusals(t *testing.T) {
 	discovery := []string{
 		"ls .", "dir .", "Get-ChildItem .", "gci .", `find . -name "*.go"`,
@@ -133,6 +138,87 @@ func TestShellServiceAccountSuccessClearsPersistentFallback(t *testing.T) {
 	}
 	if status := shell.IdentityStatus(); status.Fallback || status.Reason != "" || status.Since != "" {
 		t.Fatalf("identity status was not cleared: %+v", status)
+	}
+}
+
+func TestShellServicePermissionDenialOffersOperatorOverride(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root).Shell
+	cfg.ServiceAccount.Enabled = true
+	shell := NewShell(cfg)
+	shell.Configure(config.Config{Workspace: root, Shell: cfg})
+	shell.SetCredentialStore(presentShellCredential{})
+	shell.startService = func(_ string, _ []string, _ string, _ []string, _ config.ShellServiceAccount, _ []byte, output *lockedBuffer) (runningShellProcess, error) {
+		_, _ = output.Write([]byte("Set-Content: Access to the path is denied.\nUnauthorizedAccessException\n"))
+		return exitedShellProcess{code: 1}, nil
+	}
+	result, err, override := shell.CallDetailed(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": "Set-Content protected.txt value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !override || !strings.Contains(result, "exit=1") {
+		t.Fatalf("result=%q override=%v, want permission override", result, override)
+	}
+}
+
+func TestShellFallbackPermissionDenialDoesNotOfferOperatorOverride(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root).Shell
+	cfg.ServiceAccount.Enabled = true
+	shell := NewShell(cfg)
+	shell.Configure(config.Config{Workspace: root, Shell: cfg})
+	shell.SetCredentialStore(presentShellCredential{})
+	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
+		return nil, &serviceSpawnError{kind: "service-account authentication failed"}
+	}
+	command := "printf 'permission denied'; exit 1"
+	if runtime.GOOS == "windows" {
+		command = "Write-Output 'Access is denied'; exit 1"
+	}
+	_, err, override := shell.CallDetailed(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if override {
+		t.Fatal("operator fallback result incorrectly offered a second operator override")
+	}
+}
+
+func TestShellOperatorOverrideBypassesServiceSpawner(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root).Shell
+	cfg.ServiceAccount.Enabled = true
+	shell := NewShell(cfg)
+	shell.Configure(config.Config{Workspace: root, Shell: cfg})
+	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
+		t.Fatal("operator override called service-account process starter")
+		return nil, nil
+	}
+	command := "printf operator-ok"
+	if runtime.GOOS == "windows" {
+		command = "Write-Output operator-ok"
+	}
+	result, err := shell.CallAsOperator(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
+	if err != nil || !strings.Contains(result, "operator-ok") {
+		t.Fatalf("result=%q err=%v", result, err)
+	}
+}
+
+func TestPermissionDeniedOutput(t *testing.T) {
+	for _, value := range []string{
+		"Access is denied.",
+		"Access to the path 'x' is denied.",
+		"permission denied",
+		"CategoryInfo: PermissionDenied: (:) [], UnauthorizedAccessException",
+		"The requested operation requires elevation.",
+		"operation not permitted",
+	} {
+		if !permissionDeniedOutput(value) {
+			t.Errorf("did not recognize %q", value)
+		}
+	}
+	if permissionDeniedOutput("the file is locked by another process") {
+		t.Fatal("ordinary command failure was classified as a permission denial")
 	}
 }
 

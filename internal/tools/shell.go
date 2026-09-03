@@ -52,17 +52,33 @@ func (s *Shell) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}, "timeout_s": map[string]any{"type": "integer", "default": cfg.TimeoutS, "maximum": cfg.MaxTimeoutS}}, "required": []string{"command"}}
 }
 func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string]any) (string, error) {
+	result, err, _ := s.CallDetailed(ctx, item, args)
+	return result, err
+}
+
+func (s *Shell) CallDetailed(ctx context.Context, item *session.Session, args map[string]any) (string, error, bool) {
+	return s.call(ctx, item, args, false)
+}
+
+// CallAsOperator is intentionally absent from the Tool interface and schema.
+// Only the dispatcher invokes it after a separate, unconditional approval.
+func (s *Shell) CallAsOperator(ctx context.Context, item *session.Session, args map[string]any) (string, error) {
+	result, err, _ := s.call(ctx, item, args, true)
+	return result, err
+}
+
+func (s *Shell) call(ctx context.Context, item *session.Session, args map[string]any, forceOperator bool) (string, error, bool) {
 	cfg := s.config()
 	command, ok := args["command"].(string)
 	if !ok || strings.TrimSpace(command) == "" {
-		return "", fmt.Errorf("command is required")
+		return "", fmt.Errorf("command is required"), false
 	}
 	if cfg.FileRoutingGuardEnabled() {
 		refusal, ambiguous := inspectShellFileRouting(command)
 		if refusal != nil {
 			result, _ := json.Marshal(refusal)
 			log.Printf("shell file-routing refusal: session=%s tool=%s command=%q", item.ID, refusal.Replacement.Tool, command)
-			return string(result), nil
+			return string(result), nil, false
 		}
 		if ambiguous {
 			log.Printf("debug: shell file-routing guard allowed ambiguous compound command: %q", command)
@@ -70,7 +86,7 @@ func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string
 	}
 	for _, denied := range cfg.Deny {
 		if denied != "" && strings.Contains(strings.ToLower(command), strings.ToLower(denied)) {
-			return "", fmt.Errorf("command blocked by deny list")
+			return "", fmt.Errorf("command blocked by deny list"), false
 		}
 	}
 	timeout := number(args["timeout_s"], cfg.TimeoutS)
@@ -82,9 +98,16 @@ func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string
 	}
 	argv := append(append([]string(nil), cfg.Command[1:]...), command)
 	var output lockedBuffer
-	process, err := s.start(cfg, item.Workspace, argv, &output)
+	var process runningShellProcess
+	var usedService bool
+	var err error
+	if forceOperator {
+		process, err = startHarnessProcess(cfg.Command[0], argv, item.Workspace, &output)
+	} else {
+		process, usedService, err = s.start(cfg, item.Workspace, argv, &output)
+	}
 	if err != nil {
-		return "", err
+		return "", err, false
 	}
 	type waitResult struct {
 		code int
@@ -101,31 +124,32 @@ func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string
 	case <-ctx.Done():
 		process.KillTree()
 		<-done
-		return "", ctx.Err()
+		return "", ctx.Err(), false
 	case <-timer.C:
 		process.KillTree()
 		<-done
 		partial := cutOutput(output.String(), cfg.MaxOutputLinesHead, cfg.MaxOutputLinesTail)
 		if partial != "" {
-			return "", fmt.Errorf("timed out after %ds; partial output:\n%s", timeout, partial)
+			return "", fmt.Errorf("timed out after %ds; partial output:\n%s", timeout, partial), false
 		}
-		return "", fmt.Errorf("timed out after %ds; partial output:", timeout)
+		return "", fmt.Errorf("timed out after %ds; partial output:", timeout), false
 	case result := <-done:
 		if result.err != nil {
-			return "", result.err
+			return "", result.err, false
 		}
 		body := cutOutput(output.String(), cfg.MaxOutputLinesHead, cfg.MaxOutputLinesTail)
 		if body == "" {
-			return fmt.Sprintf("exit=%d", result.code), nil
+			return fmt.Sprintf("exit=%d", result.code), nil, false
 		}
-		return fmt.Sprintf("exit=%d\n%s", result.code, body), nil
+		return fmt.Sprintf("exit=%d\n%s", result.code, body), nil, usedService && permissionDeniedOutput(body)
 	}
 }
 
-func (s *Shell) start(cfg config.Shell, workspace string, argv []string, output *lockedBuffer) (runningShellProcess, error) {
+func (s *Shell) start(cfg config.Shell, workspace string, argv []string, output *lockedBuffer) (runningShellProcess, bool, error) {
 	service := cfg.ServiceAccount
 	if !service.Enabled {
-		return startHarnessProcess(cfg.Command[0], argv, workspace, output)
+		process, err := startHarnessProcess(cfg.Command[0], argv, workspace, output)
+		return process, false, err
 	}
 	reason := ""
 	if s.credential == nil {
@@ -137,7 +161,7 @@ func (s *Shell) start(cfg config.Shell, workspace string, argv []string, output 
 			process, spawnErr := s.startService(cfg.Command[0], argv, workspace, minimalShellEnvironment(service, workspace), service, password, output)
 			if spawnErr == nil {
 				s.setIdentity(ShellIdentityStatus{})
-				return process, nil
+				return process, true, nil
 			}
 			reason = serviceSpawnReason(spawnErr)
 		} else if errors.Is(err, credential.ErrNotStored) {
@@ -148,7 +172,27 @@ func (s *Shell) start(cfg config.Shell, workspace string, argv []string, output 
 	}
 	s.setIdentity(ShellIdentityStatus{Fallback: true, Reason: reason, Since: time.Now().UTC().Format(time.RFC3339)})
 	log.Printf("ALARM: shell service-account spawn failed; falling back to harness identity: %s", reason)
-	return startHarnessProcess(cfg.Command[0], argv, workspace, output)
+	process, err := startHarnessProcess(cfg.Command[0], argv, workspace, output)
+	return process, false, err
+}
+
+func permissionDeniedOutput(output string) bool {
+	value := strings.ToLower(output)
+	for _, marker := range []string{
+		"access is denied",
+		"permission denied",
+		"unauthorizedaccessexception",
+		"attempted to perform an unauthorized operation",
+		"requested operation requires elevation",
+		"requires elevation",
+		"operation not permitted",
+		"administrator privileges are required",
+	} {
+		if strings.Contains(value, marker) {
+			return true
+		}
+	}
+	return strings.Contains(value, "access to") && strings.Contains(value, "is denied")
 }
 
 func (s *Shell) TestServiceAccount(ctx context.Context) (string, error) {

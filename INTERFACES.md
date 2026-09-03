@@ -33,7 +33,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 - `tool.call` [4] `{turn,call_id,name,args}`; `tool.result` [4] `{turn,call_id,name,ok,ms,bytes,tokens,preview}`; `tool.toggled` [4] `{name,enabled}`.
 - `message.appended` [4] `{message}`; `message.updated` [8] `{id,patch}`; `message.queued` [6] `{message_id,position}`.
 - `budget` [4] uses the `Budget` shape. Prompt 4 emits a rough estimate; prompt 8 resolves exact versus estimated accounting.
-- `approval.required` [6] `{call_id,name,args}`; `approval.decided` [6] `{call_id,decision}`; `cycle.detected` [6] `{call_id,name,args,prior_call_id}`; `workspace.conflict` [6] `{path,session_id,other_session_id,other_label,age_s}`.
+- `approval.required` [6] `{call_id,name,args}`; `approval.decided` [6] `{call_id,decision}`; `cycle.detected` [6] `{call_id,name,args,prior_call_id}`; `workspace.conflict` [6] `{path,session_id,other_session_id,other_label,age_s}`. The dispatcher-only `shell.operator_override` approval uses args `{command,identity,reason,scope}` and is mandatory regardless of `approval.mode`; approval reruns only the original shell arguments once under the harness identity.
 - `compaction` [8] `{kind:elide|summarize,before,after,affected_ids,summary_message_id?}`; `memory.noted` [8] `{note,path}`.
 
 ## HTTP API

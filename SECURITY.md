@@ -16,6 +16,8 @@ Settings can launch the account setup script as a hidden elevated helper through
 
 With `approval.mode: "off"`, including during run-until-done operation, writes and shell commands execute without confirmation. The shipped default is `mutating`, which pauses `write_file`, `edit_file`, and `shell` for approval. Approval reduces accidental actions; it does not turn the shell wrapper into a sandbox.
 
+When a shell command successfully started under the service account but its output looks like an OS permission denial, AgentB offers a separate **Run once as operator** decision. This gate is mandatory even when `approval.mode` is `off`; the model cannot invoke the operator path directly, the UI shows the exact command, and the decision is logged. Approval reruns that command once with the harness process's identity and inherited environment, not with Administrator or UAC authority. The denial classification is a text heuristic and the prompt is not proof that Windows produced the message, so inspect the command itself before approving. This escape hatch deliberately bypasses service-account ACL and firewall restrictions for that one process and is not a security boundary.
+
 ## Network exposure
 
 AgentB has no API authentication by design and ships with `listen` bound to loopback. Moving the listener off loopback exposes an endpoint that can run shell commands. That requires a real access design, such as a reverse proxy with TLS and strong authentication; an SSH tunnel is the recommended remote-access path. A shared secret added directly to this API is not an adequate substitute.

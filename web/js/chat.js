@@ -481,15 +481,22 @@ function noticeContent(session, entry) {
   } else if (event.type === "memory.noted") content.textContent = "noted for next session";
   else if (event.type === "approval.required") {
     content.className += " chat-approval";
-    content.append(document.createTextNode(`approval: ${data.name} ${keyArgument(data.args || {})}`));
+    const operatorOverride = data.name === "shell.operator_override";
+    if (operatorOverride) content.classList.add("alarm");
+    content.append(document.createTextNode(operatorOverride
+      ? `permission denied: run once as your Windows account? ${keyArgument(data.args || {})}`
+      : `approval: ${data.name} ${keyArgument(data.args || {})}`));
     const decision = entry.decisions.get(data.call_id);
     if (decision) content.append(document.createTextNode(` ${decision}`));
     else if (!store.replay) {
-      for (const value of ["Approve", "Deny"]) {
+      for (const choice of operatorOverride
+        ? [["approve", "Run once as operator"], ["deny", "Keep denied"]]
+        : [["approve", "Approve"], ["deny", "Deny"]]) {
+        const [value, label] = choice;
         const button = document.createElement("button");
         button.type = "button";
-        button.textContent = value;
-        button.onclick = () => api("/api/approve", { session_id: session.id, call_id: data.call_id, decision: value.toLowerCase() });
+        button.textContent = label;
+        button.onclick = () => api("/api/approve", { session_id: session.id, call_id: data.call_id, decision: value });
         content.append(button);
       }
     }

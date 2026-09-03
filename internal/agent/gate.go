@@ -30,6 +30,16 @@ func (g *Gate) Wait(ctx context.Context, s *session.Session, runID, callID, name
 	if !g.required(name) {
 		return true, nil
 	}
+	return g.wait(ctx, s, runID, callID, name, args)
+}
+
+// WaitRequired always pauses for a user decision, regardless of approval.mode.
+// It is used for identity escalation, never for a model-addressable tool.
+func (g *Gate) WaitRequired(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) (bool, error) {
+	return g.wait(ctx, s, runID, callID, name, args)
+}
+
+func (g *Gate) wait(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) (bool, error) {
 	key := approvalKey(s.ID, callID)
 	wait := approvalWait{decision: make(chan string, 1)}
 	g.mu.Lock()

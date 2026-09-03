@@ -166,8 +166,12 @@ function inlineRow(session, event, decisions, state) {
   }
   row.head.replaceChildren(text);
   if (event.type === "approval.required") {
+    const operatorOverride = data.name === "shell.operator_override";
     const path = data.args?.path || "";
-    text.textContent = `approval  ${data.name} ${path}`;
+    text.textContent = operatorOverride
+      ? "permission denied — operator retry requested"
+      : `approval  ${data.name} ${path}`;
+    if (operatorOverride) row.node.classList.add("fault");
     const decision = decisions.get(data.call_id);
     if (decision) {
       const decided = document.createElement("span");
@@ -175,16 +179,19 @@ function inlineRow(session, event, decisions, state) {
       decided.textContent = decision;
       row.head.append(decided);
     } else
-      for (const value of ["Approve", "Deny"]) {
+      for (const choice of operatorOverride
+        ? [["approve", "Run once as operator"], ["deny", "Keep denied"]]
+        : [["approve", "Approve"], ["deny", "Deny"]]) {
+        const [value, label] = choice;
         const button = document.createElement("button");
         button.type = "button";
-        button.textContent = value;
+        button.textContent = label;
         button.onclick = (eventClick) => {
           eventClick.stopPropagation();
           api("/api/approve", {
             session_id: session.id,
             call_id: data.call_id,
-            decision: value.toLowerCase(),
+            decision: value,
           });
         };
         row.head.append(button);
