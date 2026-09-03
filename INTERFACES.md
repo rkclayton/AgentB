@@ -6,11 +6,11 @@ This document is the stable contract for prompts 3–10. Later prompts implement
 
 Every event is `{"seq":int,"ts":"RFC3339 with milliseconds","session_id":"","run_id":"","type":"","data":{}}`. Sessionless events are global. SSE uses `event: <type>`, the JSON envelope in `data:`, `id: <seq>`, and a comment ping every 15 seconds. JSONL additionally permits `body` on `model.request` and `raw` on `model.response`; those fields are excluded from SSE. Each session has its own log and global events use the harness log.
 
-On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapshot},servers:[Profile with masked key],config,flow:{stages,edges},tools:[{name,description}]}`.
+On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapshot},servers:[Profile with masked key],config,serving_facts,flow:{stages,edges},tools:[{name,description}]}`. `serving_facts` exposes only the three Prompt 8 accounting measurements needed by the settings sheet: `tokenize_idle_ms`, `tokenize_busy_ms`, and `tokenize_blocks_on_slot`.
 
 ## Shared records
 
-`SessionSnapshot` is `{id,label,server_id,workspace,run:{status:idle|queued|running|paused|stopping|replay,run_id,turn,max_turns,queue_position,partial},tools:[{name,enabled,calls,schema_tokens}],messages:[Message],budget:Budget,timeline:[last 200 rows],queued_messages,runnable,not_runnable_reason,memory_path}`. `schema_tokens` and `memory_path` remain zero/empty until prompt 8.
+`SessionSnapshot` is `{id,label,server_id,workspace,run:{status:idle|queued|running|paused|stopping|replay,run_id,turn,max_turns,queue_position,partial},tools:[{name,enabled,calls,schema_tokens}],messages:[Message],budget:Budget,timeline:[last 200 rows],queued_messages,runnable,not_runnable_reason,memory_path,memory_content,log_path}`. `memory_content` is the read-only injected view for the settings sheet; `log_path` names the current session JSONL. `schema_tokens` and memory fields remain zero/empty until prompt 8.
 
 `Message` is `{id,role:system|user|assistant|tool,content,reasoning?,tool_calls?,tool_call_id?,name?,category:system|memory|tools|history|files|results|summary,tokens,estimated,elided,turn}`.
 
