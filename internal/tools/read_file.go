@@ -24,7 +24,8 @@ func (*ReadFile) Description() string {
 }
 func (r *ReadFile) Schema() map[string]any {
 	cfg := r.config()
-	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "default": 1}, "limit": map[string]any{"type": "integer", "default": cfg.DefaultLimit, "maximum": cfg.MaxLimit}}, "required": []string{"path"}}
+	defaultLimit := min(cfg.DefaultLimit, cfg.MaxLimit)
+	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "default": 1}, "limit": map[string]any{"type": "integer", "default": defaultLimit, "maximum": cfg.MaxLimit}}, "required": []string{"path"}}
 }
 func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
 	cfg := r.config()

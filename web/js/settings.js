@@ -147,7 +147,7 @@ function profileFields(profile, reason) {
     <div class="settings-subhead">Capabilities</div>
     <div class="findings"><span class="settings-note">${html(caps.probed_at || "not probed")}</span><ul>${findings || "<li>no findings</li>"}</ul></div>
     ${reason ? `<p class="field-error">${html(reason)}</p>` : ""}
-    ${issue(p) ? `<p class="field-error">${html(issue(p))}</p>` : ""}
+    ${errors.get(p) ? `<p class="field-error">${html(errors.get(p))}</p>` : ""}
     <div class="settings-actions">
       <button type="button" data-action="duplicate-server" data-id="${attr(id)}">Duplicate</button>
       <button type="button" class="${armed.has(`server:${id}`) ? "confirm" : ""}" data-action="remove-server" data-id="${attr(id)}">${armed.has(`server:${id}`) ? "Confirm remove" : "Remove"}</button>

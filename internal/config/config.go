@@ -287,8 +287,8 @@ func (c Config) Validate() error {
 	if c.Tools.ReadFile.DefaultLimit < 1 {
 		return fmt.Errorf("tools.read_file.default_limit: must be positive")
 	}
-	if c.Tools.ReadFile.MaxLimit < c.Tools.ReadFile.DefaultLimit {
-		return fmt.Errorf("tools.read_file.max_limit: must be at least default_limit")
+	if c.Tools.ReadFile.MaxLimit < 1 {
+		return fmt.Errorf("tools.read_file.max_limit: must be positive")
 	}
 	if c.Tools.ReadFile.MaxLineChars < 1 {
 		return fmt.Errorf("tools.read_file.max_line_chars: must be positive")
