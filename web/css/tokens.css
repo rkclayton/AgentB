@@ -8,5 +8,5 @@ html,body{height:100%;margin:0}
 body{height:100dvh;overflow:hidden;background:var(--bezel);color:var(--ink);font:400 13px/20px var(--sans)}
 button,input{font:inherit;color:inherit}
 button{background:rgba(216,221,227,.08);border:0;border-radius:2px;padding:4px 12px;cursor:pointer}
-button:hover{background:rgba(216,221,227,.12)}button:active{background:rgba(216,221,227,.16)}button:focus-visible,input:focus-visible{outline:1px solid var(--trace);outline-offset:1px}
+button:hover{background:rgba(216,221,227,.12)}button:active{background:rgba(216,221,227,.16)}button:focus-visible,input:focus-visible,textarea:focus-visible,select:focus-visible,a:focus-visible,[role=button]:focus-visible,[tabindex]:focus-visible{outline:1px solid var(--trace);outline-offset:2px}
 .mono,.number{font-family:var(--mono);font-variant-numeric:tabular-nums}

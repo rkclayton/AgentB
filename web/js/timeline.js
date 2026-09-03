@@ -54,6 +54,12 @@ export function renderTimeline() {
   }
   const hidden = Math.max(0, entries.length - 300),
     shown = entries.slice(hidden);
+	if (!entries.length) {
+	  const empty = document.createElement("div");
+	  empty.className = "panel-empty";
+	  empty.textContent = "No turns yet";
+	  root.append(empty);
+	}
   if (hidden) {
     const earlier = document.createElement("div");
     earlier.className = "timeline-earlier";

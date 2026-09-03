@@ -23,7 +23,9 @@ subscribe(() => {
 	stop.hidden = !!store.replay;
 	document.getElementById("mode").textContent = store.replay ? "replay" : "";
   input.placeholder =
-    s?.run.status === "queued"
+	store.replay
+	  ? "Replay"
+	  : s?.run.status === "queued"
       ? "Queued"
       : busy
         ? "Run in progress"

@@ -222,7 +222,7 @@ export function reduce(event) {
   if (target) {
     target.timeline = target.timeline || [];
     target.timeline.push(event);
-    if (target.timeline.length > 500)
+    if (!store.replay && target.timeline.length > 500)
       target.timeline = target.timeline.slice(-500);
   }
   if (event.type === "workspace.conflict" && data.other_session_id) {
@@ -240,8 +240,22 @@ function hydrate(value) {
   value.messages = value.messages || [];
   value.timeline = value.timeline || [];
   value.tools = value.tools || [];
-  value._stage = value._stage || "";
-  value._completedStages = value._completedStages || [];
+	value._stage = "";
+	value._completedStages = [];
+	value._activeTool = "";
+	for (const event of value.timeline) {
+	  const data = event.data || {};
+	  if (event.type === "stage") {
+		if (data.state === "enter") {
+		  value._stage = data.stage;
+		  if (data.stage === "assemble") value._completedStages = [];
+		} else if (!value._completedStages.includes(data.stage)) value._completedStages.push(data.stage);
+	  } else if (event.type === "model.progress") value._progress = data;
+	  else if (event.type === "model.response") value._timings = data.timings;
+	  else if (event.type === "tool.call") value._activeTool = data.name;
+	  else if (event.type === "tool.result") value._activeTool = "";
+	  else if (event.type === "run.stopped") value._lastStop = data.reason;
+	}
 }
 export function setActive(id) {
   if (store.sessions[id]) {

@@ -175,6 +175,8 @@ function buildEntries(session) {
     } else if (event.type === "approval.decided") {
       decisions.set(data.call_id, data.decision);
     } else if (noticeTypes.has(event.type)) {
+	  if (event.type === "run.stopped")
+		for (const [key, turn] of turns) if (key.startsWith(`${event.run_id}:`)) turn.done = true;
       entries.push({ type: "notice", key: `event:${event.seq}`, event, decisions });
     }
   }

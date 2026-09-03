@@ -43,6 +43,12 @@ export function renderState() {
   }
   const state = view(session.id);
   count.textContent = `${session.messages.length} messages`;
+	if (!session.messages.length) {
+	  const empty = document.createElement("div");
+	  empty.className = "panel-empty";
+	  empty.textContent = "No messages yet";
+	  list.append(empty);
+	}
   for (const category of categories) {
     const button = document.createElement("button");
     button.type = "button";

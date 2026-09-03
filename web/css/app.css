@@ -17,6 +17,11 @@
   width: 24px;
   height: 24px;
 }
+.mode {
+  color: var(--mute);
+  font-size: 12px;
+  font-weight: 400;
+}
 .header #connection {
   margin-left: auto;
   color: var(--mute);
@@ -56,6 +61,21 @@
   padding: 0 10px;
   background: var(--bezel);
   white-space: nowrap;
+}
+.tab-select {
+	min-width: 0;
+	min-height: 32px;
+	flex: 1;
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 0;
+	background: transparent;
+	text-align: left;
+}
+.tab-select:hover,
+.tab-select:active {
+	background: transparent;
 }
 .tab.active {
   background: var(--well);
@@ -103,7 +123,9 @@
 }
 .tab-close {
   visibility: hidden;
-  padding: 0 2px;
+	min-width: 24px;
+	min-height: 32px;
+	padding: 0 2px;
   background: transparent;
   color: var(--mute);
 }
@@ -348,23 +370,34 @@
 .switch {
   position: relative;
   width: 28px;
-  height: 16px;
+  height: 32px;
   padding: 0;
-  background: var(--well);
-  outline: 1px solid rgba(125, 135, 148, 0.28);
+	background: transparent;
 }
-.switch::after {
+.switch::before {
   content: "";
   position: absolute;
+	width: 28px;
+	height: 16px;
+	left: 0;
+	top: 8px;
+	background: var(--well);
+	outline: 1px solid rgba(125, 135, 148, 0.28);
+}
+.switch::after {
+	content: "";
+	position: absolute;
   width: 12px;
   height: 12px;
   left: 2px;
-  top: 2px;
+	top: 10px;
   background: var(--ink);
-  transition: transform 120ms;
 }
 .switch.on {
-  background: var(--trace);
+	background: transparent;
+}
+.switch.on::before {
+	background: var(--trace);
 }
 .switch.on::after {
   transform: translateX(12px);
@@ -408,7 +441,10 @@
   padding: 4px 12px;
   background: transparent;
   text-align: left;
-  border-radius: 0;
+}
+.panel-empty {
+	padding: 8px 12px;
+	color: var(--mute);
 }
 .state-head {
   grid-template-columns: 3ch 62px 7ch minmax(0, 1fr);
@@ -563,16 +599,14 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .queued .lamp,
-  .node.active.call-model .node-lamp {
-    animation: none;
-  }
+	*,
+	*::before,
+	*::after {
+	  animation-duration: 0ms !important;
+	  transition-duration: 0ms !important;
+	}
   .travel-dot {
     display: none;
-  }
-  .segment,
-  .switch::after {
-    transition: none;
   }
 }
 .tab.idle {

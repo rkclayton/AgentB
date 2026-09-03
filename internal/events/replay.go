@@ -177,6 +177,7 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 		item.Label = replayString(data["label"])
 	case SessionReset:
 		item.Messages = []Message{}
+		item.Timeline = []Event{}
 		item.QueuedMessages = 0
 		item.Run = ReplayRun{Status: "replay", MaxTurns: item.Run.MaxTurns}
 	case RunQueued:
