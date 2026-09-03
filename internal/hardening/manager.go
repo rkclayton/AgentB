@@ -24,12 +24,13 @@ type ComponentStatus struct {
 }
 
 type Status struct {
-	Supported    bool            `json:"supported"`
-	ModelAddress string          `json:"model_address"`
-	ModelPort    int             `json:"model_port"`
-	ACL          ComponentStatus `json:"acl"`
-	Firewall     ComponentStatus `json:"firewall"`
-	Applied      bool            `json:"applied"`
+	Supported       bool            `json:"supported"`
+	HarnessElevated bool            `json:"harness_elevated"`
+	ModelAddress    string          `json:"model_address"`
+	ModelPort       int             `json:"model_port"`
+	ACL             ComponentStatus `json:"acl"`
+	Firewall        ComponentStatus `json:"firewall"`
+	Applied         bool            `json:"applied"`
 }
 
 type RunResult struct {

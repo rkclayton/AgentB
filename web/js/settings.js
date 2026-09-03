@@ -354,6 +354,11 @@ function shell(active) {
 	const setupDisabled = serviceAccountBusy || !serviceAccountStatus.loaded || !serviceAccountStatus.supported || serviceAccountStatus.administrator;
 	const profile = store.servers.find((item) => item.id === selectedHardeningServerID());
 	const protectionReady = hardeningStatus.acl?.applied && hardeningStatus.firewall?.applied;
+	const elevationState = !hardeningStatus.loaded
+		? "checking process elevation…"
+		: hardeningStatus.harness_elevated
+			? "already elevated · Windows will not show UAC"
+			: "standard user token · Windows will request UAC";
 	const protectionState = !hardeningStatus.loaded
 		? "checking host protections…"
 		: !hardeningStatus.supported
@@ -375,6 +380,7 @@ function shell(active) {
     </div>
     ${feedback(serviceAccountMessage, serviceAccountAlarm, "Create or reset the non-admin Windows account. Windows will request approval.")}
 	<div class="settings-subhead">Host protections</div>
+	${row("AgentB", `<span class="account-status ${hardeningStatus.harness_elevated ? "alarm" : ""}">${html(elevationState)}</span>`)}
 	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
 	${row("model route", `<select id="hardening-server" aria-label="Model route for host protections">${hardeningProfiles()}</select>`)}
 	<div class="settings-actions">
@@ -590,7 +596,9 @@ async function hardeningAction(action) {
 	hardeningAlarm = false;
 	hardeningMessage = action === "verify"
 		? "Verifying ACL and outbound policy…"
-		: "Approve the Windows UAC prompt to update host protections.";
+		: hardeningStatus.harness_elevated
+			? "AgentB is already elevated; applying directly without a UAC prompt."
+			: "Approve the Windows UAC prompt to update host protections.";
 	render();
 	try {
 		const result = await api("/api/hardening", { action, server_id: serverID });

@@ -103,12 +103,16 @@ function Get-ExactManagedRules {
         [Security.AccessControl.InheritanceFlags]$Inheritance,
         [Security.AccessControl.AccessControlType]$Type
     )
+    # FileSystemAccessRule normalizes composite rights (notably Modify) by
+    # adding Synchronize. Compare against a constructed rule's effective
+    # rights rather than the unnormalized enum supplied by the caller.
+    $expected = New-ManagedRule -Identity $Identity -Rights $Rights -Inheritance $Inheritance -Type $Type
     return @($Acl.Access | Where-Object {
         try { $ruleSid = $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]) } catch { return $false }
         return $ruleSid -eq $Identity -and
             -not $_.IsInherited -and
             $_.AccessControlType -eq $Type -and
-            $_.FileSystemRights -eq $Rights -and
+            $_.FileSystemRights -eq $expected.FileSystemRights -and
             $_.InheritanceFlags -eq $Inheritance -and
             $_.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::None
     })

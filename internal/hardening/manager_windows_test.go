@@ -68,9 +68,16 @@ func TestSystemPowerShellModulesAreAddedWhenMissing(t *testing.T) {
 
 func TestElevatedHardeningCommandUsesUAC(t *testing.T) {
 	command := elevatedCommand(`C:\Windows\powershell.exe`, []string{"-File", `C:\Program Files\AgentB\apply-hardening.ps1`, "-Mode", "Apply"})
-	for _, wanted := range []string{"Start-Process", "-Verb RunAs", "-WindowStyle Hidden", "WaitForExit", `"C:\Program Files\AgentB\apply-hardening.ps1"`} {
+	for _, wanted := range []string{"Start-Process", "-Verb RunAs", "-WindowStyle Hidden", "WaitForExit", "ProgressPreference = 'SilentlyContinue'", `"C:\Program Files\AgentB\apply-hardening.ps1"`} {
 		if !strings.Contains(command, wanted) {
 			t.Fatalf("elevation command does not contain %q:\n%s", wanted, command)
 		}
+	}
+}
+
+func TestSafeErrorDoesNotExposePowerShellProgressCLIXML(t *testing.T) {
+	message := safeError([]byte(`#< CLIXML <Objs><Obj S="progress">Preparing modules for first use.</Obj></Objs>`), context.DeadlineExceeded)
+	if message != context.DeadlineExceeded.Error() || strings.Contains(message, "CLIXML") {
+		t.Fatalf("safeError = %q", message)
 	}
 }

@@ -907,6 +907,9 @@
   color: var(--mute);
   font: 12px/20px var(--mono);
 }
+.account-status.alarm {
+  color: var(--alarm);
+}
 .text-action {
   margin-top: 8px;
 }

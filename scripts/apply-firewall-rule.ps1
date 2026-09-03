@@ -19,7 +19,8 @@ $blockedRanges = @(
     '0.0.0.0-100.63.255.255',
     '100.128.0.0-126.255.255.255',
     '128.0.0.0-255.255.255.255',
-    '::/128',
+    # NetSecurity canonicalizes the single-address ::/128 form to ::.
+    '::',
     '::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff'
 )
 $script:confirmationSuppressed = $NoPrompt -or ($PSBoundParameters.ContainsKey('Confirm') -and -not [bool]$PSBoundParameters['Confirm'])
@@ -99,7 +100,10 @@ function Test-RuleIntent {
     $rule = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
     if (-not $rule) { return $false }
     if ($rule.Direction -ne 'Outbound' -or $rule.Action -ne 'Block' -or $rule.Enabled -ne 'True' -or $rule.Profile -ne 'Any') { return $false }
-    if ($rule.LocalUser -ne $LocalUserSddl) { return $false }
+    # LocalUser is stored on the associated network-layer security filter,
+    # not on the MSFT_NetFirewallRule object returned by Get-NetFirewallRule.
+    $security = Get-NetFirewallSecurityFilter -AssociatedNetFirewallRule $rule
+    if ($security.LocalUser -ne $LocalUserSddl) { return $false }
     $actual = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule).RemoteAddress | Sort-Object)
     $expected = @($blockedRanges | Sort-Object)
     return ($actual.Count -eq $expected.Count -and -not (Compare-Object -ReferenceObject $expected -DifferenceObject $actual))

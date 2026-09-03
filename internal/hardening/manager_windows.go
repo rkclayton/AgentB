@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"unicode/utf16"
 )
 
@@ -18,6 +19,8 @@ const (
 	aclStatusMarker      = "AGENTB_ACL_STATUS="
 	firewallStatusMarker = "AGENTB_FIREWALL_STATUS="
 )
+
+var procIsUserAnAdmin = syscall.NewLazyDLL("shell32.dll").NewProc("IsUserAnAdmin")
 
 type windowsManager struct {
 	aclScript, firewallScript, orchestrationScript string
@@ -52,9 +55,14 @@ func (m *windowsManager) Status(ctx context.Context, request Request) (Status, e
 		return Status{}, fmt.Errorf("inspect firewall policy: %w", err)
 	}
 	return Status{
-		Supported: true, ModelAddress: request.ModelAddress, ModelPort: request.ModelPort,
+		Supported: true, HarnessElevated: isUserAnAdmin(), ModelAddress: request.ModelAddress, ModelPort: request.ModelPort,
 		ACL: acl, Firewall: firewall, Applied: acl.Applied && firewall.Applied,
 	}, nil
+}
+
+func isUserAnAdmin() bool {
+	result, _, _ := procIsUserAnAdmin.Call()
+	return result != 0
 }
 
 func inspectComponent(ctx context.Context, powershell, script, marker string, arguments []string) (ComponentStatus, error) {
@@ -164,6 +172,7 @@ func elevatedCommand(executable string, arguments []string) string {
 	}
 	return fmt.Sprintf(`
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 try {
   $process = Start-Process -FilePath '%s' -ArgumentList '%s' -Verb RunAs -WindowStyle Hidden -PassThru
   Write-Output 'AGENTB_ELEVATED_STARTED'
@@ -187,6 +196,11 @@ func encode(command string) string {
 
 func safeError(output []byte, err error) string {
 	text := strings.TrimSpace(strings.ReplaceAll(string(output), "\r\n", "\n"))
+	if strings.Contains(text, "#< CLIXML") {
+		// Progress records from a hidden Windows PowerShell process serialize as
+		// CLIXML and are not useful operator-facing diagnostics.
+		return err.Error()
+	}
 	if text == "" {
 		return err.Error()
 	}

@@ -12,7 +12,7 @@ When `shell.service_account.enabled` is false, the shell inherits the harness id
 
 Settings can launch the account setup script as a hidden elevated helper through Windows UAC while the harness remains non-elevated. The two password entries are write-only, are never placed on a command line or in logs, and cross the elevation boundary only as the existing user-scoped DPAPI blob. Keep the service on loopback, approve UAC only for an operation you initiated, and treat any failure after the elevated helper starts as a potentially partial account/password change.
 
-Settings can also apply and verify complete-tree service-account ACLs and a single account-scoped outbound Block rule through UAC. The ACL policy excludes only the configured workspace and must be reapplied after application updates create or replace files. The firewall policy permits loopback and the complete Tailscale carrier range; it does not change machine-wide firewall defaults or inspect destinations above the IP layer.
+Settings can also apply and verify complete-tree service-account ACLs and a single account-scoped outbound Block rule through UAC. Settings reports when the harness is already elevated, in which case Windows will not show another consent prompt; run the harness non-elevated during normal use so operator overrides do not inherit Administrator authority. The ACL policy excludes only the configured workspace and must be reapplied after application updates create or replace files. The firewall policy permits loopback and the complete Tailscale carrier range; it does not change machine-wide firewall defaults or inspect destinations above the IP layer.
 
 ## Approval and unattended runs
 

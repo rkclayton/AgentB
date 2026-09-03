@@ -2,19 +2,19 @@
 
 These controls reduce the reach of AgentB's model-selected shell. Shell children run under a dedicated local account, that account can write only the selected workspace inside the AgentB tree, and its outbound traffic is limited to IPv4 loopback, Tailscale's `100.64.0.0/10`, and IPv6 loopback. This is blast-radius reduction on a dedicated Windows host, not a sandbox or exploit boundary.
 
-The normal onboarding path is entirely in Settings. AgentB remains a non-elevated operator process; Windows UAC elevates only the narrowly scoped account and hardening scripts. Passwords are write-only, encrypted with user-scoped DPAPI, and never placed in process arguments, responses, or logs.
+The normal onboarding path is entirely in Settings → Security. Start AgentB normally from Explorer so it remains a non-elevated operator process; Windows UAC then elevates only the narrowly scoped account and hardening scripts. Security reports the harness's elevation state explicitly. If it says **already elevated**, Windows will not show another UAC prompt: stop AgentB and launch `start-agentb.cmd` normally before testing the onboarding boundary. Passwords are write-only, encrypted with user-scoped DPAPI, and never placed in process arguments, responses, or logs.
 
 ## 1. Configure the model first
 
-Double-click `start-agentb.cmd`. In Settings → Servers, configure and test the model endpoint, then select the ready profile for the session. Host protection accepts only a numeric address inside `127.0.0.0/8`, `100.64.0.0/10`, or IPv6 loopback because every other destination will be blocked for the service identity.
+Double-click `start-agentb.cmd`. In Settings → Connections, configure and test the model endpoint, then select the ready profile for the session. Host protection accepts only a numeric address inside `127.0.0.0/8`, `100.64.0.0/10`, or IPv6 loopback because every other destination will be blocked for the service identity.
 
 AgentB gives alternate-identity shell children only Windows system paths, a workspace-backed temporary directory, account identity names, and optional locale/`NO_COLOR` values. Git, compilers, and other non-system programs therefore need absolute executable paths unless the environment allowlist is deliberately extended.
 
 ## 2. Create and verify the service identity
 
-In Settings → Shell, leave `account` as `agentb-svc` and `domain` as `.` unless you intentionally chose another local account. Enter a new password twice under **Local Windows account**, select **Create account + enable**, and approve the Windows UAC prompt you initiated.
+In Settings → Security, enter a new password twice under **Service identity**, select **Create account**, and approve the Windows UAC prompt you initiated. The default local account is `agentb-svc`; its advanced account and domain fields are available only when a different identity is intentional.
 
-The helper creates a non-administrator local account, retains ordinary Users membership, validates the credential with Windows, stores the DPAPI credential, enables the identity split, and tests a no-op alternate-identity process. If the account already exists, the button becomes **Reset password + enable**.
+The helper creates a non-administrator local account, retains ordinary Users membership, validates the credential with Windows, stores the DPAPI credential, enables the identity split, and tests a no-op alternate-identity process. If the account already exists, the button becomes **Reset password**.
 
 Canceling UAC starts no account operation and restores the previous stored credential. A failure after the elevated helper starts is reported as potentially partial; use **Reset password + enable** to recover. Supplying different administrator credentials at UAC will fail safely because another Windows user cannot decrypt the operator-scoped DPAPI blob.
 
@@ -22,7 +22,7 @@ Run an approved `whoami` shell command and require the returned identity to end 
 
 ## 3. Apply host protections
 
-Stop active AgentB tasks. In Settings → Shell → **Host protections**, confirm the displayed model route, select **Apply + verify**, and approve the single UAC prompt. The button remains disabled until the account exists, the credential is stored, and service identity is enabled.
+Stop active AgentB tasks. In Settings → Security → **Host protections**, confirm the displayed model route, select **Apply + verify**, and approve the single UAC prompt. The button remains disabled until the account exists, the credential is stored, and service identity is enabled. No prompt is expected when Security reports that AgentB itself is already elevated; running the whole harness elevated is not the normal operating mode.
 
 The operation applies and immediately verifies both controls:
 
@@ -42,7 +42,7 @@ Run these through AgentB after **Apply + verify**:
 2. Creating and deleting a file in the workspace succeeds.
 3. Creating a file under the sibling `web` directory reports a permission denial.
 4. Choose **Keep denied** and confirm no operator retry occurs.
-5. Repeat, choose **Run once as operator**, and confirm the exact command succeeds only once. This path runs as the non-elevated account that launched AgentB and inherits its environment; it is never Administrator/UAC execution.
+5. Repeat, choose **Run once as operator**, and confirm the exact command succeeds only once. This path runs as the account that launched AgentB and inherits its environment. Keep AgentB non-elevated so this override does not acquire Administrator authority.
 6. A connection to the configured loopback or Tailscale model endpoint succeeds.
 7. A direct connection to a public test address fails under the service identity.
 8. A timed-out command loses its complete process tree.
