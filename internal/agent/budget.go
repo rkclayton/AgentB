@@ -178,8 +178,19 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			}
 		}
 		prefix := []llm.Message{{Role: "system", Content: in.System}}
-		for index, message := range in.Messages {
+		for index := 0; index < len(in.Messages); index++ {
+			message := in.Messages[index]
+			groupEnd := index
 			prefix = append(prefix, message)
+			if message.Role == "assistant" && len(message.ToolCalls) > 0 {
+				for groupEnd+1 < len(in.Messages) && groupEnd-index < len(message.ToolCalls) && in.Messages[groupEnd+1].Role == "tool" {
+					groupEnd++
+					prefix = append(prefix, in.Messages[groupEnd])
+				}
+				if groupEnd-index < len(message.ToolCalls) {
+					return events.Budget{}, fmt.Errorf("incomplete tool-call group")
+				}
+			}
 			current, err := render(prefix, activeTools)
 			if err != nil {
 				return events.Budget{}, err
@@ -187,11 +198,31 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			if !profile.Capabilities.ApplyTemplateTools {
 				current += categories["tools"]
 			}
-			tokens := max(0, current-previous)
+			groupTokens := max(0, current-previous)
 			previous = current
-			category := in.Records[index].Category
-			categories[category] += tokens
-			messageCounts[in.Records[index].ID] = session.MessageCount{Tokens: tokens, Estimated: false}
+			weights, totalWeight := make([]int, groupEnd-index+1), 0
+			for offset := range weights {
+				candidate := in.Messages[index+offset]
+				weight, _ := client.Tokenize(ctx, messageText(candidate.Content)+candidate.ReasoningContent, false)
+				for _, call := range candidate.ToolCalls {
+					value, _ := client.Tokenize(ctx, call.Function.Arguments, false)
+					weight += value
+				}
+				weight += 1
+				weights[offset], totalWeight = weight, totalWeight+weight
+			}
+			assigned := 0
+			for offset, weight := range weights {
+				tokens := groupTokens - assigned
+				if offset < len(weights)-1 {
+					tokens = int(math.Round(float64(groupTokens*weight) / float64(totalWeight)))
+					assigned += tokens
+				}
+				record := in.Records[index+offset]
+				categories[record.Category] += tokens
+				messageCounts[record.ID] = session.MessageCount{Tokens: tokens, Estimated: false}
+			}
+			index = groupEnd
 		}
 	}
 	s.SetMessageCounts(messageCounts)

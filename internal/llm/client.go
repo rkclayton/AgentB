@@ -232,7 +232,7 @@ func (c *Client) newRequest(ctx context.Context, method, path string, body io.Re
 }
 
 func (c *Client) Tokenize(ctx context.Context, text string, addSpecial bool) (int, error) {
-	raw, status, err := c.DoJSON(ctx, http.MethodPost, "/tokenize", map[string]any{"content": text, "add_special": addSpecial})
+	raw, status, err := c.DoJSON(ctx, http.MethodPost, "/tokenize", map[string]any{"content": text, "add_special": addSpecial, "parse_special": true})
 	if err != nil {
 		return 0, err
 	}
