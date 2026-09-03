@@ -49,6 +49,21 @@ func migrateV1(data []byte) (bool, []byte, error) {
 	if v := raw["thinking"]; v != nil {
 		_ = json.Unmarshal(v, &profile.Reasoning)
 	}
+	if v := raw["context"]; v != nil {
+		var old struct {
+			NCtxOverride  int     `json:"n_ctx_override"`
+			ReserveOutput int     `json:"reserve_output"`
+			SoftPct       float64 `json:"soft_pct"`
+			SummaryPct    float64 `json:"summary_pct"`
+			Accounting    string  `json:"accounting"`
+		}
+		_ = json.Unmarshal(v, &old)
+		profile.Context.NCtxOverride = old.NCtxOverride
+		if old.ReserveOutput > 0 {
+			profile.Context.ReserveOutput = old.ReserveOutput
+		}
+		raw["context"], _ = json.Marshal(GlobalContext{SoftPct: old.SoftPct, SummaryPct: old.SummaryPct, Accounting: old.Accounting})
+	}
 	var cfg Config
 	delete(raw, "server")
 	delete(raw, "sampling_thinking")
