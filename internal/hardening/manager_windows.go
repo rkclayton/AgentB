@@ -64,7 +64,9 @@ func inspectComponent(ctx context.Context, powershell, script, marker string, ar
 	}
 	args := []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", absolute}
 	args = append(args, arguments...)
-	output, runErr := exec.CommandContext(ctx, powershell, args...).CombinedOutput()
+	command := exec.CommandContext(ctx, powershell, args...)
+	command.Env = systemPowerShellEnvironment(os.Environ(), powershell)
+	output, runErr := command.CombinedOutput()
 	if runErr != nil {
 		return ComponentStatus{}, fmt.Errorf("%s", safeError(output, runErr))
 	}
@@ -101,16 +103,20 @@ func (m *windowsManager) Run(ctx context.Context, action string, request Request
 		"-ModelPort", fmt.Sprint(request.ModelPort),
 	}
 	if action == "verify" {
-		output, runErr := exec.CommandContext(ctx, m.powershell, arguments...).CombinedOutput()
+		command := exec.CommandContext(ctx, m.powershell, arguments...)
+		command.Env = systemPowerShellEnvironment(os.Environ(), m.powershell)
+		output, runErr := command.CombinedOutput()
 		if runErr != nil {
 			return RunResult{Attempted: true}, fmt.Errorf("hardening verification failed: %s", safeError(output, runErr))
 		}
 		return RunResult{Attempted: true}, nil
 	}
 	command := elevatedCommand(m.powershell, arguments)
-	output, runErr := exec.CommandContext(ctx, m.powershell,
+	launcher := exec.CommandContext(ctx, m.powershell,
 		"-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encode(command),
-	).CombinedOutput()
+	)
+	launcher.Env = systemPowerShellEnvironment(os.Environ(), m.powershell)
+	output, runErr := launcher.CombinedOutput()
 	attempted := strings.Contains(string(output), "AGENTB_ELEVATED_STARTED")
 	if runErr != nil {
 		if strings.Contains(string(output), "AGENTB_ELEVATION_NOT_STARTED") {
@@ -122,6 +128,33 @@ func (m *windowsManager) Run(ctx context.Context, action string, request Request
 		return RunResult{}, fmt.Errorf("elevated hardening did not start")
 	}
 	return RunResult{Attempted: true}, nil
+}
+
+// Windows PowerShell can inherit a PSModulePath headed by PowerShell 7's
+// incompatible built-in modules. Put its own module directory first so Get-Acl,
+// LocalAccounts, and NetSecurity autoload consistently from the web process.
+func systemPowerShellEnvironment(environment []string, powershell string) []string {
+	systemModules := filepath.Clean(filepath.Join(filepath.Dir(powershell), "Modules"))
+	result := append([]string(nil), environment...)
+	found := false
+	for index, entry := range result {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || !strings.EqualFold(key, "PSModulePath") {
+			continue
+		}
+		found = true
+		paths := []string{systemModules}
+		for _, candidate := range filepath.SplitList(value) {
+			if candidate != "" && !strings.EqualFold(filepath.Clean(candidate), systemModules) {
+				paths = append(paths, candidate)
+			}
+		}
+		result[index] = key + "=" + strings.Join(paths, string(os.PathListSeparator))
+	}
+	if !found {
+		result = append(result, "PSModulePath="+systemModules)
+	}
+	return result
 }
 
 func elevatedCommand(executable string, arguments []string) string {

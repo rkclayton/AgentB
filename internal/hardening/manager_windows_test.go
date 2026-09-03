@@ -4,6 +4,7 @@ package hardening
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -29,6 +30,40 @@ func TestStatusReportsAbsentAccountWithoutMutation(t *testing.T) {
 	if !status.Supported || status.Applied || status.ACL.AccountExists || status.Firewall.AccountExists {
 		t.Fatalf("unexpected status: %+v", status)
 	}
+}
+
+func TestSystemPowerShellModulesComeBeforePowerShell7Modules(t *testing.T) {
+	powershell := `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+	environment := systemPowerShellEnvironment([]string{
+		"PATH=C:\\Windows",
+		`PSModulePath=C:\Program Files\PowerShell\7\Modules;C:\Windows\System32\WindowsPowerShell\v1.0\Modules`,
+	}, powershell)
+	wanted := filepath.Join(filepath.Dir(powershell), "Modules")
+	for _, entry := range environment {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && strings.EqualFold(key, "PSModulePath") {
+			paths := filepath.SplitList(value)
+			if len(paths) == 0 || !strings.EqualFold(paths[0], wanted) {
+				t.Fatalf("PSModulePath = %q, want %q first", value, wanted)
+			}
+			if strings.Count(strings.ToLower(value), strings.ToLower(wanted)) != 1 {
+				t.Fatalf("PSModulePath duplicates system modules: %q", value)
+			}
+			return
+		}
+	}
+	t.Fatal("PSModulePath was not set")
+}
+
+func TestSystemPowerShellModulesAreAddedWhenMissing(t *testing.T) {
+	powershell := `C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`
+	environment := systemPowerShellEnvironment([]string{"PATH=" + os.Getenv("PATH")}, powershell)
+	for _, entry := range environment {
+		if strings.HasPrefix(strings.ToLower(entry), "psmodulepath=") {
+			return
+		}
+	}
+	t.Fatal("PSModulePath was not added")
 }
 
 func TestElevatedHardeningCommandUsesUAC(t *testing.T) {
