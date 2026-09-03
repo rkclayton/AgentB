@@ -89,6 +89,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		toolNames := r.tools.Names(enabled)
 		var request llm.Request
 		var body map[string]any
+		var requestEvent events.Event
 		system := ""
 		var budget events.Budget
 		var budgetErr error
@@ -115,9 +116,8 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			}
 			r.bus.Publish(events.New(events.BudgetEvent, s.ID, runID, budget))
 			data := map[string]any{"turn": turn, "message_count": len(messages), "tool_count": len(schemas), "params": requestParams(profile), "est_prompt_tokens": budget.UsedEst, "estimated": budget.Estimated}
-			event := events.New(events.ModelRequest, s.ID, runID, data)
-			event.Body = body
-			r.bus.Publish(event)
+			requestEvent = events.New(events.ModelRequest, s.ID, runID, data)
+			requestEvent.Body = body
 		})
 		if budgetErr != nil {
 			return "model_error", "budget accounting: " + budgetErr.Error(), turn - 1
@@ -133,6 +133,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			}
 			return "context_ceiling", fmt.Sprintf("prompt %d tokens + reserve %d exceeds n_ctx %d after compaction", guardUsed, budget.Reserve, budget.NCtx), turn - 1
 		}
+		r.bus.Publish(requestEvent)
 		r.budget.MarkRequest(s.ID, budget.UsedEst)
 		var response llm.Response
 		var callErr error
