@@ -30,16 +30,21 @@ func main() {
 	configPath := flag.String("config", "harness.json", "configuration file")
 	replayPaths := flag.String("replay", "", "comma-separated session JSONL files to replay")
 	flag.Parse()
-	facts := readServingFacts("SERVING.md")
-	if facts.TokenizeBlocksOnSlot == "yes" {
-		log.Printf("tokenize blocks on the generation slot (%d ms measured busy); context.accounting: \"estimated\" avoids it", facts.TokenizeBusyMS)
-	}
-	cfg, migrated, err := config.Load(*configPath)
+	cfg, migrated, created, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatal(err)
 	}
+	if created {
+		log.Printf("created %s from harness.example.json - set servers[0].base_url and model", filepath.Base(*configPath))
+	}
 	if migrated {
 		log.Printf("migrated %s: server → servers[local]", filepath.Base(*configPath))
+	}
+	facts := readServingFacts("SERVING.md")
+	if !facts.Complete {
+		log.Printf("debug: SERVING.md missing or partial; skipping /tokenize latency hint")
+	} else if facts.TokenizeBlocksOnSlot == "yes" {
+		log.Printf("tokenize blocks on the generation slot (%d ms measured busy); context.accounting: \"estimated\" avoids it", facts.TokenizeBusyMS)
 	}
 	if strings.TrimSpace(*replayPaths) != "" {
 		replay, loadErr := events.LoadReplay(strings.Split(*replayPaths, ","))
@@ -61,17 +66,21 @@ func main() {
 	bus := events.NewBus()
 	bus.SetSink(writers.Write)
 	profile := &cfg.Servers[0]
-	caps, findings, err := probe.Probe(context.Background(), profile)
-	if err != nil {
-		bus.Publish(events.New(events.Error, "", "", map[string]any{"where": "probe", "message": err.Error()}))
-		log.Printf("probe local: %v", err)
+	if reason := config.ProfileSetupReason(profile); reason != "" {
+		log.Printf("probe %s skipped: %s", profile.ID, reason)
 	} else {
-		profile.Capabilities = caps
-		profile.Reasoning.ValidEfforts = append([]string(nil), caps.ValidEfforts...)
-		if err := cfg.Save(*configPath); err != nil {
-			log.Fatal(err)
+		caps, findings, probeErr := probe.Probe(context.Background(), profile)
+		if probeErr != nil {
+			bus.Publish(events.New(events.Error, "", "", map[string]any{"where": "probe", "message": probeErr.Error()}))
+			log.Printf("probe %s: %v", profile.ID, probeErr)
+		} else {
+			profile.Capabilities = caps
+			profile.Reasoning.ValidEfforts = append([]string(nil), caps.ValidEfforts...)
+			if err := cfg.Save(*configPath); err != nil {
+				log.Fatal(err)
+			}
+			bus.Publish(events.New(events.ServerProbed, "", "", map[string]any{"server_id": profile.ID, "capabilities": caps, "findings": findings}))
 		}
-		bus.Publish(events.New(events.ServerProbed, "", "", map[string]any{"server_id": profile.ID, "capabilities": caps, "findings": findings}))
 	}
 	web := webserver.New(cfg, *configPath, "web", bus)
 	memoryManager := memory.New(filepath.Dir(*configPath), web.ConfigSnapshot, func(ctx context.Context, serverID, text string) (int, error) {
@@ -136,6 +145,7 @@ type servingFacts struct {
 	TokenizeIdleMS       int
 	TokenizeBusyMS       int
 	TokenizeBlocksOnSlot string
+	Complete             bool
 }
 
 // readServingFacts reads only the accounting facts needed at startup. Missing or
@@ -148,6 +158,7 @@ func readServingFacts(path string) servingFacts {
 	defer file.Close()
 
 	var facts servingFacts
+	var idleFound, busyFound, blocksFound bool
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
 		key, value, found := strings.Cut(strings.TrimSpace(scanner.Text()), "=")
@@ -156,12 +167,16 @@ func readServingFacts(path string) servingFacts {
 		}
 		switch key {
 		case "tokenize_idle_ms":
-			facts.TokenizeIdleMS, _ = strconv.Atoi(value)
+			facts.TokenizeIdleMS, err = strconv.Atoi(strings.TrimSpace(value))
+			idleFound = err == nil
 		case "tokenize_busy_ms":
-			facts.TokenizeBusyMS, _ = strconv.Atoi(value)
+			facts.TokenizeBusyMS, err = strconv.Atoi(strings.TrimSpace(value))
+			busyFound = err == nil
 		case "tokenize_blocks_on_slot":
-			facts.TokenizeBlocksOnSlot = strings.ToLower(value)
+			facts.TokenizeBlocksOnSlot = strings.ToLower(strings.TrimSpace(value))
+			blocksFound = facts.TokenizeBlocksOnSlot == "yes" || facts.TokenizeBlocksOnSlot == "no" || facts.TokenizeBlocksOnSlot == "partial"
 		}
 	}
+	facts.Complete = scanner.Err() == nil && idleFound && busyFound && blocksFound
 	return facts
 }

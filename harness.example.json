@@ -1,13 +1,13 @@
 {
   "listen": "127.0.0.1:8790",
-  "workspace": "E:\\AgentB\\sandbox",
+  "workspace": "./workspace",
   "log_dir": "logs",
   "servers": [
     {
       "id": "local",
-      "label": "UD-Q3_K_XL local",
+      "label": "Local",
       "base_url": "http://127.0.0.1:8080",
-      "model": "qwen3.8-27b",
+      "model": "",
       "api_key": "",
       "request_timeout_s": 900,
       "probe_mode": "full",
@@ -40,7 +40,7 @@
     }
   ],
   "run": { "max_turns": 40, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },
-  "approval": { "mode": "off" },
+  "approval": { "mode": "mutating" },
   "context": { "soft_pct": 0.75, "summary_pct": 0.85, "accounting": "auto" },
   "memory": { "enabled": true, "dir": "memory", "max_tokens": 1500 },
   "tools": {

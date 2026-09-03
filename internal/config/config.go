@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 type Config struct {
@@ -145,51 +146,56 @@ type Shell struct {
 
 func Defaults(workspace string) Config {
 	if workspace == "" {
-		workspace = "sandbox"
+		workspace = "./workspace"
 	}
 	abs, _ := filepath.Abs(workspace)
 	thinking := Sampling{Temperature: .6, TopP: .95, TopK: 20, RepeatPenalty: 1}
 	nonthinking := Sampling{Temperature: .7, TopP: .8, TopK: 20, PresencePenalty: 1.5, RepeatPenalty: 1}
 	return Config{
 		Listen: "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
-		Servers: []Profile{{ID: "local", Label: "UD-Q3_K_XL local", BaseURL: "http://127.0.0.1:8080", Model: "qwen3.8-27b", RequestTimeoutS: 900, ProbeMode: "full", Sampling: SamplingPair{Thinking: thinking, Nonthinking: nonthinking}, Reasoning: Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}}, Context: Context{ReserveOutput: 10240}, Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}}}},
-		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: "off"}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
+		Servers: []Profile{{ID: "local", Label: "Local", BaseURL: "http://127.0.0.1:8080", Model: "", RequestTimeoutS: 900, ProbeMode: "full", Sampling: SamplingPair{Thinking: thinking, Nonthinking: nonthinking}, Reasoning: Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}}, Context: Context{ReserveOutput: 10240}, Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}}}},
+		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: "mutating"}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
 		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}},
 		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}},
 	}
 }
 
-func Load(path string) (*Config, bool, error) {
+func Load(path string) (*Config, bool, bool, error) {
 	data, err := os.ReadFile(path)
+	created := false
 	if os.IsNotExist(err) {
-		cfg := Defaults(filepath.Join(filepath.Dir(path), "sandbox"))
-		if err := cfg.Save(path); err != nil {
-			return nil, false, err
+		examplePath := filepath.Join(filepath.Dir(path), "harness.example.json")
+		data, err = os.ReadFile(examplePath)
+		if err != nil {
+			return nil, false, false, fmt.Errorf("%s is missing; read %s: %w", filepath.Base(path), filepath.Base(examplePath), err)
 		}
-		return &cfg, false, nil
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			return nil, false, false, fmt.Errorf("create %s from %s: %w", filepath.Base(path), filepath.Base(examplePath), err)
+		}
+		created = true
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, false, false, err
 	}
 	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
 	migrated, data, err := migrateV1(data)
 	if err != nil {
-		return nil, false, err
+		return nil, false, created, err
 	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, false, err
+		return nil, false, created, err
 	}
 	applyDefaults(&cfg)
 	if err := cfg.Validate(); err != nil {
-		return nil, false, err
+		return nil, false, created, err
 	}
 	if migrated {
 		if err := cfg.Save(path); err != nil {
-			return nil, false, err
+			return nil, false, created, err
 		}
 	}
-	return &cfg, migrated, nil
+	return &cfg, migrated, created, nil
 }
 
 func (c Config) Save(path string) error {
@@ -226,9 +232,6 @@ func (c Config) Validate() error {
 			return fmt.Errorf("%s.id: duplicate", prefix)
 		}
 		seen[p.ID] = true
-		if p.BaseURL == "" || p.Model == "" {
-			return fmt.Errorf("%s: base_url and model required", prefix)
-		}
 		if p.ProbeMode != "full" && p.ProbeMode != "minimal" && p.ProbeMode != "off" {
 			return fmt.Errorf("%s.probe_mode: invalid", prefix)
 		}
@@ -309,6 +312,18 @@ func (c Config) Validate() error {
 		return fmt.Errorf("shell: output line limits cannot be negative")
 	}
 	return nil
+}
+
+// ProfileSetupReason explains incomplete first-run profile settings without
+// making the configuration file itself invalid.
+func ProfileSetupReason(profile *Profile) string {
+	if strings.TrimSpace(profile.BaseURL) == "" {
+		return "base_url is empty; set it in Servers"
+	}
+	if strings.TrimSpace(profile.Model) == "" {
+		return "model is empty; set it in Servers"
+	}
+	return ""
 }
 
 func applyDefaults(c *Config) {

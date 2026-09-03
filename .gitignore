@@ -1,20 +1,48 @@
-# Local remote-access material and machine-specific probe output.
-.remote/
-.tools/
-serve/logs/
-serve/probes/results/
-*.log
+# Runtime config can contain API keys and machine-specific endpoints.
+harness.json
+# Per-machine profile variants can contain private endpoints and paths.
+harness.*.json
+# The public first-run template must remain tracked.
+!harness.example.json
+# Full model traffic and tool results are private runtime logs.
 logs/
-memory/
-!internal/memory/
-!internal/memory/*.go
-sandbox/
-!sandbox/
-sandbox/*
-!sandbox/go.mod
-serve/probes/reliability/runs/*/workspace-*/
-
-# Models and generated binaries never belong in source control.
+# Model-authored durable notes can contain workspace content.
+memory/*
+# Keep the otherwise-empty memory directory in fresh clones.
+!memory/.gitkeep
+# Agent workspaces contain user code and runtime mutations.
+workspace/*
+# Keep the otherwise-empty default workspace in fresh clones.
+!workspace/.gitkeep
+# Serving facts contain host hardware, paths, and measured configuration.
+SERVING.md
+# Implementation notes contain local audit and verification details.
+NOTES.md
+# Local serving environment contains model paths and host choices.
+serve/local.env
+# Probe samples contain raw model traffic.
+serve/probes/samples/
+# Reliability runs contain raw model traffic and generated fixtures.
+serve/probes/reliability/runs/
+# Reliability scorer JSONL fixtures are synthetic traffic records.
+serve/probes/reliability/testdata/**/*.jsonl
+# GGUF model weights are large local artifacts.
 *.gguf
+# Remote-access scratch material is machine-specific.
+.remote/
+# Locally installed helper toolchains are machine-specific.
+.tools/
+# Serving-process logs are generated runtime output.
+serve/logs/
+# General probe results are generated runtime output.
+serve/probes/results/
+# Generic log files are generated runtime output.
+*.log
+# The legacy sandbox may contain local fixture mutations.
+sandbox/*
+# The tracked legacy sandbox module is required by existing tests.
+!sandbox/go.mod
+# Windows executables are local build or serving artifacts.
 *.exe
+# Windows runtime libraries are local serving artifacts.
 *.dll

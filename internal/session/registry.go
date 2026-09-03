@@ -175,6 +175,9 @@ func (r *Registry) Close(id string, force bool) error {
 	return nil
 }
 func runnable(profile *config.Profile, accounting string) (bool, string) {
+	if reason := config.ProfileSetupReason(profile); reason != "" {
+		return false, reason
+	}
 	c := profile.Capabilities
 	n := c.NCtx
 	if n == 0 {

@@ -1,7 +1,0 @@
-{"event":"request","turn":1,"task":"add","body":{}}
-{"event":"response","turn":1,"status":200,"body":{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"function":{"name":"write_file","arguments":"{}"}}]}}]}}
-{"event":"tool","turn":1,"task":"add","name":"write_file","args":{"path":"calc/ops.go"},"result":"error: refused","ok":false}
-{"event":"response","turn":2,"status":200,"body":{"choices":[{"message":{"role":"assistant","content":null,"tool_calls":[{"function":{"name":"shell","arguments":"{}"}}]}}]}}
-{"event":"tool","turn":2,"task":"add","name":"shell","args":{"command":"go run ./check"},"result":"exit=1\nFAIL","ok":true}
-{"event":"stop","reason":"max_turns","turns":12}
-{"event":"final","task":"add","check_exit":1,"check_output":"exit=1\nFAIL"}

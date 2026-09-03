@@ -1,13 +1,18 @@
 [CmdletBinding()]
 param(
-    [string]$Go = 'E:\tools\go\bin\go.exe',
-    [string]$C1Model = 'E:\Models\Qwen3.8-27B\Qwen3.8-27B-UD-Q3_K_XL.gguf',
-    [string]$C2Model = 'E:\Models\Qwen3.8-27B\Qwen3.8-27B-UD-IQ4_XS.gguf',
+    [string]$Go,
+    [string]$C1Model,
+    [string]$C2Model,
     [string]$BaseUrl = 'http://127.0.0.1:8080',
     [int]$Port = 8080
 )
 
 $ErrorActionPreference = 'Stop'
+$Go = if ($Go) { $Go } elseif ($env:GO) { $env:GO } else { 'go' }
+$C1Model = if ($C1Model) { $C1Model } else { $env:C1_MODEL }
+$C2Model = if ($C2Model) { $C2Model } else { $env:C2_MODEL }
+if (-not $C1Model) { throw 'C1_MODEL is unset; provide the first candidate GGUF path.' }
+if (-not $C2Model) { throw 'C2_MODEL is unset; provide the second candidate GGUF path.' }
 $startedAt = Get-Date
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..\..')).Path
 $startScript = Join-Path $repoRoot 'serve\start.ps1'
@@ -87,7 +92,7 @@ function Invoke-Trials {
 }
 
 try {
-    if (-not (Test-Path -LiteralPath $Go -PathType Leaf)) { throw "Go not found: $Go" }
+    if (-not (Get-Command $Go -ErrorAction SilentlyContinue)) { throw "Go not found: $Go" }
     New-Item -ItemType Directory -Force -Path $runsRoot | Out-Null
     Push-Location $PSScriptRoot
     try {

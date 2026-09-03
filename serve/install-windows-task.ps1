@@ -7,11 +7,14 @@ param(
     [int]$Port = 8080,
     [string]$TaskName = 'AgentB llama-server',
     [string]$FirewallRule = 'AgentB llama-server (Tailscale)',
-    [string]$RepoRoot = 'E:\AgentB',
-    [string]$LogFile = 'E:\AgentB\logs\llama-server.log'
+    [string]$RepoRoot,
+    [string]$LogFile
 )
 
 $ErrorActionPreference = 'Stop'
+$defaultRepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if (-not $RepoRoot) { $RepoRoot = $defaultRepoRoot }
+if (-not $LogFile) { $LogFile = Join-Path $RepoRoot 'logs\llama-server.log' }
 
 if (-not $BindAddress) { throw 'BindAddress is required.' }
 if (-not $AllowedRemoteAddress) { throw 'AllowedRemoteAddress is required.' }
@@ -42,7 +45,7 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 10 `
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Principal $taskPrincipal -Settings $settings `
-    -Description 'Serves AgentB local inference on the HOMEPC Tailscale address.' -Force | Out-Null
+    -Description 'Serves AgentB local inference on the configured private address.' -Force | Out-Null
 
 $rule = Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($rule) {

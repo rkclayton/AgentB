@@ -369,6 +369,10 @@ func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 404, "server not found", "server_id")
 		return
 	}
+	if reason := config.ProfileSetupReason(profile); reason != "" {
+		writeError(w, 400, reason, "servers."+id)
+		return
+	}
 	go s.runProbe(profile)
 	writeJSON(w, 202, map[string]string{"status": "probing", "server_id": id})
 }

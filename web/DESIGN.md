@@ -12,7 +12,7 @@
 - Alarm `#E4624F` — stop button, errors, ceiling breach, cycle detected.
 Colour carries state, never identity. Budget categories are Ink at 90/75/60/45/30% opacity with 1px Well gaps and labels beneath; the reserve zone is a 45° hatch of Mute at 30%. Button surface = Ink at 8% over Well; hover = 12%; pressed = 16%.
 
-**Type.** IBM Plex Sans for UI text, labels, prose, captions. IBM Plex Mono for code, message bodies, tool arguments and every number, with `font-variant-numeric: tabular-nums`. Sizes 12 / 13 / 14 / 18 only; weights 400 and 500 only; line-height 20px (16px at size 12). Sentence case everywhere; letter-spacing 0; no caps labels; no eyebrows; numbering only where content is a sequence (timeline turn numbers). Fallbacks: `system-ui` and `ui-monospace, "Cascadia Mono", Consolas, monospace`.
+**Type.** IBM Plex Sans for UI text, labels, prose, captions. IBM Plex Mono for code, message bodies, tool arguments and every number, with `font-variant-numeric: tabular-nums`. Sizes 12 / 13 / 14 / 18 only; weights 400 and 500 only; line-height 20px (16px at size 12). Sentence case everywhere; letter-spacing 0; no caps labels; no eyebrows; numbering only where content is a sequence (timeline turn numbers). Fallbacks: `system-ui` and `ui-monospace, "Cascadia Mono", Consolas, monospace`. The four latin 400/500 WOFF2 files are vendored under `assets/fonts/` with their SIL OFL license, so builds never fetch fonts or require a package registry.
 
 **Surfaces.** Panels are wells set into the bezel: `background: var(--well); box-shadow: inset 0 1px 0 rgba(0,0,0,.6);` radius 2px; no outer shadow anywhere; no borders except the single hairline. Grouping is alignment and one hairline, never a box. New regions are wells added to the grid, never cards.
 
@@ -41,4 +41,3 @@ Colour carries state, never identity. Budget categories are Ink at 90/75/60/45/3
 **Copy.** Plain verbs, sentence case: "Send", "Stop", "Reset session", "Jump to latest". Status words: idle, queued, running, paused, stopped, replay. Errors say what happened and what to do, in the interface's voice, without apologizing. Empty states invite an action.
 
 **Assets.** Three swappable SVG slots referenced by path only: `assets/mark.svg` (24×24), `assets/agent.svg` (20×20, chat), `assets/idle.svg` (96×96). Placeholders are simple geometric marks in Mute; never inline artwork into markup.
-
