@@ -184,15 +184,62 @@ function buildEntries(session) {
     if (entry.type !== "tool") continue;
     entry.content = (session.messages || []).find((message) => message.tool_call_id === entry.callID)?.content || entry.result?.preview || "";
   }
-  for (const message of session.messages || []) {
-    if (message.role === "user" && !messageIDs.has(message.id))
-      entries.unshift({ type: "user", key: `message:${message.id}`, text: message.content });
-    if (message.role === "assistant" && message.content && !entries.some((entry) => entry.type === "agent" && entry.text === message.content))
-      entries.push({ type: "agent", key: `message:${message.id}`, text: message.content, reasoning: message.reasoning || "", reasoningTokens: reasoningTokens(session, message.turn), done: true });
+  // The live timeline is a bounded tail. Rebuild messages that aged out as one
+  // ordered prefix; separating user and assistant fallbacks destroys turn order.
+  const representedText = new Map();
+  for (const entry of entries) {
+    if (entry.type === "agent" && entry.text)
+      representedText.set(entry.text, (representedText.get(entry.text) || 0) + 1);
   }
+  const callDetails = messageCallDetails(session.messages || []);
+  const missing = [];
+  for (let index = (session.messages || []).length - 1; index >= 0; index--) {
+    const message = session.messages[index];
+    if (messageIDs.has(message.id)) continue;
+    if (message.role === "user") {
+      missing.push({ type: "user", key: `message:${message.id}`, text: message.content });
+    } else if (message.role === "assistant") {
+      const count = representedText.get(message.content) || 0;
+      if (message.content && count > 0) {
+        representedText.set(message.content, count - 1);
+        continue;
+      }
+      if ((message.tool_calls || []).some((call) => calls.has(call.id))) continue;
+      if (message.content || message.reasoning)
+        missing.push({ type: "agent", key: `message:${message.id}`, text: message.content || "", reasoning: message.reasoning || "", reasoningTokens: 0, done: true });
+    } else if (message.role === "tool" && !calls.has(message.tool_call_id)) {
+      const detail = callDetails.get(message.tool_call_id) || {};
+      const content = message.content || "";
+      missing.push({
+        type: "tool",
+        key: `tool-message:${message.id}`,
+        callID: message.tool_call_id,
+        name: message.name || detail.name || "tool",
+        args: detail.args || {},
+        content,
+        result: { ok: !String(content).startsWith("error:"), ms: null, preview: content },
+      });
+    }
+  }
+  entries.unshift(...missing.reverse());
   const active = [...entries].reverse().find((entry) => entry.type === "agent" && !entry.done);
   if (session.run.partial && active && session.run.partial.length > active.text.length) active.text = session.run.partial;
   return entries;
+}
+
+function messageCallDetails(messages) {
+  const details = new Map();
+  for (const message of messages) {
+    for (const call of message.tool_calls || []) {
+      let args = call.function?.arguments || {};
+      if (typeof args === "string") {
+        try { args = JSON.parse(args); }
+        catch { args = { arguments: args }; }
+      }
+      details.set(call.id, { name: call.function?.name || "tool", args });
+    }
+  }
+  return details;
 }
 
 const noticeTypes = new Set([
@@ -275,7 +322,7 @@ function toolTick(entry) {
   button.children[1].textContent = keyArgument(entry.args);
   button.children[2].textContent = state;
   button.children[2].className = `tool-state ${state === "error" ? "error" : ""}`;
-  button.children[3].textContent = entry.result ? `${entry.result.ms || 0} ms` : "";
+  button.children[3].textContent = entry.result && entry.result.ms !== null && entry.result.ms !== undefined ? `${entry.result.ms} ms` : "";
   button.onclick = () => {
     expanded.has(entry.key) ? expanded.delete(entry.key) : expanded.add(entry.key);
     render();
@@ -417,9 +464,6 @@ function keyArgument(args) {
 function capResult(value) {
   const lines = String(value || "").split("\n");
   return lines.length <= 200 ? lines.join("\n") : [...lines.slice(0, 199), "[… open in timeline for the rest]"].join("\n");
-}
-function reasoningTokens(session, turn) {
-  return [...(session.timeline || [])].reverse().find((event) => event.type === "model.response" && event.data?.turn === turn)?.data?.reasoning_tokens || 0;
 }
 function renderMarkdown(root, text) {
   const lines = String(text).split("\n");
