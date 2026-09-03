@@ -18,10 +18,10 @@ subscribe(() => {
   renderState();
   renderTimeline();
 	const identityAlarm = document.getElementById("shell-identity-alarm");
-	const fallback = store.shell_identity?.fallback;
-	identityAlarm.hidden = !fallback;
-	identityAlarm.textContent = fallback
-		? `SHELL IDENTITY FALLBACK — running as the operator: ${store.shell_identity.reason}`
+	const identityUnavailable = store.shell_identity?.operator_approval_required || store.shell_identity?.fallback;
+	identityAlarm.hidden = !identityUnavailable;
+	identityAlarm.textContent = identityUnavailable
+		? `SERVICE IDENTITY UNAVAILABLE — shell requires explicit operator approval: ${store.shell_identity.reason}`
 		: "";
   const s = store.sessions[store.active],
     busy = s && s.run.status !== "idle";

@@ -276,7 +276,7 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	overrideArgs := map[string]any{
 		"command":  command,
 		"identity": "harness operator (not Administrator)",
-		"reason":   "service account was denied permission",
+		"reason":   outcome.OperatorOverrideReason,
 		"scope":    "rerun this exact command once",
 	}
 	overrideApproved, overrideErr := r.gate.WaitRequired(ctx, s, runID, overrideID, "shell.operator_override", overrideArgs)

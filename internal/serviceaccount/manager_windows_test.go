@@ -60,7 +60,7 @@ func TestPowerShellReadsGoDPAPICredentialWithoutExposingIt(t *testing.T) {
 }
 
 func TestElevatedCommandUsesUACAndHiddenHelper(t *testing.T) {
-	command := elevatedCommand(`C:\Windows\powershell.exe`, []string{"-File", `C:\Program Files\AgentB\setup.ps1`, "-Confirm:$false"})
+	command := elevatedCommand(`C:\Windows\powershell.exe`, []string{"-File", `C:\Program Files\AgentB\setup.ps1`, "-NoPrompt"})
 	for _, wanted := range []string{"Start-Process", "-Verb RunAs", "-WindowStyle Hidden", "WaitForExit", `"C:\Program Files\AgentB\setup.ps1"`} {
 		if !strings.Contains(command, wanted) {
 			t.Fatalf("elevation command does not contain %q:\n%s", wanted, command)

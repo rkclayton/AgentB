@@ -68,7 +68,7 @@ func (m *windowsManager) Setup(ctx context.Context, account, credentialPath stri
 	arguments := []string{
 		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
 		"-File", scriptPath, "-AccountName", account, "-CredentialStore", credentialPath,
-		"-Confirm:$false",
+		"-NoPrompt",
 	}
 	if reset {
 		arguments = append(arguments, "-ResetPassword")

@@ -2,9 +2,14 @@ package web
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +20,7 @@ import (
 	"harness/internal/config"
 	"harness/internal/credential"
 	"harness/internal/events"
+	"harness/internal/hardening"
 	"harness/internal/probe"
 	"harness/internal/serviceaccount"
 	"harness/internal/session"
@@ -22,25 +28,27 @@ import (
 )
 
 type Server struct {
-	mu         sync.RWMutex
-	cfg        *config.Config
-	configPath string
-	bus        *events.Bus
-	registry   *session.Registry
-	webDir     string
-	scheduler  *agent.Scheduler
-	runner     *agent.Runner
-	prompt     *agent.PromptRenderer
-	replay     *events.Replay
-	credential *credential.Store
-	shell      *tools.Shell
-	account    serviceaccount.Manager
-	shellTest  func(context.Context) (string, error)
-	accountMu  sync.Mutex
+	mu            sync.RWMutex
+	cfg           *config.Config
+	configPath    string
+	bus           *events.Bus
+	registry      *session.Registry
+	webDir        string
+	scheduler     *agent.Scheduler
+	runner        *agent.Runner
+	prompt        *agent.PromptRenderer
+	replay        *events.Replay
+	credential    *credential.Store
+	shell         *tools.Shell
+	account       serviceaccount.Manager
+	hardening     hardening.Manager
+	shellTest     func(context.Context) (string, error)
+	accountMu     sync.Mutex
+	mutationToken string
 }
 
 func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
-	return &Server{cfg: cfg, configPath: path, webDir: webDir, bus: bus}
+	return &Server{cfg: cfg, configPath: path, webDir: webDir, bus: bus, mutationToken: newMutationToken()}
 }
 func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry }
 func (s *Server) SetReplay(replay *events.Replay)        { s.replay = replay }
@@ -50,6 +58,7 @@ func (s *Server) SetShellSecurity(store *credential.Store, shell *tools.Shell) {
 	s.shellTest = shell.TestServiceAccount
 }
 func (s *Server) SetServiceAccountManager(manager serviceaccount.Manager) { s.account = manager }
+func (s *Server) SetHardeningManager(manager hardening.Manager)           { s.hardening = manager }
 func (s *Server) SetRuntime(scheduler *agent.Scheduler, runner *agent.Runner, prompt *agent.PromptRenderer) {
 	s.scheduler = scheduler
 	s.runner = runner
@@ -81,11 +90,110 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/config", s.replayGuard(s.config))
 	mux.HandleFunc("/api/shell-credential", s.replayGuard(s.shellCredential))
 	mux.HandleFunc("/api/service-account", s.replayGuard(s.serviceAccount))
+	mux.HandleFunc("/api/hardening", s.replayGuard(s.hostHardening))
 	mux.HandleFunc("/api/message", s.replayGuard(s.message))
 	mux.HandleFunc("/api/stop", s.replayGuard(s.stop))
 	mux.HandleFunc("/api/approve", s.replayGuard(s.approve))
 	mux.HandleFunc("/api/tools/", s.replayGuard(s.toggleTool))
-	return mux
+	return s.securityHeaders(s.mutationGuard(mux))
+}
+
+func (s *Server) hardeningRequest(serverID string) (hardening.Request, error) {
+	s.mu.RLock()
+	cfg := *s.cfg
+	s.mu.RUnlock()
+	if serverID == "" && len(cfg.Servers) > 0 {
+		serverID = cfg.Servers[0].ID
+	}
+	var profile *config.Profile
+	for index := range cfg.Servers {
+		if cfg.Servers[index].ID == serverID {
+			value := cfg.Servers[index]
+			profile = &value
+			break
+		}
+	}
+	if profile == nil {
+		return hardening.Request{}, fmt.Errorf("model profile not found")
+	}
+	endpoint, err := url.Parse(profile.BaseURL)
+	if err != nil || endpoint.Hostname() == "" || (endpoint.Scheme != "http" && endpoint.Scheme != "https") {
+		return hardening.Request{}, fmt.Errorf("model profile base_url is invalid")
+	}
+	host := endpoint.Hostname()
+	if strings.EqualFold(host, "localhost") {
+		host = "127.0.0.1"
+	}
+	if net.ParseIP(host) == nil {
+		return hardening.Request{}, fmt.Errorf("hardening requires a numeric loopback or Tailscale model address; profile host %q is not numeric", host)
+	}
+	port := 0
+	if endpoint.Port() != "" {
+		if _, err := fmt.Sscanf(endpoint.Port(), "%d", &port); err != nil {
+			return hardening.Request{}, fmt.Errorf("model profile port is invalid")
+		}
+	} else if endpoint.Scheme == "https" {
+		port = 443
+	} else {
+		port = 80
+	}
+	if port < 1 || port > 65535 {
+		return hardening.Request{}, fmt.Errorf("model profile port must be between 1 and 65535")
+	}
+	configPath, err := filepath.Abs(s.configPath)
+	if err != nil {
+		return hardening.Request{}, fmt.Errorf("resolve config path: %w", err)
+	}
+	workspace := cfg.Workspace
+	if !filepath.IsAbs(workspace) {
+		workspace = filepath.Join(filepath.Dir(configPath), workspace)
+	}
+	return hardening.Request{
+		AccountName: cfg.Shell.ServiceAccount.Account, HarnessDirectory: filepath.Dir(configPath),
+		WorkspaceDirectory: workspace, ModelAddress: host, ModelPort: port,
+	}, nil
+}
+
+func newMutationToken() string {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		panic("generate HTTP mutation token: " + err.Error())
+	}
+	return base64.RawURLEncoding.EncodeToString(value)
+}
+
+func (s *Server) mutationGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet || r.Method == http.MethodHead || r.Method == http.MethodOptions {
+			next.ServeHTTP(w, r)
+			return
+		}
+		provided := r.Header.Get("X-AgentB-Mutation-Token")
+		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.mutationToken)) != 1 {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "missing or invalid AgentB mutation token"})
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" && !sameRequestOrigin(origin, r.Host) {
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "cross-origin mutation refused"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func sameRequestOrigin(origin, requestHost string) bool {
+	parsed, err := url.Parse(origin)
+	return err == nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && strings.EqualFold(parsed.Host, requestHost)
+}
+
+func (s *Server) securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) replayGuard(next http.HandlerFunc) http.HandlerFunc {
@@ -120,7 +228,7 @@ func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any 
 	if s.shell != nil {
 		identityStatus = s.shell.IdentityStatus()
 	}
-	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "replay": replay, "shell_credential": credentialStatus, "shell_identity": identityStatus, "serving_facts": servingFacts("SERVING.md"), "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Save a durable workspace note."}, {"name": "glob", "description": "Find files by name pattern."}}}
+	return map[string]any{"sessions": sessions, "servers": masked.Servers, "config": masked, "replay": replay, "mutation_token": s.mutationToken, "shell_credential": credentialStatus, "shell_identity": identityStatus, "serving_facts": servingFacts("SERVING.md"), "flow": map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}}, "tools": []map[string]string{{"name": "read_file", "description": "Read a UTF-8 text file."}, {"name": "list_dir", "description": "List a directory."}, {"name": "write_file", "description": "Write a file."}, {"name": "edit_file", "description": "Edit a file."}, {"name": "grep", "description": "Search files."}, {"name": "shell", "description": "Run a shell command."}, {"name": "remember", "description": "Save a durable workspace note."}, {"name": "glob", "description": "Find files by name pattern."}}}
 }
 
 func (s *Server) shellCredential(w http.ResponseWriter, r *http.Request) {

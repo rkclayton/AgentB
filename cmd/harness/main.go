@@ -19,6 +19,7 @@ import (
 	"harness/internal/config"
 	"harness/internal/credential"
 	"harness/internal/events"
+	"harness/internal/hardening"
 	"harness/internal/llm"
 	"harness/internal/memory"
 	"harness/internal/probe"
@@ -110,6 +111,11 @@ func main() {
 	})
 	web.SetShellSecurity(credentialStore, shellTool)
 	web.SetServiceAccountManager(serviceaccount.New(filepath.Join("scripts", "setup-service-account.ps1")))
+	web.SetHardeningManager(hardening.New(
+		filepath.Join("scripts", "apply-acls.ps1"),
+		filepath.Join("scripts", "apply-firewall-rule.ps1"),
+		filepath.Join("scripts", "apply-hardening.ps1"),
+	))
 	toolRegistry := tools.New(
 		tools.NewReadFile(cfg.Tools.ReadFile),
 		tools.NewListDir(cfg.Tools.ListDir),

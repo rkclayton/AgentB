@@ -17,7 +17,7 @@ go build ./cmd/harness
 ./harness
 ```
 
-The first start copies `harness.example.json` to the ignored local `harness.json`; expand **Servers**, set `base_url` and `model` (and `api_key` when needed), then select **Test**. A successful test stays labeled `ready`; choose that profile for the existing session under **Sessions**. Settings → Shell can create or reset the local service account through Windows UAC without running AgentB itself as Administrator; follow the [Windows host hardening](docs/HARDENING.md) sequence. If the endpoint does not report its context size, enter its documented limit in `n_ctx_override`; AgentB refuses to guess a context ceiling.
+The first start copies `harness.example.json` to the ignored local `harness.json`; expand **Servers**, set `base_url` and `model` (and `api_key` when needed), then select **Test**. A successful test stays labeled `ready`; choose that profile for the existing session under **Sessions**. Settings → Shell can create the local service account, verify the identity split, and apply/verify the application ACL and outbound firewall policies through Windows UAC without running AgentB itself as Administrator; follow the [Windows host hardening](docs/HARDENING.md) sequence. If the endpoint does not report its context size, enter its documented limit in `n_ctx_override`; AgentB refuses to guess a context ceiling.
 
 Without llama.cpp's accounting endpoints, the budget meter uses calibrated estimation instead of exact categories, the cached-token readout is hidden, and the prefill and tok/s readouts stay dark. The agent loop, tools, approvals, sessions, memory, compaction, chat, and replay remain available once the endpoint passes the baseline profile checks. See [Capability degradation](#capability-degradation) for the complete behavior.
 
@@ -45,7 +45,7 @@ Profiles hold an endpoint, model, sampling, reasoning, context settings, and mea
 
 Sessions are ephemeral views onto a workspace and may use different profiles. Point several sessions at one workspace for a swarm; file-write conflicts force a re-read instead of silently overwriting another session. AgentB schedules two runs by default, but a llama.cpp server started with `--parallel 1` interleaves their slot work instead of decoding two requests simultaneously.
 
-With the service-account split enabled, a shell command that reports a permission denial pauses and offers **Run once as operator**. That action reruns only the displayed command once under the Windows account running AgentB, is required even when normal approvals are off, and is logged. It does not grant a lasting permission or run as Administrator; work requiring elevation remains an operator task outside AgentB.
+With the service-account split enabled, a shell permission denial or service-identity launch failure pauses and offers **Run once as operator**. The failed command is never retried automatically. Approval reruns only the displayed command once under the Windows account running AgentB, is required even when normal approvals are off, and is logged. It does not grant a lasting permission or run as Administrator.
 
 ## Bring your own model
 

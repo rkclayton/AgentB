@@ -11,13 +11,18 @@ param(
 
     [switch]$Inspect,
 
-    [switch]$ValidateCredentialStore
+	[switch]$ValidateCredentialStore,
+
+	# Internal UAC helper path. The browser already supplied the two matching
+	# password entries and the API validated the requested operation.
+	[switch]$NoPrompt
 )
 
 $ErrorActionPreference = 'Stop'
 $minimumPasswordLength = 14
 $script:changeState = 'nothing'
-$script:confirmationSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not [bool]$PSBoundParameters['Confirm']
+$script:confirmationSuppressed = $NoPrompt -or ($PSBoundParameters.ContainsKey('Confirm') -and -not [bool]$PSBoundParameters['Confirm'])
+if ($NoPrompt) { $ConfirmPreference = 'None' }
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()

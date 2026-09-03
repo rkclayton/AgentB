@@ -94,6 +94,7 @@ func postSessionUpdate(t *testing.T, server *Server, body string) *httptest.Resp
 	t.Helper()
 	request := httptest.NewRequest(http.MethodPost, "/api/sessions/main", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
+	authorizeMutation(request, server)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	return response

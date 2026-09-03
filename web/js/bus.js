@@ -6,8 +6,9 @@ export const store = {
   flow: { stages: [], edges: [] },
   tools: [],
   serving_facts: {},
+	mutation_token: "",
 	shell_credential: { stored: false, stored_at: "" },
-	shell_identity: { fallback: false, reason: "", since: "" },
+	shell_identity: { fallback: false, operator_approval_required: false, reason: "", since: "" },
   replay: false,
 };
 const listeners = new Set();
@@ -286,6 +287,8 @@ export function setActive(id) {
 }
 export async function api(path, body, method = "POST") {
   const options = { method, headers: {} };
+	if (method !== "GET" && method !== "HEAD")
+		options.headers["X-AgentB-Mutation-Token"] = store.mutation_token;
   if (body !== undefined) {
     options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);

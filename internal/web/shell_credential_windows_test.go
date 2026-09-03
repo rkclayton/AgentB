@@ -34,6 +34,7 @@ func TestShellCredentialEndpointNeverReturnsPassword(t *testing.T) {
 	password := hex.EncodeToString(random)
 	request := httptest.NewRequest(http.MethodPost, "/api/shell-credential", strings.NewReader(`{"action":"store","password":"`+password+`"}`))
 	request.Header.Set("Content-Type", "application/json")
+	authorizeMutation(request, server)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK {
@@ -45,6 +46,7 @@ func TestShellCredentialEndpointNeverReturnsPassword(t *testing.T) {
 
 	request = httptest.NewRequest(http.MethodPost, "/api/shell-credential", strings.NewReader(`{"action":"clear"}`))
 	request.Header.Set("Content-Type", "application/json")
+	authorizeMutation(request, server)
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"stored":false`) {

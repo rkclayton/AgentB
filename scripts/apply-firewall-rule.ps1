@@ -2,20 +2,28 @@
 param(
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
     [string]$AccountName = 'agentb-svc',
-
     [string]$ModelAddress = '127.0.0.1',
-
     [ValidateRange(1, 65535)]
     [int]$ModelPort = 8080,
-
-    [switch]$Remove
+    [switch]$Verify,
+    [switch]$Remove,
+	[switch]$Inspect,
+	[switch]$NoPrompt
 )
 
 $ErrorActionPreference = 'Stop'
-$blockRuleName = 'AgentB-Svc-Outbound-Block'
-$allowRuleName = 'AgentB-Svc-Model-Allow'
-$script:removedRules = 0
-$script:confirmationSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not [bool]$PSBoundParameters['Confirm']
+$ruleName = 'AgentB-Svc-Outbound-Block'
+$legacyAllowRuleName = 'AgentB-Svc-Model-Allow'
+$statusMarker = 'AGENTB_FIREWALL_STATUS='
+$blockedRanges = @(
+    '0.0.0.0-100.63.255.255',
+    '100.128.0.0-126.255.255.255',
+    '128.0.0.0-255.255.255.255',
+    '::/128',
+    '::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff'
+)
+$script:confirmationSuppressed = $NoPrompt -or ($PSBoundParameters.ContainsKey('Confirm') -and -not [bool]$PSBoundParameters['Confirm'])
+if ($NoPrompt) { $ConfirmPreference = 'None' }
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -23,7 +31,7 @@ function Test-IsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Write-FirewallSummary {
+function Write-Summary {
     param([string[]]$Changed, [string[]]$NotChanged, [string[]]$Next)
     Write-Host ''
     Write-Host 'SUMMARY'
@@ -35,8 +43,8 @@ function Write-FirewallSummary {
 function Stop-UnsafeConfirmation {
     param([string]$Message)
     [Console]::Error.WriteLine("PROMPT REFUSED: $Message")
-    [Console]::Error.WriteLine('Run this command alone in an interactive console, or use -Confirm:$false for intentional non-interactive removal.')
-    Write-FirewallSummary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('rerun safely after reviewing -WhatIf output')
+    [Console]::Error.WriteLine('Run this command alone in an interactive console, or use -Confirm:$false only after reviewing -WhatIf output.')
+    Write-Summary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('rerun safely after reviewing -WhatIf output')
     exit 2
 }
 
@@ -71,84 +79,113 @@ function Test-ConfirmationPromptExpected {
 
 function Resolve-LocalUserSid {
     param([string]$Name)
-
     $user = Get-LocalUser -Name $Name -ErrorAction SilentlyContinue
-    if (-not $user) {
-        throw "Local account '$Name' does not exist. Run setup-service-account.ps1 first."
-    }
+    if (-not $user) { throw "Local account '$Name' does not exist. Create and verify it in AgentB Settings first." }
     return $user.SID.Value
 }
 
-trap {
-    [Console]::Error.WriteLine("FIREWALL SCRIPT FAILED: $($_.Exception.Message)")
-    Write-FirewallSummary -Changed @("$script:removedRules reserved firewall rule(s) removed before failure") -NotChanged @('firewall profile defaults') -Next @('inspect reserved rules and rerun with -WhatIf')
-    exit 1
+function Test-AllowedModelAddress {
+    param([string]$Address)
+    try { $ip = [Net.IPAddress]::Parse($Address) } catch { return $false }
+    if ($ip.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetworkV6) {
+        return $ip.Equals([Net.IPAddress]::IPv6Loopback)
+    }
+    $bytes = $ip.GetAddressBytes()
+    return $bytes[0] -eq 127 -or ($bytes[0] -eq 100 -and $bytes[1] -ge 64 -and $bytes[1] -le 127)
 }
 
-if (-not (Test-IsAdministrator)) {
-    [Console]::Error.WriteLine('Administrator elevation is required. Reopen PowerShell as Administrator and run this script again.')
-    Write-FirewallSummary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('reopen PowerShell as Administrator and rerun')
-    exit 1
+function Test-RuleIntent {
+    param([string]$LocalUserSddl)
+    $rule = Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue
+    if (-not $rule) { return $false }
+    if ($rule.Direction -ne 'Outbound' -or $rule.Action -ne 'Block' -or $rule.Enabled -ne 'True' -or $rule.Profile -ne 'Any') { return $false }
+    if ($rule.LocalUser -ne $LocalUserSddl) { return $false }
+    $actual = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule).RemoteAddress | Sort-Object)
+    $expected = @($blockedRanges | Sort-Object)
+    return ($actual.Count -eq $expected.Count -and -not (Compare-Object -ReferenceObject $expected -DifferenceObject $actual))
+}
+
+if (($Verify.IsPresent -and $Remove.IsPresent) -or ($Inspect.IsPresent -and ($Verify.IsPresent -or $Remove.IsPresent))) {
+    [Console]::Error.WriteLine('Choose only one of -Verify, -Remove, or -Inspect.')
+    exit 2
+}
+if (-not (Test-AllowedModelAddress -Address $ModelAddress)) {
+    [Console]::Error.WriteLine("ModelAddress must be an IP inside 127.0.0.0/8, 100.64.0.0/10, or IPv6 loopback. '$ModelAddress' would be blocked by this policy.")
+    exit 2
 }
 
 Write-Host 'AgentB service-account outbound firewall policy'
 Write-Host "Account: $env:COMPUTERNAME\$AccountName"
+Write-Host "Model endpoint confirmed inside the spared local/Tailscale ranges: $ModelAddress`:$ModelPort"
+Write-Host 'Policy: one user-scoped outbound Block rule; spare IPv4 loopback 127.0.0.0/8, Tailscale 100.64.0.0/10, and IPv6 loopback ::1.'
+Write-Host 'No Allow rule is created and machine-wide DefaultOutboundAction is not changed.'
+
+if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $Verify -and -not $Inspect) {
+    [Console]::Error.WriteLine('Administrator elevation is required to apply or remove the firewall rule.')
+    Write-Summary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('use AgentB Settings or reopen PowerShell as Administrator')
+    exit 1
+}
 
 if ($Remove) {
-    $removed = 0
-    $absent = 0
-    foreach ($name in @($blockRuleName, $allowRuleName)) {
-        $rule = Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue
-        if (-not $rule) {
-            Write-Host "UNCHANGED: firewall rule is already absent :: $name"
-            $absent++
-            continue
-        }
-        if (Test-ConfirmationPromptExpected) {
-            Assert-SafeConfirmationInput
-        }
-        if ($PSCmdlet.ShouldProcess($name, 'Remove AgentB firewall rule')) {
-            Remove-NetFirewallRule -Name $name
-            Write-Host "REMOVED: $name"
-            $removed++
-            $script:removedRules++
-        }
+    $present = @(Get-NetFirewallRule -Name $ruleName, $legacyAllowRuleName -ErrorAction SilentlyContinue)
+    if ($present.Count -eq 0) {
+        Write-Host 'UNCHANGED: AgentB reserved firewall rules are already absent.'
+        Write-Summary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('remove ACLs before deleting the service account if rolling back fully')
+        exit 0
     }
-    Write-FirewallSummary -Changed @("$removed reserved firewall rule(s) removed") -NotChanged @("$absent reserved firewall rule(s) were already absent", 'firewall profile defaults') -Next @('verify the service-account split before applying any replacement outbound policy')
+    if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
+    if ($PSCmdlet.ShouldProcess(($present.Name -join ', '), 'Remove AgentB firewall rules')) {
+        $present | Remove-NetFirewallRule
+        Write-Host "REMOVED: $($present.Name -join ', ')"
+    }
+    Write-Summary -Changed @('reserved AgentB firewall rules removed') -NotChanged @('firewall profile defaults') -Next @('remove ACLs before deleting the service account if rolling back fully')
     exit 0
 }
-
-$localUserSddl = if ($WhatIfPreference) {
-    'D:(A;;CC;;;<resolved local-account SID>)'
-} else {
-    try {
-        $sid = Resolve-LocalUserSid -Name $AccountName
-    } catch {
-        [Console]::Error.WriteLine("Firewall policy setup failed: $($_.Exception.Message)")
-        Write-FirewallSummary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('create and verify the service account, then rerun')
-        exit 1
-    }
-    "D:(A;;CC;;;$sid)"
-}
-
-Write-Host "Requested block rule name: $blockRuleName"
-Write-Host "Requested model exception: TCP $ModelAddress`:$ModelPort ($allowRuleName)"
-Write-Host "LocalUser form: $localUserSddl"
-Write-Host 'Verified Windows behavior: an explicit Block rule wins over a conflicting explicit Allow rule.'
-Write-Host 'Therefore a blanket user-scoped Block plus a narrower model-server Allow would also block the model server.'
-
-$profiles = Get-NetFirewallProfile | Sort-Object Name
-$profileSummary = ($profiles | ForEach-Object { "$($_.Name)=$($_.DefaultOutboundAction)" }) -join ', '
-Write-Host "Current profile DefaultOutboundAction values: $profileSummary"
 
 if ($WhatIfPreference) {
     Write-Host 'Mode: WhatIf; no firewall rule or profile setting will be changed.'
-    Write-Host 'No rules would be created: the requested allow-list policy first requires an operator decision to set outbound default action to Block or to choose a different non-overlapping policy design.'
-    Write-Host 'This script intentionally does not change the machine-wide outbound default.'
-    Write-FirewallSummary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('verify the service-account split', 'complete the separate firewall redesign before applying a policy')
+    $null = $PSCmdlet.ShouldProcess($ruleName, "Create or repair user-scoped outbound Block over: $($blockedRanges -join ', ')")
+    Write-Summary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('apply from AgentB Settings, then verify')
     exit 0
 }
 
-Write-Error 'No firewall rules were created. A correct deny-by-default policy with an allow-list requires a machine-wide outbound-default decision; this script will not make that decision or install a misleading block-plus-allow pair.' -ErrorAction Continue
-Write-FirewallSummary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('complete the separate non-overlapping firewall redesign')
-exit 2
+$sid = $null
+try { $sid = Resolve-LocalUserSid -Name $AccountName } catch {
+    if ($Inspect) {
+        $status = [ordered]@{ supported = $true; account_exists = $false; applied = $false; summary = $_.Exception.Message }
+        Write-Output ($statusMarker + ($status | ConvertTo-Json -Compress))
+        exit 0
+    }
+    [Console]::Error.WriteLine("Firewall policy failed: $($_.Exception.Message)")
+    exit 1
+}
+$localUserSddl = "D:(A;;CC;;;$sid)"
+$correct = Test-RuleIntent -LocalUserSddl $localUserSddl
+$legacyPresent = [bool](Get-NetFirewallRule -Name $legacyAllowRuleName -ErrorAction SilentlyContinue)
+
+if ($Inspect) {
+    $status = [ordered]@{ supported = $true; account_exists = $true; applied = ($correct -and -not $legacyPresent); summary = $(if ($correct -and -not $legacyPresent) { 'user-scoped outbound policy verified' } else { 'firewall rule missing or drifted' }) }
+    Write-Output ($statusMarker + ($status | ConvertTo-Json -Compress))
+    exit 0
+}
+if ($Verify) {
+    Write-Host "$(if ($correct) { 'PASS' } else { 'DRIFT' }): $ruleName"
+    Write-Host "$(if (-not $legacyPresent) { 'PASS' } else { 'DRIFT' }): no conflicting legacy Allow rule"
+    Write-Summary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @($(if ($correct -and -not $legacyPresent) { 'firewall verification complete' } else { 'apply again to repair drift' }))
+    if (-not $correct -or $legacyPresent) { exit 1 }
+    exit 0
+}
+
+if ($correct -and -not $legacyPresent) {
+    Write-Host "UNCHANGED: exact firewall policy already exists :: $ruleName"
+    Write-Summary -Changed @() -NotChanged @('firewall rule', 'firewall profile defaults') -Next @('run the RBAC network check')
+    exit 0
+}
+
+if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
+if ($PSCmdlet.ShouldProcess($ruleName, 'Create or repair AgentB user-scoped outbound Block rule')) {
+    Get-NetFirewallRule -Name $ruleName, $legacyAllowRuleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    $null = New-NetFirewallRule -Name $ruleName -DisplayName $ruleName -Description 'Blocks AgentB service-account egress except loopback and Tailscale address ranges.' -Direction Outbound -Action Block -Enabled True -Profile Any -LocalUser $localUserSddl -RemoteAddress $blockedRanges
+    Write-Host "APPLIED: $ruleName"
+}
+Write-Summary -Changed @('user-scoped outbound Block rule applied') -NotChanged @('firewall profile defaults') -Next @('verify from Settings', 'run the RBAC network check')

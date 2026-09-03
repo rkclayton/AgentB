@@ -84,6 +84,7 @@ func TestServiceAccountSetupStoresEnablesAndTestsWithoutReturningPassword(t *tes
 	body := `{"action":"create","password":"` + password + `","confirmation":"` + password + `"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/service-account", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
+	authorizeMutation(request, server)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 
@@ -119,6 +120,7 @@ func TestServiceAccountSetupRejectsMismatchBeforeMutation(t *testing.T) {
 	password := randomTestPassword(t)
 	request := httptest.NewRequest(http.MethodPost, "/api/service-account", strings.NewReader(`{"action":"create","password":"`+password+`","confirmation":"different"}`))
 	request.Header.Set("Content-Type", "application/json")
+	authorizeMutation(request, server)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 
@@ -144,6 +146,7 @@ func TestServiceAccountCanceledElevationRestoresCredential(t *testing.T) {
 	password := randomTestPassword(t)
 	request := httptest.NewRequest(http.MethodPost, "/api/service-account", strings.NewReader(`{"action":"create","password":"`+password+`","confirmation":"`+password+`"}`))
 	request.Header.Set("Content-Type", "application/json")
+	authorizeMutation(request, server)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 
@@ -173,6 +176,7 @@ func TestServiceAccountAttemptedFailureRetainsSubmittedCredentialAndWarns(t *tes
 	password := randomTestPassword(t)
 	request := httptest.NewRequest(http.MethodPost, "/api/service-account", strings.NewReader(`{"action":"create","password":"`+password+`","confirmation":"`+password+`"}`))
 	request.Header.Set("Content-Type", "application/json")
+	authorizeMutation(request, server)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 

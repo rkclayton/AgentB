@@ -35,10 +35,15 @@ type shellCredentialReader interface {
 }
 
 type ShellIdentityStatus struct {
-	Fallback bool   `json:"fallback"`
-	Reason   string `json:"reason"`
-	Since    string `json:"since"`
+	Fallback                 bool   `json:"fallback"`
+	OperatorApprovalRequired bool   `json:"operator_approval_required"`
+	Reason                   string `json:"reason"`
+	Since                    string `json:"since"`
 }
+
+type operatorOverrideRequired struct{ reason string }
+
+func (e *operatorOverrideRequired) Error() string { return e.reason }
 
 func NewShell(cfg config.Shell) *Shell {
 	return &Shell{cfg: cfg, startService: startServiceAccountProcess}
@@ -52,33 +57,33 @@ func (s *Shell) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"command": map[string]any{"type": "string"}, "timeout_s": map[string]any{"type": "integer", "default": cfg.TimeoutS, "maximum": cfg.MaxTimeoutS}}, "required": []string{"command"}}
 }
 func (s *Shell) Call(ctx context.Context, item *session.Session, args map[string]any) (string, error) {
-	result, err, _ := s.CallDetailed(ctx, item, args)
-	return result, err
+	detail := s.CallDetailed(ctx, item, args)
+	return detail.Content, detail.Err
 }
 
-func (s *Shell) CallDetailed(ctx context.Context, item *session.Session, args map[string]any) (string, error, bool) {
+func (s *Shell) CallDetailed(ctx context.Context, item *session.Session, args map[string]any) CallDetail {
 	return s.call(ctx, item, args, false)
 }
 
 // CallAsOperator is intentionally absent from the Tool interface and schema.
 // Only the dispatcher invokes it after a separate, unconditional approval.
 func (s *Shell) CallAsOperator(ctx context.Context, item *session.Session, args map[string]any) (string, error) {
-	result, err, _ := s.call(ctx, item, args, true)
-	return result, err
+	detail := s.call(ctx, item, args, true)
+	return detail.Content, detail.Err
 }
 
-func (s *Shell) call(ctx context.Context, item *session.Session, args map[string]any, forceOperator bool) (string, error, bool) {
+func (s *Shell) call(ctx context.Context, item *session.Session, args map[string]any, forceOperator bool) CallDetail {
 	cfg := s.config()
 	command, ok := args["command"].(string)
 	if !ok || strings.TrimSpace(command) == "" {
-		return "", fmt.Errorf("command is required"), false
+		return CallDetail{Err: fmt.Errorf("command is required")}
 	}
 	if cfg.FileRoutingGuardEnabled() {
 		refusal, ambiguous := inspectShellFileRouting(command)
 		if refusal != nil {
 			result, _ := json.Marshal(refusal)
 			log.Printf("shell file-routing refusal: session=%s tool=%s command=%q", item.ID, refusal.Replacement.Tool, command)
-			return string(result), nil, false
+			return CallDetail{Content: string(result)}
 		}
 		if ambiguous {
 			log.Printf("debug: shell file-routing guard allowed ambiguous compound command: %q", command)
@@ -86,7 +91,7 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 	}
 	for _, denied := range cfg.Deny {
 		if denied != "" && strings.Contains(strings.ToLower(command), strings.ToLower(denied)) {
-			return "", fmt.Errorf("command blocked by deny list"), false
+			return CallDetail{Err: fmt.Errorf("command blocked by deny list")}
 		}
 	}
 	timeout := number(args["timeout_s"], cfg.TimeoutS)
@@ -107,7 +112,14 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 		process, usedService, err = s.start(cfg, item.Workspace, argv, &output)
 	}
 	if err != nil {
-		return "", err, false
+		var required *operatorOverrideRequired
+		if errors.As(err, &required) {
+			return CallDetail{
+				Content:                "service-account shell was not started: " + required.reason,
+				OperatorOverrideReason: required.reason,
+			}
+		}
+		return CallDetail{Err: err}
 	}
 	type waitResult struct {
 		code int
@@ -124,24 +136,28 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 	case <-ctx.Done():
 		process.KillTree()
 		<-done
-		return "", ctx.Err(), false
+		return CallDetail{Err: ctx.Err()}
 	case <-timer.C:
 		process.KillTree()
 		<-done
 		partial := cutOutput(output.String(), cfg.MaxOutputLinesHead, cfg.MaxOutputLinesTail)
 		if partial != "" {
-			return "", fmt.Errorf("timed out after %ds; partial output:\n%s", timeout, partial), false
+			return CallDetail{Err: fmt.Errorf("timed out after %ds; partial output:\n%s", timeout, partial)}
 		}
-		return "", fmt.Errorf("timed out after %ds; partial output:", timeout), false
+		return CallDetail{Err: fmt.Errorf("timed out after %ds; partial output:", timeout)}
 	case result := <-done:
 		if result.err != nil {
-			return "", result.err, false
+			return CallDetail{Err: result.err}
 		}
 		body := cutOutput(output.String(), cfg.MaxOutputLinesHead, cfg.MaxOutputLinesTail)
 		if body == "" {
-			return fmt.Sprintf("exit=%d", result.code), nil, false
+			return CallDetail{Content: fmt.Sprintf("exit=%d", result.code)}
 		}
-		return fmt.Sprintf("exit=%d\n%s", result.code, body), nil, usedService && permissionDeniedOutput(body)
+		detail := CallDetail{Content: fmt.Sprintf("exit=%d\n%s", result.code, body)}
+		if usedService && permissionDeniedOutput(body) {
+			detail.OperatorOverrideReason = "service account was denied permission"
+		}
+		return detail
 	}
 }
 
@@ -170,10 +186,9 @@ func (s *Shell) start(cfg config.Shell, workspace string, argv []string, output 
 			reason = "service-account credential cannot be decrypted by this harness identity"
 		}
 	}
-	s.setIdentity(ShellIdentityStatus{Fallback: true, Reason: reason, Since: time.Now().UTC().Format(time.RFC3339)})
-	log.Printf("ALARM: shell service-account spawn failed; falling back to harness identity: %s", reason)
-	process, err := startHarnessProcess(cfg.Command[0], argv, workspace, output)
-	return process, false, err
+	s.setIdentity(ShellIdentityStatus{OperatorApprovalRequired: true, Reason: reason, Since: time.Now().UTC().Format(time.RFC3339)})
+	log.Printf("ALARM: shell service-account spawn failed; operator approval required: %s", reason)
+	return nil, false, &operatorOverrideRequired{reason: reason}
 }
 
 func permissionDeniedOutput(output string) bool {
@@ -261,7 +276,9 @@ func (s *Shell) IdentityStatus() ShellIdentityStatus {
 
 func (s *Shell) setIdentity(status ShellIdentityStatus) {
 	s.identityMu.Lock()
-	if status.Fallback && s.identity.Fallback && s.identity.Reason == status.Reason {
+	if (status.Fallback || status.OperatorApprovalRequired) &&
+		(s.identity.Fallback || s.identity.OperatorApprovalRequired) &&
+		s.identity.Reason == status.Reason {
 		status.Since = s.identity.Since
 	}
 	s.identity = status
@@ -277,6 +294,9 @@ func (s *Shell) Configure(value config.Config) {
 	s.cfg = value.Shell
 	s.workspace = value.Workspace
 	s.mu.Unlock()
+	if !value.Shell.ServiceAccount.Enabled {
+		s.setIdentity(ShellIdentityStatus{})
+	}
 }
 func (s *Shell) config() config.Shell { s.mu.RLock(); defer s.mu.RUnlock(); return s.cfg }
 func (s *Shell) configWithWorkspace() (config.Shell, string) {

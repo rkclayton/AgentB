@@ -23,12 +23,19 @@ type CallOutcome struct {
 	Content                   string
 	OK                        bool
 	OperatorOverrideAvailable bool
+	OperatorOverrideReason    string
 }
 
 // DetailedTool is optional. It lets a tool report that a narrowly scoped,
 // user-approved retry is available without exposing that retry to the model.
 type DetailedTool interface {
-	CallDetailed(context.Context, *session.Session, map[string]any) (string, error, bool)
+	CallDetailed(context.Context, *session.Session, map[string]any) CallDetail
+}
+
+type CallDetail struct {
+	Content                string
+	Err                    error
+	OperatorOverrideReason string
 }
 
 // OperatorOverrideTool is optional and is called only by the dispatcher after
@@ -93,9 +100,10 @@ func (r *Registry) CallDetailed(ctx context.Context, s *session.Session, name st
 	}
 	var result string
 	var err error
-	override := false
+	overrideReason := ""
 	if detailed, ok := tool.(DetailedTool); ok {
-		result, err, override = detailed.CallDetailed(ctx, s, args)
+		detail := detailed.CallDetailed(ctx, s, args)
+		result, err, overrideReason = detail.Content, detail.Err, detail.OperatorOverrideReason
 	} else {
 		result, err = tool.Call(ctx, s, args)
 	}
@@ -105,7 +113,7 @@ func (r *Registry) CallDetailed(ctx context.Context, s *session.Session, name st
 		}
 		return CallOutcome{Content: "error: " + err.Error()}
 	}
-	return CallOutcome{Content: result, OK: true, OperatorOverrideAvailable: override}
+	return CallOutcome{Content: result, OK: true, OperatorOverrideAvailable: overrideReason != "", OperatorOverrideReason: overrideReason}
 }
 func (r *Registry) CallAsOperator(ctx context.Context, s *session.Session, name string, args map[string]any) (string, bool) {
 	tool := r.byName[name]

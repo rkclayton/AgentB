@@ -2,21 +2,21 @@
 param(
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
     [string]$AccountName = 'agentb-svc',
-
     [string]$HarnessDirectory,
-
     [string]$WorkspaceDirectory,
-
     [string]$MemoryDirectory,
-
-    [switch]$Verify
+    [switch]$Verify,
+    [switch]$Remove,
+	[switch]$Inspect,
+	[switch]$NoPrompt
 )
 
 $ErrorActionPreference = 'Stop'
-$script:appliedRules = 0
-$script:unchangedRules = 0
-$script:workspaceCreated = $false
-$script:confirmationSuppressed = $PSBoundParameters.ContainsKey('Confirm') -and -not [bool]$PSBoundParameters['Confirm']
+$statusMarker = 'AGENTB_ACL_STATUS='
+$script:changed = 0
+$script:unchanged = 0
+$script:confirmationSuppressed = $NoPrompt -or ($PSBoundParameters.ContainsKey('Confirm') -and -not [bool]$PSBoundParameters['Confirm'])
+if ($NoPrompt) { $ConfirmPreference = 'None' }
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -24,7 +24,7 @@ function Test-IsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Write-AclSummary {
+function Write-Summary {
     param([string[]]$Changed, [string[]]$NotChanged, [string[]]$Next)
     Write-Host ''
     Write-Host 'SUMMARY'
@@ -36,8 +36,8 @@ function Write-AclSummary {
 function Stop-UnsafeConfirmation {
     param([string]$Message)
     [Console]::Error.WriteLine("PROMPT REFUSED: $Message")
-    [Console]::Error.WriteLine('Run this command alone in an interactive console, or use -Confirm:$false for intentional non-interactive application.')
-    Write-AclSummary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('rerun safely after reviewing -WhatIf output')
+    [Console]::Error.WriteLine('Run this command alone in an interactive console, or use -Confirm:$false only after reviewing -WhatIf output.')
+    Write-Summary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('rerun safely after reviewing -WhatIf output')
     exit 2
 }
 
@@ -72,10 +72,9 @@ function Test-ConfirmationPromptExpected {
 
 function Resolve-ServiceIdentity {
     param([string]$Name)
-
     $localUser = Get-LocalUser -Name $Name -ErrorAction SilentlyContinue
     if (-not $localUser) {
-        throw "Local account '$Name' does not exist. Run setup-service-account.ps1 first."
+        throw "Local account '$Name' does not exist. Create and verify it in AgentB Settings first."
     }
     return $localUser.SID
 }
@@ -87,7 +86,6 @@ function New-ManagedRule {
         [Security.AccessControl.InheritanceFlags]$Inheritance,
         [Security.AccessControl.AccessControlType]$Type
     )
-
     return [Security.AccessControl.FileSystemAccessRule]::new(
         $Identity,
         $Rights,
@@ -97,7 +95,7 @@ function New-ManagedRule {
     )
 }
 
-function Test-ManagedRule {
+function Get-ExactManagedRules {
     param(
         [Security.AccessControl.FileSystemSecurity]$Acl,
         [Security.Principal.SecurityIdentifier]$Identity,
@@ -105,81 +103,78 @@ function Test-ManagedRule {
         [Security.AccessControl.InheritanceFlags]$Inheritance,
         [Security.AccessControl.AccessControlType]$Type
     )
-
-    foreach ($rule in $Acl.Access) {
-        try {
-            $ruleSid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier])
-        } catch {
-            continue
-        }
-        if ($ruleSid -eq $Identity -and
-            -not $rule.IsInherited -and
-            $rule.AccessControlType -eq $Type -and
-            $rule.FileSystemRights -eq $Rights -and
-            $rule.InheritanceFlags -eq $Inheritance -and
-            $rule.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::None) {
-            return $true
-        }
-    }
-    return $false
+    return @($Acl.Access | Where-Object {
+        try { $ruleSid = $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]) } catch { return $false }
+        return $ruleSid -eq $Identity -and
+            -not $_.IsInherited -and
+            $_.AccessControlType -eq $Type -and
+            $_.FileSystemRights -eq $Rights -and
+            $_.InheritanceFlags -eq $Inheritance -and
+            $_.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::None
+    })
 }
 
 function Set-ManagedRule {
-    param(
-        [string]$Path,
-        [Security.Principal.SecurityIdentifier]$Identity,
-        [Security.AccessControl.FileSystemRights]$Rights,
-        [Security.AccessControl.InheritanceFlags]$Inheritance,
-        [Security.AccessControl.AccessControlType]$Type,
-        [string]$Intent
-    )
-
-    $acl = Get-Acl -LiteralPath $Path
-    if (Test-ManagedRule -Acl $acl -Identity $Identity -Rights $Rights -Inheritance $Inheritance -Type $Type) {
-        Write-Host "UNCHANGED: $Intent :: $Path"
-        $script:unchangedRules++
+    param([pscustomobject]$Target, [Security.Principal.SecurityIdentifier]$Identity)
+    $acl = Get-Acl -LiteralPath $Target.Path
+    if ((Get-ExactManagedRules -Acl $acl -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type).Count -gt 0) {
+        Write-Host "UNCHANGED: $($Target.Intent) :: $($Target.Path)"
+        $script:unchanged++
         return
     }
-    if (Test-ConfirmationPromptExpected) {
-        Assert-SafeConfirmationInput
-    }
-    if ($PSCmdlet.ShouldProcess($Path, $Intent)) {
-        $rule = New-ManagedRule -Identity $Identity -Rights $Rights -Inheritance $Inheritance -Type $Type
-        $null = $acl.AddAccessRule($rule)
-        Set-Acl -LiteralPath $Path -AclObject $acl
-        Write-Host "APPLIED: $Intent :: $Path"
-        $script:appliedRules++
+    if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
+    if ($PSCmdlet.ShouldProcess($Target.Path, $Target.Intent)) {
+        $null = $acl.AddAccessRule((New-ManagedRule -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type))
+        Set-Acl -LiteralPath $Target.Path -AclObject $acl
+        Write-Host "APPLIED: $($Target.Intent) :: $($Target.Path)"
+        $script:changed++
     }
 }
 
-trap {
-    [Console]::Error.WriteLine("ACL SCRIPT FAILED: $($_.Exception.Message)")
-    Write-AclSummary -Changed @("$script:appliedRules managed ACL rule(s) applied before failure", $(if ($script:workspaceCreated) { 'workspace directory was created' } else { 'no directory creation is claimed' })) -NotChanged @("$script:unchangedRules exact managed ACL rule(s)") -Next @('inspect the paths above, then rerun with -Verify')
-    exit 1
+function Remove-ManagedRule {
+    param([pscustomobject]$Target, [Security.Principal.SecurityIdentifier]$Identity)
+    $acl = Get-Acl -LiteralPath $Target.Path
+    $rules = Get-ExactManagedRules -Acl $acl -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type
+    if ($rules.Count -eq 0) {
+        Write-Host "UNCHANGED: managed ACE already absent :: $($Target.Path)"
+        $script:unchanged++
+        return
+    }
+    if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
+    if ($PSCmdlet.ShouldProcess($Target.Path, 'Remove AgentB managed ACL rule')) {
+        foreach ($rule in $rules) { $acl.RemoveAccessRuleSpecific($rule) }
+        Set-Acl -LiteralPath $Target.Path -AclObject $acl
+        Write-Host "REMOVED: AgentB managed ACL rule :: $($Target.Path)"
+        $script:changed++
+    }
 }
 
-if (-not (Test-IsAdministrator)) {
-    [Console]::Error.WriteLine('Administrator elevation is required. Reopen PowerShell as Administrator and run this script again.')
-    Write-AclSummary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('reopen PowerShell as Administrator and rerun')
-    exit 1
+if (($Verify.IsPresent -and $Remove.IsPresent) -or ($Inspect.IsPresent -and ($Verify.IsPresent -or $Remove.IsPresent))) {
+    [Console]::Error.WriteLine('Choose only one of -Verify, -Remove, or -Inspect.')
+    exit 2
 }
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-if ([string]::IsNullOrWhiteSpace($HarnessDirectory)) {
-    $HarnessDirectory = $repositoryRoot
-}
-if ([string]::IsNullOrWhiteSpace($WorkspaceDirectory)) {
-    $WorkspaceDirectory = Join-Path $HarnessDirectory 'workspace'
-}
-if ([string]::IsNullOrWhiteSpace($MemoryDirectory)) {
-    $MemoryDirectory = Join-Path $HarnessDirectory 'memory'
+if ([string]::IsNullOrWhiteSpace($HarnessDirectory)) { $HarnessDirectory = $repositoryRoot }
+if ([string]::IsNullOrWhiteSpace($WorkspaceDirectory)) { $WorkspaceDirectory = Join-Path $HarnessDirectory 'workspace' }
+if ([string]::IsNullOrWhiteSpace($MemoryDirectory)) { $MemoryDirectory = Join-Path $HarnessDirectory 'memory' }
+$root = [IO.Path]::GetFullPath($HarnessDirectory).TrimEnd('\')
+$workspace = [IO.Path]::GetFullPath($WorkspaceDirectory).TrimEnd('\')
+
+if (-not (Test-Path -LiteralPath $root -PathType Container)) {
+    [Console]::Error.WriteLine("Harness directory does not exist: $root")
+    exit 1
 }
 
-$root = [IO.Path]::GetFullPath($HarnessDirectory)
-$workspace = [IO.Path]::GetFullPath($WorkspaceDirectory)
-$memory = [IO.Path]::GetFullPath($MemoryDirectory)
-$logs = Join-Path $root 'logs'
-$qualifiedName = "$env:COMPUTERNAME\$AccountName"
+$rootPrefix = $root + '\'
+$workspaceInsideRoot = $workspace.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)
+if ($workspaceInsideRoot) {
+    $relativeWorkspace = $workspace.Substring($rootPrefix.Length)
+    if ([string]::IsNullOrWhiteSpace($relativeWorkspace) -or $relativeWorkspace.Contains('\')) {
+        [Console]::Error.WriteLine('When the workspace is inside the harness directory it must be one direct child directory, so the rest of the application tree can be denied recursively.')
+        exit 1
+    }
+}
 
 $denyRights = [Security.AccessControl.FileSystemRights]::WriteData `
     -bor [Security.AccessControl.FileSystemRights]::CreateFiles `
@@ -197,127 +192,91 @@ $recursive = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [S
 $deny = [Security.AccessControl.AccessControlType]::Deny
 $allow = [Security.AccessControl.AccessControlType]::Allow
 
-$recursiveControlDirectories = @('prompts', '.git', 'scripts', 'serve') | ForEach-Object { Join-Path $root $_ }
-$fileTargets = @(
-    (Join-Path $root 'harness.exe'),
-    (Join-Path $root 'harness'),
-    (Join-Path $root 'harness.json')
-)
-$fileTargets += Get-ChildItem -LiteralPath $root -File -Filter 'harness.*.json' -ErrorAction SilentlyContinue |
-    Select-Object -ExpandProperty FullName
-$fileTargets = $fileTargets | Sort-Object -Unique
+$targets = @([pscustomobject]@{ Path = $root; Rights = $denyRights; Inheritance = $none; Type = $deny; Intent = 'deny control-tree entry mutation' })
+foreach ($item in Get-ChildItem -LiteralPath $root -Force | Sort-Object FullName) {
+    if ($workspaceInsideRoot -and $item.FullName.TrimEnd('\').Equals($workspace, [StringComparison]::OrdinalIgnoreCase)) { continue }
+    $inheritance = if ($item.PSIsContainer) { $recursive } else { $none }
+    $kind = if ($item.PSIsContainer) { 'directory tree' } else { 'control file' }
+    $targets += [pscustomobject]@{ Path = $item.FullName; Rights = $denyRights; Inheritance = $inheritance; Type = $deny; Intent = "deny writes to $kind" }
+}
 
-Write-Host 'AgentB control-surface ACL policy'
-Write-Host "Identity: $qualifiedName"
+if (-not (Test-Path -LiteralPath $workspace -PathType Container) -and -not $WhatIfPreference) {
+    if ($Verify -or $Inspect -or $Remove) {
+        [Console]::Error.WriteLine("Workspace directory does not exist: $workspace")
+        exit 1
+    }
+    if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
+    if ($PSCmdlet.ShouldProcess($workspace, 'Create workspace directory')) { $null = New-Item -ItemType Directory -Path $workspace }
+}
+$targets += [pscustomobject]@{ Path = $workspace; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant workspace Modify' }
+
+Write-Host 'AgentB complete control-tree ACL policy'
+Write-Host "Identity: $env:COMPUTERNAME\$AccountName"
 Write-Host "Harness directory: $root"
-Write-Host "Workspace write grant: $workspace"
-Write-Host 'DENY intent: write, create, append, delete, permission changes, and ownership changes; read/execute are not denied.'
-Write-Warning "No deny ACE is applied to '$logs'. The verified identity split makes log separation possible, but this Prompt 16 ACL policy has not yet added that rule."
-Write-Warning "No deny ACE is applied to '$memory'. The harness-owned remember tool still works, but service-account shell processes can reach this path unless another policy denies it."
-Write-Host 'The harness remains under the operator identity, so service-account denies on harness.json do not block normal harness config saves.'
+Write-Host "Only shell-writable tree: $workspace"
+Write-Host 'All existing top-level application files and directories except the workspace receive explicit write/delete/ownership denies. Read and execute are retained.'
+Write-Host 'Reapply and verify after an application update creates or replaces files.'
+
+if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $Verify -and -not $Inspect) {
+    [Console]::Error.WriteLine('Administrator elevation is required to apply or remove ACLs.')
+    Write-Summary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('use AgentB Settings or reopen PowerShell as Administrator')
+    exit 1
+}
 
 if ($WhatIfPreference) {
     Write-Host 'Mode: WhatIf; no directory or ACL will be changed.'
-    $null = $PSCmdlet.ShouldProcess($root, 'Add explicit object-only deny ACE to the harness binary directory')
-    foreach ($path in $recursiveControlDirectories) {
-        $null = $PSCmdlet.ShouldProcess($path, 'Add explicit inheritable deny ACE to the control directory')
-    }
-    foreach ($path in $fileTargets) {
-        $exists = Test-Path -LiteralPath $path -PathType Leaf
-        Write-Host "File target (exists=$($exists.ToString().ToLowerInvariant())): $path"
-        if ($exists) {
-            $null = $PSCmdlet.ShouldProcess($path, 'Add explicit object-only deny ACE to the control file')
-        }
-    }
-    if (-not (Test-Path -LiteralPath $workspace -PathType Container)) {
-        $null = $PSCmdlet.ShouldProcess($workspace, 'Create the workspace directory')
-    }
-    $null = $PSCmdlet.ShouldProcess($workspace, 'Add explicit inheritable Modify allow ACE for workspace files')
-    Write-AclSummary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('rerun without -WhatIf to apply', 'then rerun with -Verify')
+    foreach ($target in $targets) { $null = $PSCmdlet.ShouldProcess($target.Path, $target.Intent) }
+    Write-Summary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('apply from AgentB Settings, then verify')
     exit 0
 }
 
-try {
-    $serviceSid = Resolve-ServiceIdentity -Name $AccountName
-} catch {
-    [Console]::Error.WriteLine("ACL setup failed: $($_.Exception.Message)")
-    Write-AclSummary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('create the service account, then rerun')
+$serviceSid = $null
+try { $serviceSid = Resolve-ServiceIdentity -Name $AccountName } catch {
+    if ($Inspect) {
+        $status = [ordered]@{ supported = $true; account_exists = $false; applied = $false; drift = $targets.Count; summary = $_.Exception.Message }
+        Write-Output ($statusMarker + ($status | ConvertTo-Json -Compress))
+        exit 0
+    }
+    [Console]::Error.WriteLine("ACL policy failed: $($_.Exception.Message)")
     exit 1
 }
 
-if ($Verify) {
+if ($Verify -or $Inspect) {
     $drift = 0
-    $checks = @(
-        [pscustomobject]@{ Path = $root; Rights = $denyRights; Inheritance = $none; Type = $deny; Intent = 'harness directory deny' }
-    )
-    foreach ($path in $recursiveControlDirectories) {
-        $checks += [pscustomobject]@{ Path = $path; Rights = $denyRights; Inheritance = $recursive; Type = $deny; Intent = 'recursive control deny' }
-    }
-    foreach ($path in $fileTargets) {
-        if (Test-Path -LiteralPath $path -PathType Leaf) {
-            $checks += [pscustomobject]@{ Path = $path; Rights = $denyRights; Inheritance = $none; Type = $deny; Intent = 'control file deny' }
-        } else {
-            Write-Host "ABSENT: $path (the harness-directory deny prevents this identity from creating it)"
-        }
-    }
-    $checks += [pscustomobject]@{ Path = $workspace; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'workspace Modify allow' }
-
-    foreach ($check in $checks) {
-        if (-not (Test-Path -LiteralPath $check.Path)) {
-            Write-Host "DRIFT: missing path :: $($check.Path)"
+    foreach ($target in $targets) {
+        if (-not (Test-Path -LiteralPath $target.Path)) {
+            if ($Verify) { Write-Host "DRIFT: missing path :: $($target.Path)" }
             $drift++
             continue
         }
-        $acl = Get-Acl -LiteralPath $check.Path
-        if (Test-ManagedRule -Acl $acl -Identity $serviceSid -Rights $check.Rights -Inheritance $check.Inheritance -Type $check.Type) {
-            Write-Host "PASS: $($check.Intent) :: $($check.Path)"
-        } else {
-            Write-Host "DRIFT: missing exact explicit ACE for $($check.Intent) :: $($check.Path)"
-            $drift++
-        }
+        $acl = Get-Acl -LiteralPath $target.Path
+        $present = (Get-ExactManagedRules -Acl $acl -Identity $serviceSid -Rights $target.Rights -Inheritance $target.Inheritance -Type $target.Type).Count -gt 0
+        if (-not $present) { $drift++ }
+        if ($Verify) { Write-Host "$(if ($present) { 'PASS' } else { 'DRIFT' }): $($target.Intent) :: $($target.Path)" }
     }
-    Write-Host 'LIMITATION: this policy does not manage a logs deny ACE; verification cannot report log separation.'
-    if ($drift -gt 0) {
-        Write-Error "ACL verification found $drift drift item(s)." -ErrorAction Continue
-        Write-AclSummary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('review drift above and rerun without -Verify to repair it')
-        exit 1
+    if ($Inspect) {
+        $status = [ordered]@{ supported = $true; account_exists = $true; applied = ($drift -eq 0); drift = $drift; summary = $(if ($drift -eq 0) { 'complete control-tree ACL policy verified' } else { "$drift ACL drift item(s)" }) }
+        Write-Output ($statusMarker + ($status | ConvertTo-Json -Compress))
+        exit 0
     }
-    Write-AclSummary -Changed @() -NotChanged @('directories', 'files', 'ACLs; every enforceable intent is already correct') -Next @('verify the service-account shell identity before relying on these ACLs')
+    Write-Summary -Changed @() -NotChanged @('ACLs') -Next @($(if ($drift -eq 0) { 'ACL verification complete' } else { 'apply again to repair drift' }))
+    if ($drift -gt 0) { exit 1 }
     exit 0
 }
 
-if (-not (Test-Path -LiteralPath $root -PathType Container)) {
-    Write-Error "Harness directory does not exist: $root" -ErrorAction Continue
-    Write-AclSummary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('correct -HarnessDirectory and rerun')
-    exit 1
+if ($Remove) {
+    foreach ($target in $targets) {
+        if (Test-Path -LiteralPath $target.Path) { Remove-ManagedRule -Target $target -Identity $serviceSid }
+    }
+    Write-Summary -Changed @("$script:changed managed ACL rule(s) removed") -NotChanged @("$script:unchanged already absent") -Next @('disable the service identity before removing the account')
+    exit 0
 }
 
-Set-ManagedRule -Path $root -Identity $serviceSid -Rights $denyRights -Inheritance $none -Type $deny -Intent 'Add explicit object-only deny ACE to the harness binary directory'
-foreach ($path in $recursiveControlDirectories) {
-    if (-not (Test-Path -LiteralPath $path -PathType Container)) {
-        Write-Error "Required control directory does not exist: $path" -ErrorAction Continue
-        Write-AclSummary -Changed @("$script:appliedRules managed ACL rule(s) before failure") -NotChanged @('missing control directory', 'remaining ACL intents') -Next @('restore or correct the control directory, then rerun and verify')
+foreach ($target in $targets) {
+    if (-not (Test-Path -LiteralPath $target.Path)) {
+        [Console]::Error.WriteLine("Required path does not exist: $($target.Path)")
         exit 1
     }
-    Set-ManagedRule -Path $path -Identity $serviceSid -Rights $denyRights -Inheritance $recursive -Type $deny -Intent 'Add explicit inheritable deny ACE to the control directory'
+    Set-ManagedRule -Target $target -Identity $serviceSid
 }
-foreach ($path in $fileTargets) {
-    if (Test-Path -LiteralPath $path -PathType Leaf) {
-        Set-ManagedRule -Path $path -Identity $serviceSid -Rights $denyRights -Inheritance $none -Type $deny -Intent 'Add explicit object-only deny ACE to the control file'
-    } else {
-        Write-Host "ABSENT: $path (protected against creation by the harness-directory deny)"
-    }
-}
-if (-not (Test-Path -LiteralPath $workspace -PathType Container)) {
-    if (Test-ConfirmationPromptExpected) {
-        Assert-SafeConfirmationInput
-    }
-    if ($PSCmdlet.ShouldProcess($workspace, 'Create the workspace directory')) {
-        $null = New-Item -ItemType Directory -Path $workspace
-        $script:workspaceCreated = $true
-    }
-}
-Set-ManagedRule -Path $workspace -Identity $serviceSid -Rights $allowRights -Inheritance $recursive -Type $allow -Intent 'Add explicit inheritable Modify allow ACE for workspace files'
-
-$directoryResult = if ($script:workspaceCreated) { 'workspace directory was created' } else { 'no directory creation was required' }
-Write-AclSummary -Changed @("$script:appliedRules managed ACL rule(s) applied", $directoryResult) -NotChanged @("$script:unchangedRules exact managed ACL rule(s)", 'inheritance', 'logs ACL', 'memory ACL') -Next @('rerun with -Verify', 'verify the service-account shell identity before relying on these ACLs')
+Write-Summary -Changed @("$script:changed managed ACL rule(s) applied") -NotChanged @("$script:unchanged exact managed rule(s)") -Next @('verify from Settings', 'run the RBAC checks')

@@ -71,7 +71,7 @@ func TestShellFileRoutingRefusals(t *testing.T) {
 	}
 }
 
-func TestShellServiceAccountSpawnFailureFallsBackAndRaisesIdentityAlarm(t *testing.T) {
+func TestShellServiceAccountSpawnFailureRequiresOperatorApproval(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root).Shell
 	cfg.ServiceAccount.Enabled = true
@@ -83,22 +83,19 @@ func TestShellServiceAccountSpawnFailureFallsBackAndRaisesIdentityAlarm(t *testi
 	}
 	var reported ShellIdentityStatus
 	shell.SetIdentityReporter(func(status ShellIdentityStatus) { reported = status })
-	command := "printf fallback-ok"
+	command := "printf must-not-run"
 	if runtime.GOOS == "windows" {
-		command = "Write-Output fallback-ok"
+		command = "Write-Output must-not-run"
 	}
-	result, err := shell.Call(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
-	if err != nil {
-		t.Fatal(err)
+	detail := shell.CallDetailed(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
+	if detail.Err != nil || detail.OperatorOverrideReason == "" || strings.Contains(detail.Content, "must-not-run") {
+		t.Fatalf("detail=%+v, want an unexecuted operator-approval request", detail)
 	}
-	if !strings.Contains(result, "fallback-ok") {
-		t.Fatalf("fallback result = %q", result)
-	}
-	if !reported.Fallback || !strings.Contains(reported.Reason, "authentication failed") || reported.Since == "" {
+	if reported.Fallback || !reported.OperatorApprovalRequired || !strings.Contains(reported.Reason, "authentication failed") || reported.Since == "" {
 		t.Fatalf("identity report = %+v", reported)
 	}
 	if _, err := time.Parse(time.RFC3339, reported.Since); err != nil {
-		t.Fatalf("fallback timestamp = %q: %v", reported.Since, err)
+		t.Fatalf("alarm timestamp = %q: %v", reported.Since, err)
 	}
 }
 
@@ -116,19 +113,19 @@ func TestShellServiceAccountDisabledDoesNotRaiseIdentityAlarm(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(result, "disabled-ok") || called || shell.IdentityStatus().Fallback {
+	if !strings.Contains(result, "disabled-ok") || called || shell.IdentityStatus().Fallback || shell.IdentityStatus().OperatorApprovalRequired {
 		t.Fatalf("result=%q called=%v status=%+v", result, called, shell.IdentityStatus())
 	}
 }
 
-func TestShellServiceAccountSuccessClearsPersistentFallback(t *testing.T) {
+func TestShellServiceAccountSuccessClearsPersistentIdentityAlarm(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root).Shell
 	cfg.ServiceAccount.Enabled = true
 	shell := NewShell(cfg)
 	shell.Configure(config.Config{Workspace: root, Shell: cfg})
 	shell.SetCredentialStore(presentShellCredential{})
-	shell.identity = ShellIdentityStatus{Fallback: true, Reason: "earlier failure", Since: time.Now().UTC().Format(time.RFC3339)}
+	shell.identity = ShellIdentityStatus{OperatorApprovalRequired: true, Reason: "earlier failure", Since: time.Now().UTC().Format(time.RFC3339)}
 	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
 		return completedShellProcess{}, nil
 	}
@@ -136,7 +133,7 @@ func TestShellServiceAccountSuccessClearsPersistentFallback(t *testing.T) {
 	if err != nil || !strings.Contains(message, "succeeded") {
 		t.Fatalf("message=%q err=%v", message, err)
 	}
-	if status := shell.IdentityStatus(); status.Fallback || status.Reason != "" || status.Since != "" {
+	if status := shell.IdentityStatus(); status.Fallback || status.OperatorApprovalRequired || status.Reason != "" || status.Since != "" {
 		t.Fatalf("identity status was not cleared: %+v", status)
 	}
 }
@@ -152,16 +149,16 @@ func TestShellServicePermissionDenialOffersOperatorOverride(t *testing.T) {
 		_, _ = output.Write([]byte("Set-Content: Access to the path is denied.\nUnauthorizedAccessException\n"))
 		return exitedShellProcess{code: 1}, nil
 	}
-	result, err, override := shell.CallDetailed(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": "Set-Content protected.txt value"})
-	if err != nil {
-		t.Fatal(err)
+	detail := shell.CallDetailed(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": "Set-Content protected.txt value"})
+	if detail.Err != nil {
+		t.Fatal(detail.Err)
 	}
-	if !override || !strings.Contains(result, "exit=1") {
-		t.Fatalf("result=%q override=%v, want permission override", result, override)
+	if detail.OperatorOverrideReason == "" || !strings.Contains(detail.Content, "exit=1") {
+		t.Fatalf("detail=%+v, want permission override", detail)
 	}
 }
 
-func TestShellFallbackPermissionDenialDoesNotOfferOperatorOverride(t *testing.T) {
+func TestShellSpawnFailureDoesNotExecuteOperatorCommand(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root).Shell
 	cfg.ServiceAccount.Enabled = true
@@ -171,16 +168,17 @@ func TestShellFallbackPermissionDenialDoesNotOfferOperatorOverride(t *testing.T)
 	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
 		return nil, &serviceSpawnError{kind: "service-account authentication failed"}
 	}
-	command := "printf 'permission denied'; exit 1"
+	marker := filepath.Join(root, "must-not-exist")
+	command := "touch must-not-exist"
 	if runtime.GOOS == "windows" {
-		command = "Write-Output 'Access is denied'; exit 1"
+		command = "New-Item must-not-exist"
 	}
-	_, err, override := shell.CallDetailed(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
-	if err != nil {
-		t.Fatal(err)
+	detail := shell.CallDetailed(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
+	if detail.Err != nil || detail.OperatorOverrideReason == "" {
+		t.Fatalf("detail=%+v", detail)
 	}
-	if override {
-		t.Fatal("operator fallback result incorrectly offered a second operator override")
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("operator command ran without approval: %v", err)
 	}
 }
 

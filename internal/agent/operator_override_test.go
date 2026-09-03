@@ -22,9 +22,9 @@ func (*overrideTestTool) Schema() map[string]any { return map[string]any{} }
 func (*overrideTestTool) Call(context.Context, *session.Session, map[string]any) (string, error) {
 	return "unused", nil
 }
-func (t *overrideTestTool) CallDetailed(context.Context, *session.Session, map[string]any) (string, error, bool) {
+func (t *overrideTestTool) CallDetailed(context.Context, *session.Session, map[string]any) tools.CallDetail {
 	t.normalCalls++
-	return "exit=1\nAccess to the path is denied.", nil, true
+	return tools.CallDetail{Content: "exit=1\nAccess to the path is denied.", OperatorOverrideReason: "service account was denied permission"}
 }
 func (t *overrideTestTool) CallAsOperator(context.Context, *session.Session, map[string]any) (string, error) {
 	t.overrideCalls++

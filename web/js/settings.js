@@ -14,6 +14,10 @@ let serviceAccountStatus = { loaded: false, supported: true, exists: false, admi
 let serviceAccountBusy = false;
 let serviceAccountMessage = "";
 let serviceAccountAlarm = false;
+let hardeningStatus = { loaded: false, supported: true, applied: false };
+let hardeningBusy = false;
+let hardeningMessage = "";
+let hardeningAlarm = false;
 
 export function initSettings() {
   gear.addEventListener("click", () => (open ? closeSheet() : openSheet()));
@@ -60,6 +64,7 @@ function openSheet() {
   gear.setAttribute("aria-expanded", "true");
   render();
   refreshServiceAccountStatus();
+	refreshHardeningStatus();
   requestAnimationFrame(() => sheet.querySelector("button, input")?.focus());
 }
 
@@ -82,7 +87,7 @@ function render() {
       ${group("Memory", memory(active))}
       ${group("Context", context(active))}
       ${group("Run", run())}
-      ${group("Shell", shell())}
+	  ${group("Shell", shell(active))}
       ${group("Session", sessionControls(active))}
     </div>`;
 }
@@ -273,7 +278,7 @@ function run() {
     ${number("run.queue_depth", "queue depth", cfg.run?.queue_depth)}`;
 }
 
-function shell() {
+function shell(active) {
 	const service = store.config.shell?.service_account || {};
 	const credential = store.shell_credential || {};
 	const stored = credential.stored
@@ -293,6 +298,17 @@ function shell() {
 			? "Reset password + enable"
 			: "Create account + enable";
 	const setupDisabled = serviceAccountBusy || !serviceAccountStatus.loaded || !serviceAccountStatus.supported || serviceAccountStatus.administrator;
+	const profile = store.servers.find((item) => item.id === active?.server_id) || store.servers[0];
+	const protectionReady = hardeningStatus.acl?.applied && hardeningStatus.firewall?.applied;
+	const protectionState = !hardeningStatus.loaded
+		? "checking host protections…"
+		: !hardeningStatus.supported
+			? "available only on Windows"
+			: protectionReady
+				? "ACL + outbound policy verified"
+				: `${hardeningStatus.acl?.summary || "ACL not applied"} · ${hardeningStatus.firewall?.summary || "firewall not applied"}`;
+	const canApply = !hardeningBusy && !serviceAccountBusy && service.enabled && credential.stored && serviceAccountStatus.exists && !serviceAccountStatus.administrator && !!profile;
+	const canInspect = !hardeningBusy && hardeningStatus.loaded && hardeningStatus.supported && serviceAccountStatus.exists;
   return `${text("shell.command", "command", (store.config.shell?.command || []).join(" "), "command")}
     ${toggle("shell.service_account.enabled", "service identity", service.enabled)}
     ${text("shell.service_account.account", "account", service.account || "agentb-svc")}
@@ -316,7 +332,18 @@ function shell() {
       <button type="button" data-action="clear-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Clear</button>
     </div>
     ${shellCredentialMessage ? `<p class="settings-note">${html(shellCredentialMessage)}</p>` : ""}
-    <p class="settings-note">changes apply to new shell calls</p>`;
+	<div class="settings-subhead">Host protections</div>
+	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
+	${row("model route", `<code>${html(profile?.base_url || "no selected model profile")}</code>`)}
+	<div class="settings-actions">
+	  <button type="button" data-action="apply-hardening" ${canApply ? "" : "disabled"}>Apply + verify</button>
+	  <button type="button" data-action="verify-hardening" ${canInspect ? "" : "disabled"}>Verify</button>
+	  <button type="button" data-action="refresh-hardening" ${hardeningBusy ? "disabled" : ""}>Refresh</button>
+	  <button type="button" class="${armed.has("hardening:remove") ? "confirm" : ""}" data-action="remove-hardening" ${canInspect ? "" : "disabled"}>${armed.has("hardening:remove") ? "Confirm remove" : "Remove"}</button>
+	</div>
+	${hardeningMessage ? `<p class="settings-note ${hardeningAlarm ? "alarm" : ""}">${html(hardeningMessage)}</p>` : ""}
+	<p class="settings-note">Apply uses one Windows UAC prompt. It makes the application tree read-only to the service identity, leaves only the workspace writable, and blocks that identity's outbound traffic except loopback and Tailscale ranges.</p>
+	<p class="settings-note">changes apply to new shell calls; reapply protections after updating or rebuilding AgentB</p>`;
 }
 
 function sessionControls(active) {
@@ -421,6 +448,17 @@ async function click(event) {
 	if (action === "clear-shell-credential") return shellCredentialAction("clear");
 	if (action === "setup-service-account") return setupServiceAccount(button.dataset.setupAction);
 	if (action === "refresh-service-account") return refreshServiceAccountStatus();
+	if (action === "apply-hardening") return hardeningAction("apply");
+	if (action === "verify-hardening") return hardeningAction("verify");
+	if (action === "refresh-hardening") return refreshHardeningStatus();
+	if (action === "remove-hardening") {
+		if (!armed.has("hardening:remove")) {
+			armed.add("hardening:remove");
+			return render();
+		}
+		armed.delete("hardening:remove");
+		return hardeningAction("remove");
+	}
   if (action === "copy") {
     if (button.dataset.value) await navigator.clipboard?.writeText(button.dataset.value);
   }
@@ -436,6 +474,54 @@ async function refreshServiceAccountStatus() {
 		serviceAccountAlarm = true;
 	}
 	if (open) render();
+}
+
+function selectedHardeningServerID() {
+	return store.sessions[store.active]?.server_id || store.servers[0]?.id || "";
+}
+
+async function refreshHardeningStatus() {
+	const serverID = selectedHardeningServerID();
+	if (!serverID) {
+		hardeningStatus = { loaded: true, supported: true, applied: false };
+		hardeningMessage = "select a model profile before applying host protections";
+		hardeningAlarm = true;
+		if (open) render();
+		return;
+	}
+	try {
+		const status = await api(`/api/hardening?server_id=${encodeURIComponent(serverID)}`, undefined, "GET");
+		hardeningStatus = { ...status, loaded: true };
+		hardeningAlarm = false;
+	} catch (error) {
+		hardeningStatus = { loaded: true, supported: false, applied: false };
+		hardeningMessage = error.message;
+		hardeningAlarm = true;
+	}
+	if (open) render();
+}
+
+async function hardeningAction(action) {
+	const serverID = selectedHardeningServerID();
+	hardeningBusy = true;
+	hardeningAlarm = false;
+	hardeningMessage = action === "verify"
+		? "Verifying ACL and outbound policy…"
+		: "Approve the Windows UAC prompt to update host protections.";
+	render();
+	try {
+		const result = await api("/api/hardening", { action, server_id: serverID });
+		hardeningStatus = { ...(result.status || hardeningStatus), loaded: true };
+		hardeningMessage = result.message;
+		hardeningAlarm = action === "apply" && !hardeningStatus.applied;
+	} catch (error) {
+		hardeningMessage = error.message;
+		hardeningAlarm = true;
+		await refreshHardeningStatus();
+	} finally {
+		hardeningBusy = false;
+		if (open) render();
+	}
 }
 
 async function setupServiceAccount(action) {
@@ -466,6 +552,7 @@ async function setupServiceAccount(action) {
 		if (result.config) reduce({ type: "config.changed", data: { config: result.config } });
 		serviceAccountMessage = result.message;
 		serviceAccountAlarm = !result.ok;
+		await refreshHardeningStatus();
 	} catch (error) {
 		if (error.data?.credential) store.shell_credential = error.data.credential;
 		serviceAccountMessage = error.message;

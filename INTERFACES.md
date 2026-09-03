@@ -6,7 +6,7 @@ This document is the stable contract for prompts 3–10. Later prompts implement
 
 Every event is `{"seq":int,"ts":"RFC3339 with milliseconds","session_id":"","run_id":"","type":"","data":{}}`. Sessionless events are global. SSE uses `event: <type>`, the JSON envelope in `data:`, `id: <seq>`, and a comment ping every 15 seconds. JSONL additionally permits `body` on `model.request` and `raw` on `model.response`; those fields are excluded from SSE. Each session has its own log and global events use the harness log.
 
-On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapshot},servers:[Profile with masked key],config,replay,shell_credential:{stored,stored_at},shell_identity:{fallback,reason,since},serving_facts,flow:{stages,edges},tools:[{name,description}]}`. `replay` is true only for `-replay` servers. `serving_facts` exposes only the three Prompt 8 accounting measurements needed by the settings sheet: `tokenize_idle_ms`, `tokenize_busy_ms`, and `tokenize_blocks_on_slot`. The credential status never contains the credential.
+On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapshot},servers:[Profile with masked key],config,replay,mutation_token,shell_credential:{stored,stored_at},shell_identity:{fallback,operator_approval_required,reason,since},serving_facts,flow:{stages,edges},tools:[{name,description}]}`. `mutation_token` is a per-launch browser/CSRF secret required in `X-AgentB-Mutation-Token` on every non-read request; it is not persisted or logged. `replay` is true only for `-replay` servers. The credential status never contains the credential.
 
 ## Shared records
 
@@ -24,7 +24,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 
 - `session.created` [prompt 3] `{session}`; `session.renamed` [3] `{session_id,label}`; `session.updated` `{session_id,server_id,runnable,not_runnable_reason,memory_path,memory_content}`; `session.reset` [3] `{session_id,log_path}`; `session.closed` [3] `{session_id}`.
 - `server.probed` [3] `{server_id,capabilities,findings}`; `config.changed` [3] `{config}` (masked); `error` [3] `{where,message}`.
-- `shell.identity` [17] `{fallback,reason,since}` announces or clears a persistent alternate-identity fallback; `shell.credential` [17] `{stored,stored_at}` reports write-only store status.
+- `shell.identity` [17] `{fallback,operator_approval_required,reason,since}` announces or clears a persistent alternate-identity failure. New events set `fallback:false`; failed service spawning requires an operator approval instead of executing automatically. `shell.credential` [17] `{stored,stored_at}` reports write-only store status.
 - `run.queued` [4] `{run_id,position}`; `run.started` [4] `{run_id,user_message_id}`; `run.stopped` [4] `{run_id,reason,detail,turns}`. Stop reasons are `done`, `user_stop`, `turn_ceiling`, `cycle`, `tool_errors`, `context_ceiling`, `length`, `model_error`, `profile_not_runnable`.
 - `stage` [4] `{stage,state:enter|exit,turn,ms}`. Stages are `assemble`, `call_model`, `parse`, `dispatch`, `execute`, `append`, `compact`, `wait_user`; compact is initially a no-op.
 - `model.request` [4] `{turn,message_count,tool_count,params:{temperature,top_p,top_k?,min_p?,presence_penalty,repeat_penalty?,max_tokens,reasoning:{control,effort?,enabled?,preserve?}},est_prompt_tokens,estimated}`.
@@ -45,6 +45,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 - `GET /api/config`; `POST /api/config` deep-merges keys and server entries by immutable `id`, validates, saves, and publishes `config.changed`. The masked API-key sentinel means unchanged. Validation errors are 400 `{error,field}`.
 - `POST /api/shell-credential {action:store,password}` writes a user-scoped DPAPI blob; `{action:test}` attempts a no-op service-account process; `{action:clear}` removes it. Responses and events expose status only, never the password.
 - `GET /api/service-account` inspects the configured local account without elevation. `POST /api/service-account {action:create|reset,password,confirmation}` requires matching write-only values, stores the DPAPI credential, launches `setup-service-account.ps1` through Windows UAC, enables the split, and attempts the no-op service-account spawn. It never returns either password field. A canceled or unavailable UAC prompt makes no account change and restores the previous credential; a failure after the elevated helper starts is reported as potentially partial.
+- `GET /api/hardening?server_id=<id>` inspects complete-tree ACL and user-scoped outbound-firewall state. `POST /api/hardening {action:apply|verify|remove,server_id}` orchestrates the policies; apply requires an enabled, stored, successfully tested non-administrator service identity and no active runs. Apply/remove use UAC and apply immediately verifies both controls.
 - `POST /api/message`, `/api/stop`, `/api/tools/{name}`, and `/api/approve` drive runs, cancellation, per-session tool toggles, and approval decisions.
 
 ## Replay and keyboard
