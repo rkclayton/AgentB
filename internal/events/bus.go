@@ -52,7 +52,7 @@ func (b *Bus) Subscribe() (chan Event, func()) {
 	b.subscribers[id] = ch
 	b.mu.Unlock()
 	var once sync.Once
-	return ch, func() { once.Do(func() { b.mu.Lock(); delete(b.subscribers, id); close(ch); b.mu.Unlock() }) }
+	return ch, func() { once.Do(func() { b.mu.Lock(); delete(b.subscribers, id); b.mu.Unlock() }) }
 }
 func (b *Bus) Recent(sessionID string) []Event {
 	b.mu.Lock()
