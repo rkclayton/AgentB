@@ -146,24 +146,33 @@ function buildEntries(session) {
     } else if (event.type === "message.appended" && data.message) {
       messageIDs.add(data.message.id);
     } else if (event.type === "model.request") {
-      const entry = { type: "agent", key: `turn:${turnKey}`, text: "", reasoning: "", reasoningTokens: 0, done: false };
+      const entry = { type: "agent", key: `turn:${turnKey}`, text: "", reasoning: "", reasoningTokens: 0, thinkingStartedMS: 0, thinkingEndedMS: 0, thinkingMS: null, done: false };
       turns.set(turnKey, entry);
       entries.push(entry);
     } else if (event.type === "model.delta") {
       const entry = turns.get(turnKey);
       if (entry) {
-        if (data.kind === "content") entry.text += data.text || "";
-        if (data.kind === "reasoning") entry.reasoning += data.text || "";
+        if (data.kind === "reasoning") {
+          if (!entry.thinkingStartedMS) entry.thinkingStartedMS = eventTime(event);
+          entry.reasoning += data.text || "";
+        } else {
+          if (entry.thinkingStartedMS && !entry.thinkingEndedMS) entry.thinkingEndedMS = eventTime(event);
+          if (data.kind === "content") entry.text += data.text || "";
+        }
       }
     } else if (event.type === "model.response") {
       let entry = turns.get(turnKey);
       if (!entry) {
-        entry = { type: "agent", key: `turn:${turnKey}`, text: "", reasoning: "", reasoningTokens: 0, done: false };
+        entry = { type: "agent", key: `turn:${turnKey}`, text: "", reasoning: "", reasoningTokens: 0, thinkingStartedMS: 0, thinkingEndedMS: 0, thinkingMS: null, done: false };
         turns.set(turnKey, entry);
         entries.push(entry);
       }
       entry.text = data.content || entry.text;
       entry.reasoningTokens = data.reasoning_tokens || 0;
+      if (entry.thinkingStartedMS && !entry.thinkingEndedMS) entry.thinkingEndedMS = eventTime(event);
+      entry.thinkingMS = entry.thinkingStartedMS && entry.thinkingEndedMS
+        ? Math.max(0, entry.thinkingEndedMS - entry.thinkingStartedMS)
+        : entry.reasoningTokens > 0 ? data.duration_ms || null : null;
       entry.done = true;
     } else if (event.type === "tool.call") {
       const entry = { type: "tool", key: `tool:${data.call_id}`, callID: data.call_id, name: data.name, args: data.args || {}, result: null };
@@ -205,8 +214,20 @@ function buildEntries(session) {
         continue;
       }
       if ((message.tool_calls || []).some((call) => calls.has(call.id))) continue;
-      if (message.content || message.reasoning)
-        missing.push({ type: "agent", key: `message:${message.id}`, text: message.content || "", reasoning: message.reasoning || "", reasoningTokens: 0, done: true });
+      if (message.content || message.reasoning) {
+        const tokens = Math.ceil((message.reasoning || "").length / 3.6);
+        const rate = Number(session._timings?.predicted_per_second || 0);
+        missing.push({
+          type: "agent",
+          key: `message:${message.id}`,
+          text: message.content || "",
+          reasoning: message.reasoning || "",
+          reasoningTokens: 0,
+          thinkingMS: tokens > 0 && rate > 0 ? (tokens / rate) * 1000 : null,
+          thinkingEstimated: tokens > 0,
+          done: true,
+        });
+      }
     } else if (message.role === "tool" && !calls.has(message.tool_call_id)) {
       const detail = callDetails.get(message.tool_call_id) || {};
       const content = message.content || "";
@@ -247,6 +268,11 @@ function groupResponses(entries) {
   return grouped;
 }
 
+function eventTime(event) {
+  const value = Date.parse(event.ts || "");
+  return Number.isFinite(value) ? value : 0;
+}
+
 function messageCallDetails(messages) {
   const details = new Map();
   for (const message of messages) {
@@ -285,7 +311,7 @@ function renderEntry(session, entry) {
   else if (entry.type === "tool") content.append(toolTick(entry));
   else {
     const tokens = entry.reasoningTokens || Math.ceil((entry.reasoning || "").length / 3.6);
-    if (tokens > 0 || (!entry.done && entry.reasoning)) content.append(thinking(entry, tokens));
+    if (tokens > 0 || !entry.done) content.append(thinking(entry, tokens));
     if (entry.text) renderMarkdown(content, entry.text);
     if (!entry.done) {
       const caret = document.createElement("span");
@@ -309,7 +335,7 @@ function renderResponse(session, entry) {
       const step = document.createElement("div");
       step.className = "chat-response-step";
       const tokens = item.reasoningTokens || Math.ceil((item.reasoning || "").length / 3.6);
-      if (tokens > 0 || (!item.done && item.reasoning)) step.append(thinking(item, tokens));
+      if (tokens > 0 || !item.done) step.append(thinking(item, tokens));
       if (item.text) {
         const answer = document.createElement("div");
         answer.className = "chat-response-answer";
@@ -356,8 +382,30 @@ function thinking(entry, tokens) {
   const root = document.createElement("div");
   const button = document.createElement("button");
   button.type = "button";
-  button.className = "thinking-line";
-  button.textContent = `${entry.done ? "thinking" : "thinking…"}  ${format(tokens)} tokens`;
+  button.className = `thinking-line ${entry.done ? "thought-line" : "thinking-active"}`;
+  const open = expanded.has(entry.key);
+  button.setAttribute("aria-expanded", String(open));
+  const caret = document.createElement("span");
+  caret.className = "disclosure-caret";
+  caret.textContent = open ? "▾" : "▸";
+  button.append(caret);
+  if (entry.done) {
+    const summary = document.createElement("em");
+    const duration = formatThoughtSeconds(entry.thinkingMS);
+    summary.textContent = `Thought ${entry.thinkingEstimated && duration ? "~" : ""}${duration || "—"} seconds (${format(tokens)} tokens)`;
+    button.append(summary);
+  } else {
+    const label = document.createElement("span");
+    label.textContent = "Thinking";
+    const dots = document.createElement("span");
+    dots.className = "thinking-dots";
+    dots.textContent = "...";
+    // Streaming deltas rebuild the row frequently. Preserve the visual phase so
+    // those rebuilds do not pin the progress indicator to its first dot.
+    dots.style.animationDelay = `-${Date.now() % 1200}ms`;
+    label.append(dots);
+    button.append(label);
+  }
   button.onclick = () => {
     expanded.has(entry.key) ? expanded.delete(entry.key) : expanded.add(entry.key);
     render();
@@ -377,9 +425,11 @@ function toolTick(entry) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "tool-tick";
+  const open = expanded.has(entry.key);
+  button.setAttribute("aria-expanded", String(open));
   const state = entry.result ? (entry.result.ok ? "ok" : "error") : "";
   button.innerHTML = '<span class="tool-name"></span><span class="tool-key"></span><span class="tool-state"></span><span class="tool-ms"></span>';
-  button.children[0].textContent = `▸ ${entry.name}`;
+  button.children[0].textContent = `${open ? "▾" : "▸"} ${entry.name}`;
   button.children[1].textContent = keyArgument(entry.args);
   button.children[2].textContent = state;
   button.children[2].className = `tool-state ${state === "error" ? "error" : ""}`;
@@ -396,6 +446,12 @@ function toolTick(entry) {
     root.append(pre);
   }
   return root;
+}
+
+function formatThoughtSeconds(milliseconds) {
+  if (!Number.isFinite(milliseconds)) return "";
+  const seconds = Math.max(0, milliseconds) / 1000;
+  return (seconds < 10 ? seconds.toFixed(1) : seconds.toFixed(0)).replace(/\.0$/, "");
 }
 
 function renderNotice(session, entry) {

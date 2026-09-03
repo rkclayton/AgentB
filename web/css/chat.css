@@ -239,6 +239,28 @@
   text-align: left;
   font-size: 12px;
 }
+.disclosure-caret {
+  display: inline-block;
+  width: 14px;
+  font-family: var(--mono);
+  font-style: normal;
+}
+.thought-line em {
+  font-style: italic;
+}
+.thinking-dots {
+  display: inline-block;
+  width: 1ch;
+  overflow: hidden;
+  vertical-align: bottom;
+  white-space: nowrap;
+  animation: thinking-dots 1.2s steps(1, end) infinite;
+}
+@keyframes thinking-dots {
+  0% { width: 1ch; }
+  33% { width: 2ch; }
+  66%, 100% { width: 3ch; }
+}
 .thinking-body,
 .tool-detail {
   margin: 4px 0 0;
@@ -356,5 +378,8 @@
   .chat-page *::after {
     transition-duration: 0ms !important;
     animation-duration: 0ms !important;
+  }
+  .thinking-dots {
+    width: 3ch;
   }
 }
