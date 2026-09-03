@@ -254,7 +254,11 @@ function hydrate(value) {
 	  else if (event.type === "model.response") value._timings = data.timings;
 	  else if (event.type === "tool.call") value._activeTool = data.name;
 	  else if (event.type === "tool.result") value._activeTool = "";
-	  else if (event.type === "run.stopped") value._lastStop = data.reason;
+	  else if (event.type === "run.stopped") {
+		value._lastStop = data.reason;
+		value._stage = "wait_user";
+		value._stageState = "enter";
+	  }
 	}
 }
 export function setActive(id) {
