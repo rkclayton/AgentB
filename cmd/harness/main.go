@@ -146,13 +146,16 @@ func startupElevationError(elevated bool) error {
 	if !elevated {
 		return nil
 	}
-	return fmt.Errorf("SECURITY: AgentB refuses to run with an elevated Administrator token; local administrators can launch it normally by double-clicking start-agentb.cmd in File Explorer (do not use Run as administrator)")
+	return fmt.Errorf("SECURITY: Agent_b refuses to run with an elevated Administrator token; local administrators can launch it normally by double-clicking start-Agent_b.cmd in File Explorer (do not use Run as administrator)")
 }
 
 func serve(cfg *config.Config, handler http.Handler) error {
 	httpServer := &http.Server{Addr: cfg.Listen, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	errors := make(chan error, 1)
-	go func() { log.Printf("AgentB listening on http://%s", cfg.Listen); errors <- httpServer.ListenAndServe() }()
+	go func() {
+		log.Printf("Agent_b listening on http://%s", cfg.Listen)
+		errors <- httpServer.ListenAndServe()
+	}()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	select {
@@ -177,7 +180,7 @@ type servingFacts struct {
 }
 
 // readServingFacts reads only the accounting facts needed at startup. Missing or
-// malformed values remain zero-valued so a documentation issue cannot stop AgentB.
+// malformed values remain zero-valued so a documentation issue cannot stop Agent_b.
 func readServingFacts(path string) servingFacts {
 	file, err := os.Open(path)
 	if err != nil {

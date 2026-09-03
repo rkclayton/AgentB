@@ -185,7 +185,7 @@ func (s *Shell) start(cfg config.Shell, workspace string, argv []string, output 
 		} else if errors.Is(err, credential.ErrNotStored) {
 			reason = "service-account credential is not stored"
 		} else {
-			reason = "service-account credential cannot be decrypted by this harness identity"
+			reason = "service-account credential cannot be decrypted by this Agent_b process identity"
 		}
 	}
 	s.setIdentity(ShellIdentityStatus{OperatorApprovalRequired: true, Reason: reason, Since: time.Now().UTC().Format(time.RFC3339)})
@@ -226,7 +226,7 @@ func (s *Shell) TestServiceAccount(ctx context.Context) (string, error) {
 		return "service-account credential is not stored", err
 	}
 	if err != nil {
-		return "service-account credential cannot be decrypted by this harness identity", err
+		return "service-account credential cannot be decrypted by this Agent_b process identity", err
 	}
 	defer clearBytes(password)
 	command := shellNoop(cfg.Command[0])

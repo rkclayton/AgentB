@@ -1,12 +1,12 @@
-# AgentB
+# Agent_b
 
-AgentB is a small, standard-library Go coding-agent harness for OpenAI-compatible model servers. It provides observable multi-session runs, eight guarded workspace tools, exact-or-labeled context accounting, compaction, durable workspace notes, an industrial-console UI, and a standalone chat window.
+Agent_b is a small, standard-library Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, eight guarded workspace tools, exact-or-labeled context accounting, compaction, durable workspace notes, an industrial-console UI, and a standalone chat window.
 
 Choose one serving path before you start.
 
-On Windows, double-click **`start-agentb.cmd`** for the normal one-step launch. It finds Go on `PATH` or in the ignored local `.tools\go` directory, rebuilds `harness.exe`, starts AgentB, waits for the local UI, and opens it in the default browser. No PowerShell command is required.
+On Windows, double-click **`start-Agent_b.cmd`** for the normal one-step launch. It finds Go on `PATH` or in the ignored local `.tools\go` directory, rebuilds `Agent_b.exe`, starts Agent_b, waits for the local UI, and opens it in the default browser. No PowerShell command is required.
 
-AgentB refuses to start with an elevated Administrator token. Membership in the local Administrators group is fine: double-click the launcher normally, without **Run as administrator** and outside an elevated terminal.
+Agent_b refuses to start with an elevated Administrator token. Membership in the local Administrators group is fine: double-click the launcher normally, without **Run as administrator** and outside an elevated terminal.
 
 ## Path A — an endpoint you already run (~5 minutes)
 
@@ -15,11 +15,11 @@ Prerequisites: Go 1.24+ and an OpenAI-compatible endpoint you already run, such 
 ```text
 git clone <repo-url>
 cd AgentB
-go build ./cmd/harness
-./harness
+go build -o Agent_b ./cmd/harness
+./Agent_b
 ```
 
-The first start copies `harness.example.json` to the ignored local `harness.json`; under **Connections**, set `base_url` and `model` (and `api_key` when needed), then select **Test**. A successful test stays labeled `ready`; choose that profile for the existing session under **Sessions**. Settings → Security can create the local service account, verify the identity split, and apply/verify the application ACL and outbound firewall policies through Windows UAC without running AgentB itself as Administrator; follow the [Windows host hardening](docs/HARDENING.md) sequence. If the endpoint does not report its context size, enter its documented limit in `n_ctx_override`; AgentB refuses to guess a context ceiling.
+The first start copies the legacy-compatible `harness.example.json` filename to the ignored local `harness.json`; existing connection settings continue to work unchanged. Under **Connections**, set `base_url` and `model` (and `api_key` when needed), then select **Test**. A successful test stays labeled `ready`; choose that profile for the existing session under **Sessions**. Settings → Security can create the local service account, verify the identity split, and apply/verify the application ACL and outbound firewall policies through Windows UAC without running Agent_b itself as Administrator; follow the [Windows host hardening](docs/HARDENING.md) sequence. If the endpoint does not report its context size, enter its documented limit in `n_ctx_override`; Agent_b refuses to guess a context ceiling.
 
 Without llama.cpp's accounting endpoints, the budget meter uses calibrated estimation instead of exact categories, the cached-token readout is hidden, and the prefill and tok/s readouts stay dark. The agent loop, tools, approvals, sessions, memory, compaction, chat, and replay remain available once the endpoint passes the baseline profile checks. See [Capability degradation](#capability-degradation) for the complete behavior.
 
@@ -27,13 +27,13 @@ Without llama.cpp's accounting endpoints, the budget meter uses calibrated estim
 
 Prerequisites: Go 1.24+, an NVIDIA GPU with a CUDA 12.8+ driver, about 15 GB of free disk, `curl`, a current llama.cpp `llama-server`, and a GGUF model you supply.
 
-Copy `serve/local.env.example` to the ignored `serve/local.env`, set `MODEL_PATH` and `LLAMA_SERVER`, and adjust `CTX`, `KV_TYPE`, `PORT`, or `MTP` if needed. Start the model with `serve/start.ps1` on Windows or `serve/start.sh` on Unix, then build and run AgentB as in Path A; set the profile's model to the `MODEL_ALIAS` value before selecting **Test**.
+Copy `serve/local.env.example` to the ignored `serve/local.env`, set `MODEL_PATH` and `LLAMA_SERVER`, and adjust `CTX`, `KV_TYPE`, `PORT`, or `MTP` if needed. Start the model with `serve/start.ps1` on Windows or `serve/start.sh` on Unix, then build and run Agent_b as in Path A; set the profile's model to the `MODEL_ALIAS` value before selecting **Test**.
 
 Exact context accounting requires llama.cpp's `/tokenize` and `/apply-template` endpoints. This path exposes both, which is why it can provide the real per-category meter along with cached-token, prefill, and generation-rate instrumentation. Prompt 1 produces the machine-local `SERVING.md`; [SERVING.example.md](SERVING.example.md) shows its public-safe Facts shape.
 
 For either path, Node.js is optional and is used only for `node --check` verification of the dependency-free frontend JavaScript. The four IBM Plex WOFF2 files are committed under `web/assets/fonts/`, so building and serving the UI never contacts npm or another font host.
 
-## Use the harness
+## Use Agent_b
 
 The main instrument is at `http://127.0.0.1:8790/`, and a bound chat window is at `http://127.0.0.1:8790/chat?session=main`. `serve/chat-window.ps1 main` or `serve/chat-window.sh main` opens a 520×760 Chrome/Edge app window when available and otherwise opens the normal browser.
 
@@ -45,9 +45,9 @@ go run ./cmd/harness -config harness.json -replay logs/main.jsonl,logs/s2.jsonl
 
 Profiles hold an endpoint, model, sampling, reasoning, context settings, and measured capabilities. The settings sheet can add, duplicate, edit, test, and remove profiles; full probes measure behavior while minimal/off modes label assumptions. A profile is runnable only with known context, streaming, structured tool calls, and non-truncating overflow behavior.
 
-Sessions are ephemeral views onto a workspace and may use different profiles. Point several sessions at one workspace for a swarm; file-write conflicts force a re-read instead of silently overwriting another session. AgentB schedules two runs by default, but a llama.cpp server started with `--parallel 1` interleaves their slot work instead of decoding two requests simultaneously.
+Sessions are ephemeral views onto a workspace and may use different profiles. Point several sessions at one workspace for a swarm; file-write conflicts force a re-read instead of silently overwriting another session. Agent_b schedules two runs by default, but a llama.cpp server started with `--parallel 1` interleaves their slot work instead of decoding two requests simultaneously.
 
-With the service-account split enabled, a shell permission denial or service-identity launch failure pauses and offers **Run once as operator**. The failed command is never retried automatically. Approval reruns only the displayed command once under the Windows account running AgentB, is required even when normal approvals are off, and is logged. It does not grant a lasting permission or run as Administrator.
+With the service-account split enabled, a shell permission denial or service-identity launch failure pauses and offers **Run once as operator**. The failed command is never retried automatically. Approval reruns only the displayed command once under the Windows account running Agent_b, is required even when normal approvals are off, and is logged. It does not grant a lasting permission or run as Administrator.
 
 ## Bring your own model
 
@@ -77,7 +77,7 @@ The generated JSONL, workspaces, server logs, score sheets, and summary stay und
 | cached-token reporting | The cached-token readout is hidden rather than displayed as zero. |
 | timings or prompt progress | Prefill and tok/s readouts stay dark; elapsed time remains available. |
 | structured tool calls, streaming, or known context | The profile is `not_runnable` and states what must be fixed. |
-| silent context truncation | The profile is refused; AgentB never silently truncates a prompt. |
+| silent context truncation | The profile is refused; Agent_b never silently truncates a prompt. |
 
 ## Configuration
 
@@ -94,7 +94,7 @@ See [web/DESIGN.md](web/DESIGN.md) for the UI contract, [INTERFACES.md](INTERFAC
 ## Deferred boundaries
 
 - OS-level shell sandboxing; the shell is not jailed, and its file routing, deny list, approvals, and process-tree timeout are not a security boundary.
-- API authentication. AgentB intentionally binds loopback; an EventSource query-string token was rejected because it leaks through logs/history without addressing a present network threat. Authentication must be designed when `listen` moves off loopback.
+- API authentication. Agent_b intentionally binds loopback; an EventSource query-string token was rejected because it leaks through logs/history without addressing a present network threat. Authentication must be designed when `listen` moves off loopback.
 - MCP tools and the Discord process. The two Discord integration hooks are the existing `/api/message` plus SSE client surface, and `run.queue_depth`/`message.queued` for chat backpressure; no bot process is included.
 - Session persistence across restarts and orchestration or handoff between sessions.
 - Electron/Tauri packaging, image input, and a second local `--parallel 2` server slot.

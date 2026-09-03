@@ -170,7 +170,7 @@ func (s *Server) mutationGuard(next http.Handler) http.Handler {
 		}
 		provided := r.Header.Get("X-AgentB-Mutation-Token")
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(s.mutationToken)) != 1 {
-			writeJSON(w, http.StatusForbidden, map[string]string{"error": "missing or invalid AgentB mutation token"})
+			writeJSON(w, http.StatusForbidden, map[string]string{"error": "missing or invalid Agent_b mutation token"})
 			return
 		}
 		if origin := r.Header.Get("Origin"); origin != "" && !sameRequestOrigin(origin, r.Host) {
@@ -405,7 +405,7 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprint(w, "<!doctype html><title>AgentB</title><p>AgentB API is running.</p>")
+	fmt.Fprint(w, "<!doctype html><title>Agent_b</title><p>Agent_b API is running.</p>")
 }
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {

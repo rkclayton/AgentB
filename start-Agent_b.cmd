@@ -12,15 +12,15 @@ if not defined GO_EXE for /f "delims=" %%G in ('where go.exe 2^>nul') do if not 
 if /i "%~1"=="--check" goto check
 
 if defined GO_EXE (
-  echo Building AgentB...
-  "%GO_EXE%" build -o "%AGENTB_ROOT%harness.exe" ./cmd/harness
+  echo Building Agent_b...
+  "%GO_EXE%" build -o "%AGENTB_ROOT%Agent_b.exe" ./cmd/harness
   if errorlevel 1 goto build_failed
-) else if not exist "%AGENTB_ROOT%harness.exe" (
+) else if not exist "%AGENTB_ROOT%Agent_b.exe" (
   goto go_missing
 )
 
 if /i "%~1"=="--build-only" (
-  echo AgentB is built and ready. Nothing was started.
+  echo Agent_b is built and ready. Nothing was started.
   exit /b 0
 )
 
@@ -28,12 +28,12 @@ if not defined AGENTB_NO_BROWSER (
   start "" /b powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "$uri='http://127.0.0.1:8790/'; for($attempt=0; $attempt -lt 100; $attempt++){ try { $null=Invoke-WebRequest -UseBasicParsing -Uri $uri -TimeoutSec 1; Start-Process $uri; exit 0 } catch { Start-Sleep -Milliseconds 200 } }"
 )
 
-echo Starting AgentB. Close this window or press Ctrl+C to stop it.
-"%AGENTB_ROOT%harness.exe"
+echo Starting Agent_b. Close this window or press Ctrl+C to stop it.
+"%AGENTB_ROOT%Agent_b.exe"
 set "AGENTB_EXIT=%ERRORLEVEL%"
 if not "%AGENTB_EXIT%"=="0" (
   echo.
-  echo AgentB stopped with exit code %AGENTB_EXIT%.
+  echo Agent_b stopped with exit code %AGENTB_EXIT%.
   pause
 )
 exit /b %AGENTB_EXIT%
@@ -47,13 +47,13 @@ exit /b 0
 
 :go_missing
 echo.
-echo AgentB could not find Go 1.24 or newer and no existing harness.exe is available.
+echo Agent_b could not find Go 1.24 or newer and no existing Agent_b.exe is available.
 echo Install Go from https://go.dev/dl/ or place a local SDK at .tools\go, then run this launcher again.
 pause
 exit /b 1
 
 :build_failed
 echo.
-echo AgentB could not be built. Review the error above; nothing was started.
+echo Agent_b could not be built. Review the error above; nothing was started.
 pause
 exit /b 1

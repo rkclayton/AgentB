@@ -275,7 +275,7 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	overrideID := callID + ":operator"
 	overrideArgs := map[string]any{
 		"command":  command,
-		"identity": "harness operator (not Administrator)",
+		"identity": "Agent_b operator (not Administrator)",
 		"reason":   outcome.OperatorOverrideReason,
 		"scope":    "rerun this exact command once",
 	}

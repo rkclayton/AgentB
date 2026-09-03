@@ -145,7 +145,7 @@ function Read-VerifiedPassword {
     param([string]$QualifiedName)
     if ($CredentialStore) {
         if (-not [IO.Path]::IsPathRooted($CredentialStore) -or -not (Test-Path -LiteralPath $CredentialStore -PathType Leaf)) {
-            [Console]::Error.WriteLine('PASSWORD REFUSED: the AgentB credential store is missing or is not an absolute file path.')
+            [Console]::Error.WriteLine('PASSWORD REFUSED: the Agent_b credential store is missing or is not an absolute file path.')
             return $null
         }
         $protected = [IO.File]::ReadAllBytes($CredentialStore)
@@ -171,7 +171,7 @@ function Read-VerifiedPassword {
             # already-confirmed value without putting it on a command line.
             return $stored
         } catch {
-            [Console]::Error.WriteLine("PASSWORD REFUSED: the AgentB credential store could not be decrypted for this Windows user ($($_.Exception.Message)).")
+            [Console]::Error.WriteLine("PASSWORD REFUSED: the Agent_b credential store could not be decrypted for this Windows user ($($_.Exception.Message)).")
             return $null
         } finally {
             if ($characters) { [Array]::Clear($characters, 0, $characters.Length) }
@@ -288,7 +288,7 @@ if (-not (Test-IsAdministrator)) {
 
 $qualifiedName = "$env:COMPUTERNAME\$AccountName"
 $existing = Get-LocalUser -Name $AccountName -ErrorAction SilentlyContinue
-Write-Host 'AgentB service-account setup'
+Write-Host 'Agent_b service-account setup'
 Write-Host "Account: $qualifiedName"
 
 if ($existing -and -not $ResetPassword) {
@@ -297,9 +297,9 @@ if ($existing -and -not $ResetPassword) {
     $isAdministrator = Get-LocalGroupMember -Group $administrators -ErrorAction SilentlyContinue |
         Where-Object { $_.SID -eq $existing.SID }
     if ($isAdministrator) {
-        Write-Warning 'The existing account is an Administrator. Remove that membership before using it for AgentB.'
+        Write-Warning 'The existing account is an Administrator. Remove that membership before using it for Agent_b.'
     }
-    Write-SetupSummary -Changed @() -NotChanged @('existing account', 'password', 'group memberships', 'logon rights') -Next @('run this script alone with -ResetPassword to set and verify a known password', 'then store and test it in AgentB Settings')
+    Write-SetupSummary -Changed @() -NotChanged @('existing account', 'password', 'group memberships', 'logon rights') -Next @('run this script alone with -ResetPassword to set and verify a known password', 'then store and test it in Agent_b Settings')
     exit 0
 }
 
@@ -316,7 +316,7 @@ if ($existing -and $ResetPassword) {
     $currentSid = [Security.Principal.WindowsIdentity]::GetCurrent().User
     if ($isAdministrator -or $existing.SID -eq $currentSid) {
         Write-Warning 'Password reset refused: the target is an Administrator or the current operator account. This recovery path is only for a separate non-administrator service account.'
-        Write-SetupSummary -Changed @() -NotChanged @('account', 'password', 'group memberships', 'logon rights') -Next @('select the dedicated non-administrator AgentB service account')
+        Write-SetupSummary -Changed @() -NotChanged @('account', 'password', 'group memberships', 'logon rights') -Next @('select the dedicated non-administrator Agent_b service account')
         exit 1
     }
 }
@@ -351,7 +351,7 @@ try {
 
     if ($operation -eq 'create') {
         $script:changeState = 'account creation was attempted; inspect the account because the operation failed before post-condition verification'
-        New-LocalUser -Name $AccountName -Password $securePassword -PasswordNeverExpires -AccountNeverExpires -Description 'Dedicated low-privilege account for AgentB' | Out-Null
+        New-LocalUser -Name $AccountName -Password $securePassword -PasswordNeverExpires -AccountNeverExpires -Description 'Dedicated low-privilege account for Agent_b' | Out-Null
         $created = Get-LocalUser -Name $AccountName
         $administrators = Get-BuiltinGroupName -SidType BuiltinAdministratorsSid
         $adminMembership = Get-LocalGroupMember -Group $administrators -ErrorAction SilentlyContinue | Where-Object { $_.SID -eq $created.SID }
@@ -368,14 +368,14 @@ try {
         [Console]::Error.WriteLine("VALIDATION FAILED: the account exists, but the script could not establish that the password took (Win32 $($validation.ErrorCode): $($validation.Message)).")
         $changed = if ($operation -eq 'create') { 'local account was created' } else { 'password reset was submitted' }
         $untouched = if ($operation -eq 'create') { 'ordinary Users membership' } else { 'account and group memberships' }
-        Write-SetupSummary -Changed @($changed) -NotChanged @('logon rights', $untouched) -Next @('do not store this credential in AgentB', 'resolve the validation failure and rerun with -ResetPassword')
+        Write-SetupSummary -Changed @($changed) -NotChanged @('logon rights', $untouched) -Next @('do not store this credential in Agent_b', 'resolve the validation failure and rerun with -ResetPassword')
         exit 1
     }
 
     Write-Host 'VALIDATED: the supplied credential successfully authenticated with LogonUser.'
     $changed = if ($operation -eq 'create') { 'created the non-administrator local account and set a verified password' } else { 'reset and verified the existing account password' }
     $untouched = if ($operation -eq 'create') { 'ordinary Users membership was retained' } else { 'account and group memberships' }
-    Write-SetupSummary -Changed @($changed) -NotChanged @('interactive or task-scheduler logon rights', $untouched) -Next @('store the password in AgentB Settings', 'enable and test the service identity', 'verify whoami before applying ACLs or firewall policy')
+    Write-SetupSummary -Changed @($changed) -NotChanged @('interactive or task-scheduler logon rights', $untouched) -Next @('store the password in Agent_b Settings', 'enable and test the service identity', 'verify whoami before applying ACLs or firewall policy')
 } finally {
     $securePassword.Dispose()
 }

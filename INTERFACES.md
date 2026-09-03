@@ -1,10 +1,10 @@
-# AgentB interfaces
+# Agent_b interfaces
 
 This document is the stable contract for prompts 3–10. Later prompts implement the tagged records without changing their shapes.
 
 ## Event envelope and transport
 
-Every event is `{"seq":int,"ts":"RFC3339 with milliseconds","session_id":"","run_id":"","type":"","data":{}}`. Sessionless events are global. SSE uses `event: <type>`, the JSON envelope in `data:`, `id: <seq>`, and a comment ping every 15 seconds. JSONL additionally permits `body` on `model.request` and `raw` on `model.response`; those fields are excluded from SSE. Each session has its own log and global events use the harness log.
+Every event is `{"seq":int,"ts":"RFC3339 with milliseconds","session_id":"","run_id":"","type":"","data":{}}`. Sessionless events are global. SSE uses `event: <type>`, the JSON envelope in `data:`, `id: <seq>`, and a comment ping every 15 seconds. JSONL additionally permits `body` on `model.request` and `raw` on `model.response`; those fields are excluded from SSE. Each session has its own log and global events use the Agent_b log.
 
 On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapshot},servers:[Profile with masked key],config,replay,mutation_token,shell_credential:{stored,stored_at},shell_identity:{fallback,operator_approval_required,reason,since},serving_facts,flow:{stages,edges},tools:[{name,description}]}`. `mutation_token` is a per-launch browser/CSRF secret required in `X-AgentB-Mutation-Token` on every non-read request; it is not persisted or logged. `replay` is true only for `-replay` servers. The credential status never contains the credential.
 
@@ -33,7 +33,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 - `tool.call` [4] `{turn,call_id,name,args}`; `tool.result` [4] `{turn,call_id,name,ok,ms,bytes,tokens,preview}`; `tool.toggled` [4] `{name,enabled}`.
 - `message.appended` [4] `{message}`; `message.updated` [8] `{id,patch}`; `message.queued` [6] `{message_id,position}`.
 - `budget` [4] uses the `Budget` shape. Prompt 4 emits a rough estimate; prompt 8 resolves exact versus estimated accounting.
-- `approval.required` [6] `{call_id,name,args}`; `approval.decided` [6] `{call_id,decision}`; `cycle.detected` [6] `{call_id,name,args,prior_call_id}`; `workspace.conflict` [6] `{path,session_id,other_session_id,other_label,age_s}`. The dispatcher-only `shell.operator_override` approval uses args `{command,identity,reason,scope}` and is mandatory regardless of `approval.mode`; approval reruns only the original shell arguments once under the harness identity.
+- `approval.required` [6] `{call_id,name,args}`; `approval.decided` [6] `{call_id,decision}`; `cycle.detected` [6] `{call_id,name,args,prior_call_id}`; `workspace.conflict` [6] `{path,session_id,other_session_id,other_label,age_s}`. The dispatcher-only `shell.operator_override` approval uses args `{command,identity,reason,scope}` and is mandatory regardless of `approval.mode`; approval reruns only the original shell arguments once under the Agent_b process identity.
 - `compaction` [8] `{kind:elide|summarize,before,after,affected_ids,summary_message_id?}`; `memory.noted` [8] `{note,path}`.
 
 ## HTTP API

@@ -1,4 +1,4 @@
-# AgentB repository guidance
+# Agent_b repository guidance
 
 - Treat `harness-plan.md` as the document of record. Execute the revised prompt set in numeric order: `01-verify-serving.md`, `02-reliability-canary.md`, then `03-foundation.md` through `10-chat-replay-polish.md`.
 - Older overlapping prompt files are reference material; do not let them override the revised plan or canonical prompts.

@@ -74,7 +74,7 @@ function Resolve-ServiceIdentity {
     param([string]$Name)
     $localUser = Get-LocalUser -Name $Name -ErrorAction SilentlyContinue
     if (-not $localUser) {
-        throw "Local account '$Name' does not exist. Create and verify it in AgentB Settings first."
+        throw "Local account '$Name' does not exist. Create and verify it in Agent_b Settings first."
     }
     return $localUser.SID
 }
@@ -145,10 +145,10 @@ function Remove-ManagedRule {
         return
     }
     if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
-    if ($PSCmdlet.ShouldProcess($Target.Path, 'Remove AgentB managed ACL rule')) {
+    if ($PSCmdlet.ShouldProcess($Target.Path, 'Remove Agent_b managed ACL rule')) {
         foreach ($rule in $rules) { $acl.RemoveAccessRuleSpecific($rule) }
         Set-Acl -LiteralPath $Target.Path -AclObject $acl
-        Write-Host "REMOVED: AgentB managed ACL rule :: $($Target.Path)"
+        Write-Host "REMOVED: Agent_b managed ACL rule :: $($Target.Path)"
         $script:changed++
     }
 }
@@ -166,7 +166,7 @@ $root = [IO.Path]::GetFullPath($HarnessDirectory).TrimEnd('\')
 $workspace = [IO.Path]::GetFullPath($WorkspaceDirectory).TrimEnd('\')
 
 if (-not (Test-Path -LiteralPath $root -PathType Container)) {
-    [Console]::Error.WriteLine("Harness directory does not exist: $root")
+    [Console]::Error.WriteLine("Agent_b application directory does not exist: $root")
     exit 1
 }
 
@@ -175,7 +175,7 @@ $workspaceInsideRoot = $workspace.StartsWith($rootPrefix, [StringComparison]::Or
 if ($workspaceInsideRoot) {
     $relativeWorkspace = $workspace.Substring($rootPrefix.Length)
     if ([string]::IsNullOrWhiteSpace($relativeWorkspace) -or $relativeWorkspace.Contains('\')) {
-        [Console]::Error.WriteLine('When the workspace is inside the harness directory it must be one direct child directory, so the rest of the application tree can be denied recursively.')
+        [Console]::Error.WriteLine('When the workspace is inside the Agent_b application directory it must be one direct child directory, so the rest of the application tree can be denied recursively.')
         exit 1
     }
 }
@@ -214,23 +214,23 @@ if (-not (Test-Path -LiteralPath $workspace -PathType Container) -and -not $What
 }
 $targets += [pscustomobject]@{ Path = $workspace; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant workspace Modify' }
 
-Write-Host 'AgentB complete control-tree ACL policy'
+Write-Host 'Agent_b complete control-tree ACL policy'
 Write-Host "Identity: $env:COMPUTERNAME\$AccountName"
-Write-Host "Harness directory: $root"
+Write-Host "Agent_b application directory: $root"
 Write-Host "Only shell-writable tree: $workspace"
 Write-Host 'All existing top-level application files and directories except the workspace receive explicit write/delete/ownership denies. Read and execute are retained.'
 Write-Host 'Reapply and verify after an application update creates or replaces files.'
 
 if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $Verify -and -not $Inspect) {
     [Console]::Error.WriteLine('Administrator elevation is required to apply or remove ACLs.')
-    Write-Summary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('use AgentB Settings or reopen PowerShell as Administrator')
+    Write-Summary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('use Agent_b Settings or reopen PowerShell as Administrator')
     exit 1
 }
 
 if ($WhatIfPreference) {
     Write-Host 'Mode: WhatIf; no directory or ACL will be changed.'
     foreach ($target in $targets) { $null = $PSCmdlet.ShouldProcess($target.Path, $target.Intent) }
-    Write-Summary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('apply from AgentB Settings, then verify')
+    Write-Summary -Changed @() -NotChanged @('directories', 'files', 'ACLs') -Next @('apply from Agent_b Settings, then verify')
     exit 0
 }
 

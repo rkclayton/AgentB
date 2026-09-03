@@ -21,7 +21,7 @@ func NewWriters(dir string) (*Writers, error) {
 		return nil, err
 	}
 	stamp := time.Now().UTC().Format("20060102T150405.000Z")
-	file, err := os.OpenFile(filepath.Join(dir, "harness-"+stamp+".jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	file, err := os.OpenFile(filepath.Join(dir, "Agent_b-"+stamp+".jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}

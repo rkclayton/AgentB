@@ -57,7 +57,7 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 		if s.registry != nil {
 			for _, item := range s.registry.List() {
 				if item.IsRunning() {
-					writeError(w, http.StatusConflict, "stop all AgentB runs before applying host protections", "sessions")
+					writeError(w, http.StatusConflict, "stop all Agent_b runs before applying host protections", "sessions")
 					return
 				}
 			}

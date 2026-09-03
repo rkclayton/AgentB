@@ -45,7 +45,7 @@ $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 10 `
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
     -Principal $taskPrincipal -Settings $settings `
-    -Description 'Serves AgentB local inference on the configured private address.' -Force | Out-Null
+    -Description 'Serves Agent_b local inference on the configured private address.' -Force | Out-Null
 
 $rule = Get-NetFirewallRule -DisplayName $FirewallRule -ErrorAction SilentlyContinue | Select-Object -First 1
 if ($rule) {

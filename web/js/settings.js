@@ -380,7 +380,7 @@ function shell(active) {
     </div>
     ${feedback(serviceAccountMessage, serviceAccountAlarm, "Create or reset the non-admin Windows account. Windows may request approval.")}
 	<div class="settings-subhead">Host protections</div>
-	${row("AgentB", `<span class="account-status ${hardeningStatus.harness_elevated ? "alarm" : ""}">${html(elevationState)}</span>`)}
+	${row("Agent_b", `<span class="account-status ${hardeningStatus.harness_elevated ? "alarm" : ""}">${html(elevationState)}</span>`)}
 	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
 	${row("model route", `<select id="hardening-server" aria-label="Model route for host protections">${hardeningProfiles()}</select>`)}
 	<div class="settings-actions">
@@ -597,7 +597,7 @@ async function hardeningAction(action) {
 	hardeningMessage = action === "verify"
 		? "Verifying ACL and outbound policy…"
 		: hardeningStatus.harness_elevated
-			? "AgentB is already elevated; applying directly without a UAC prompt."
+			? "Agent_b is already elevated; applying directly without a UAC prompt."
 			: "Windows elevation requested. Respond if a UAC prompt appears.";
 	render();
 	try {

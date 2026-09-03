@@ -40,7 +40,7 @@ function Invoke-HardeningScript {
 
 $requiresElevation = $Mode -ne 'Verify' -and -not $WhatIfPreference
 if ($requiresElevation -and -not (Test-IsAdministrator)) {
-    [Console]::Error.WriteLine('Administrator elevation is required to apply or remove AgentB hardening.')
+    [Console]::Error.WriteLine('Administrator elevation is required to apply or remove Agent_b hardening.')
     exit 1
 }
 
@@ -60,7 +60,7 @@ if ($WhatIfPreference) {
     $aclArguments += '-Remove'
 }
 
-Write-Host "AgentB hardening orchestration: $Mode"
+Write-Host "Agent_b hardening orchestration: $Mode"
 Write-Host "Application: $HarnessDirectory"
 Write-Host "Workspace: $WorkspaceDirectory"
 Write-Host "Model endpoint: $ModelAddress`:$ModelPort"

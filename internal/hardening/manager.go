@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-var ErrUnsupported = errors.New("AgentB host hardening is supported only on Windows")
+var ErrUnsupported = errors.New("Agent_b host hardening is supported only on Windows")
 
 type Request struct {
 	AccountName        string
