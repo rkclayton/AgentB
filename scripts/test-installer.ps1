@@ -58,6 +58,12 @@ try {
     foreach ($required in @('.chat-identity-alarm { grid-row: 2; }', '.chat-budget { grid-row: 3; }', '.chat-log { grid-row: 4; }', '.chat-composer { grid-row: 5; }', '#chat-send {')) {
         if ($chatCSS -notmatch [regex]::Escape($required)) { throw "Installed Chat layout is missing: $required" }
     }
+    $chatScript = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'web\js\chat.js')
+    $settingsScript = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'web\js\settings.js')
+    if ($chatScript -notmatch 'chatCurrent\.addEventListener\("click", \(event\) => event\.preventDefault\(\)\);' -or
+        $settingsScript -notmatch 'consoleLaunch\.addEventListener\("click", \(event\) => \{\s+event\.preventDefault\(\);\s+if \(open\) closeSettings\(\);') {
+        throw 'Installed application allows its selected view control to reload the page.'
+    }
     $manifestPath = Join-Path $testInstall 'web\app.webmanifest'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         throw 'Installed application manifest is missing.'

@@ -41,9 +41,8 @@ const sectionLabels = [
 export function initSettings() {
   gear.addEventListener("click", () => (open ? closeSettings() : openSettings()));
   consoleLaunch.addEventListener("click", (event) => {
-    if (!open) return;
     event.preventDefault();
-    closeSettings();
+    if (open) closeSettings();
   });
   document.addEventListener("settings.open", (event) => openSettings(event.detail?.section));
   document.addEventListener("keydown", (event) => {

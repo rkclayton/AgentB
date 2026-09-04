@@ -24,6 +24,8 @@ let renderTimer = 0;
 let lastRender = 0;
 const renderIntervalMS = 50;
 
+chatCurrent.addEventListener("click", (event) => event.preventDefault());
+
 function consoleURL() {
   const query = new URLSearchParams();
   if (bound) query.set("session", bound);
