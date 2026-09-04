@@ -1158,6 +1158,8 @@
   background: rgba(216, 221, 227, 0.6);
 }
 .timeline-tool.error .timeline-lamp { background: var(--alarm); }
+.timeline-tool.untrusted .timeline-lamp { background: var(--alarm); }
+.timeline-tool.untrusted .finish { color: var(--alarm); }
 .settings-page { inset: var(--app-header-height) 0 0; }
 
 @media (max-width: 800px) {

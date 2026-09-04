@@ -25,6 +25,9 @@ type CallOutcome struct {
 	OperatorContext           bool
 	OperatorOverrideAvailable bool
 	OperatorOverrideReason    string
+	Category                  string
+	Untrusted                 bool
+	Metadata                  map[string]any
 }
 
 // DetailedTool is optional. It lets a tool report that a narrowly scoped,
@@ -38,6 +41,9 @@ type CallDetail struct {
 	Err                    error
 	OperatorContext        bool
 	OperatorOverrideReason string
+	Category               string
+	Untrusted              bool
+	Metadata               map[string]any
 }
 
 // OperatorOverrideTool is optional and is called only by the dispatcher after
@@ -103,25 +109,50 @@ func (r *Registry) CallDetailed(ctx context.Context, s *session.Session, name st
 	var result string
 	var err error
 	overrideReason := ""
+	category, untrusted := detailCategory(tool), detailUntrusted(tool)
+	var metadata map[string]any
 	if detailed, ok := tool.(DetailedTool); ok {
 		detail := detailed.CallDetailed(ctx, s, args)
 		result, err, overrideReason = detail.Content, detail.Err, detail.OperatorOverrideReason
+		if detail.Category != "" {
+			category = detail.Category
+		}
+		untrusted, metadata = detail.Untrusted || untrusted, detail.Metadata
 		if err == nil && overrideReason != "" {
-			return CallOutcome{Content: result, OperatorContext: detail.OperatorContext, OperatorOverrideAvailable: true, OperatorOverrideReason: overrideReason}
+			return CallOutcome{Content: result, OperatorContext: detail.OperatorContext, OperatorOverrideAvailable: true, OperatorOverrideReason: overrideReason, Category: category, Untrusted: untrusted, Metadata: metadata}
 		}
 		if err == nil {
-			return CallOutcome{Content: result, OK: true, OperatorContext: detail.OperatorContext}
+			return CallOutcome{Content: result, OK: true, OperatorContext: detail.OperatorContext, Category: category, Untrusted: untrusted, Metadata: metadata}
 		}
 	} else {
 		result, err = tool.Call(ctx, s, args)
 	}
 	if err != nil {
 		if strings.HasPrefix(err.Error(), "note:") {
-			return CallOutcome{Content: err.Error()}
+			return CallOutcome{Content: err.Error(), Category: category, Untrusted: untrusted, Metadata: metadata}
 		}
-		return CallOutcome{Content: "error: " + err.Error()}
+		return CallOutcome{Content: "error: " + err.Error(), Category: category, Untrusted: untrusted, Metadata: metadata}
 	}
-	return CallOutcome{Content: result, OK: true, OperatorOverrideAvailable: overrideReason != "", OperatorOverrideReason: overrideReason}
+	return CallOutcome{Content: result, OK: true, OperatorOverrideAvailable: overrideReason != "", OperatorOverrideReason: overrideReason, Category: category, Untrusted: untrusted, Metadata: metadata}
+}
+
+// ResultClassifyingTool declares model-context handling that applies even when
+// a call fails before it can return detailed metadata.
+type ResultClassifyingTool interface {
+	ResultCategory() string
+	ResultUntrusted() bool
+}
+
+func detailCategory(tool Tool) string {
+	if classified, ok := tool.(ResultClassifyingTool); ok {
+		return classified.ResultCategory()
+	}
+	return ""
+}
+
+func detailUntrusted(tool Tool) bool {
+	classified, ok := tool.(ResultClassifyingTool)
+	return ok && classified.ResultUntrusted()
 }
 func (r *Registry) CallAsOperator(ctx context.Context, s *session.Session, name string, args map[string]any) (string, bool) {
 	tool := r.byName[name]

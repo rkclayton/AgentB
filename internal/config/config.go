@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -121,6 +122,7 @@ type Tools struct {
 	ReadFile ReadFileTool `json:"read_file"`
 	ListDir  ListDirTool  `json:"list_dir"`
 	Grep     GrepTool     `json:"grep"`
+	Fetch    FetchTool    `json:"fetch"`
 }
 type ReadFileTool struct {
 	DefaultLimit int `json:"default_limit"`
@@ -134,6 +136,16 @@ type ListDirTool struct {
 type GrepTool struct {
 	MaxMatches   int `json:"max_matches"`
 	MaxLineChars int `json:"max_line_chars"`
+}
+type FetchTool struct {
+	TimeoutS           int      `json:"timeout_s"`
+	MaxBytes           int64    `json:"max_bytes"`
+	MaxRedirects       int      `json:"max_redirects"`
+	DefaultLimit       int      `json:"default_limit"`
+	MaxLimit           int      `json:"max_limit"`
+	MaxLineChars       int      `json:"max_line_chars"`
+	AllowDomains       []string `json:"allow_domains"`
+	AllowInternalHosts []string `json:"allow_internal_hosts"`
 }
 type Shell struct {
 	Command            []string `json:"command"`
@@ -167,7 +179,7 @@ func Defaults(workspace string) Config {
 		Listen: "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
 		Servers: []Profile{{ID: "local", Label: "Local", BaseURL: "http://127.0.0.1:8080", Model: "", RequestTimeoutS: 900, ProbeMode: "full", Sampling: SamplingPair{Thinking: thinking, Nonthinking: nonthinking}, Reasoning: Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}}, Context: Context{ReserveOutput: 10240}, Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}}}},
 		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: "mutating"}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
-		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}},
+		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500, AllowDomains: []string{}, AllowInternalHosts: []string{}}},
 		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextTimeoutMinutes: 60, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
 	}
 }
@@ -320,6 +332,23 @@ func (c Config) Validate() error {
 	if c.Tools.Grep.MaxMatches < 1 || c.Tools.Grep.MaxLineChars < 1 {
 		return fmt.Errorf("tools.grep: limits must be positive")
 	}
+	if c.Tools.Fetch.TimeoutS < 1 || c.Tools.Fetch.TimeoutS > 300 {
+		return fmt.Errorf("tools.fetch.timeout_s: must be between 1 and 300")
+	}
+	if c.Tools.Fetch.MaxBytes < 1 || c.Tools.Fetch.MaxBytes > 64<<20 {
+		return fmt.Errorf("tools.fetch.max_bytes: must be between 1 and 67108864")
+	}
+	if c.Tools.Fetch.MaxRedirects < 0 || c.Tools.Fetch.MaxRedirects > 20 {
+		return fmt.Errorf("tools.fetch.max_redirects: must be between 0 and 20")
+	}
+	if c.Tools.Fetch.DefaultLimit < 1 || c.Tools.Fetch.MaxLimit < 1 || c.Tools.Fetch.DefaultLimit > c.Tools.Fetch.MaxLimit || c.Tools.Fetch.MaxLineChars < 1 {
+		return fmt.Errorf("tools.fetch: line limits must be positive and default_limit no greater than max_limit")
+	}
+	for _, host := range append(append([]string{}, c.Tools.Fetch.AllowDomains...), c.Tools.Fetch.AllowInternalHosts...) {
+		if !validFetchHost(host) {
+			return fmt.Errorf("tools.fetch: allow-list entries must be hostnames or IP addresses without schemes, ports, paths, or wildcards")
+		}
+	}
 	if len(c.Shell.Command) == 0 {
 		return fmt.Errorf("shell.command: required")
 	}
@@ -387,6 +416,8 @@ func applyDefaults(c *Config) {
 	}
 	if c.Tools.ReadFile.DefaultLimit == 0 {
 		c.Tools = d.Tools
+	} else if c.Tools.Fetch.TimeoutS == 0 {
+		c.Tools.Fetch = d.Tools.Fetch
 	}
 	if len(c.Shell.Command) == 0 {
 		c.Shell = d.Shell
@@ -438,6 +469,13 @@ func (s Shell) FileRoutingGuardEnabled() bool {
 	return s.FileRoutingGuard == nil || *s.FileRoutingGuard
 }
 func boolPointer(value bool) *bool { return &value }
+func validFetchHost(value string) bool {
+	value = strings.TrimSpace(value)
+	if net.ParseIP(value) != nil {
+		return true
+	}
+	return value != "" && !strings.ContainsAny(value, `/\\:*?`) && !strings.Contains(value, "..")
+}
 func oneOf(v string, values ...string) bool {
 	for _, x := range values {
 		if v == x {

@@ -111,6 +111,7 @@ func main() {
 		fileIdentity.Wrap(tools.NewGrep(cfg.Tools.Grep, cfg.Tools.ListDir)),
 		shellTool,
 		tools.NewRemember(memoryManager, bus),
+		tools.NewFetch(cfg.Tools.Fetch),
 		fileIdentity.Wrap(tools.NewGlob()),
 	)
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)

@@ -54,7 +54,8 @@ func TestOperatorOverrideRequiresApprovalEvenWhenApprovalModeOff(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		content, ok, _ := runner.executeTool(context.Background(), s, "run", "call", "shell", map[string]any{"command": "Set-Content protected.txt value"})
+		outcome := runner.executeTool(context.Background(), s, "run", "call", "shell", map[string]any{"command": "Set-Content protected.txt value"})
+		content, ok := outcome.Content, outcome.OK
 		done <- result{content: content, ok: ok}
 	}()
 
@@ -113,7 +114,8 @@ func TestOperatorOverrideDenialDoesNotRetry(t *testing.T) {
 	}
 	done := make(chan denialResult, 1)
 	go func() {
-		content, ok, _ := runner.executeTool(context.Background(), s, "run", "call", "shell", map[string]any{"command": "Set-Content protected.txt value"})
+		outcome := runner.executeTool(context.Background(), s, "run", "call", "shell", map[string]any{"command": "Set-Content protected.txt value"})
+		content, ok := outcome.Content, outcome.OK
 		done <- denialResult{content: content, ok: ok}
 	}()
 	select {
@@ -154,7 +156,8 @@ func TestFileToolOperatorOverrideUsesPathAndExactCall(t *testing.T) {
 	}
 	done := make(chan fileResult, 1)
 	go func() {
-		content, ok, _ := runner.executeTool(context.Background(), s, "run", "call", "read_file", map[string]any{"path": `C:\allowed.txt`})
+		outcome := runner.executeTool(context.Background(), s, "run", "call", "read_file", map[string]any{"path": `C:\allowed.txt`})
+		content, ok := outcome.Content, outcome.OK
 		done <- fileResult{content: content, ok: ok}
 	}()
 	required := <-eventCh
@@ -190,7 +193,7 @@ func TestSuccessfulEmptyOperatorOverrideIsUnambiguous(t *testing.T) {
 	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"list_dir": true}}
 	done := make(chan string, 1)
 	go func() {
-		content, _, _ := runner.executeTool(context.Background(), s, "run", "call", "list_dir", map[string]any{})
+		content := runner.executeTool(context.Background(), s, "run", "call", "list_dir", map[string]any{}).Content
 		done <- content
 	}()
 	<-eventCh

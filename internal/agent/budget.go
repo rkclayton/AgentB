@@ -74,7 +74,7 @@ func (b *Budgeter) MarkRequest(id string, estimate int) {
 }
 func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
 	state := b.state(s.ID)
-	categories := map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "summary": 0}
+	categories := map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "fetched": 0, "summary": 0}
 	estimated := []string{}
 	messageCounts := map[string]session.MessageCount{}
 	schemaCounts := map[string]int{}
@@ -84,7 +84,7 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 	client := llm.New(profile)
 	if forceEstimate {
 		mode = "estimated"
-		estimated = []string{"system", "memory", "tools", "history", "files", "results", "summary"}
+		estimated = []string{"system", "memory", "tools", "history", "files", "results", "fetched", "summary"}
 		cpt := state.cpt
 		if cpt <= 0 {
 			cpt = 3.6
@@ -110,7 +110,7 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			schemaCounts[name] = estimateChars(float64(len([]rune(string(data))))*1.1, cpt)
 		}
 	} else if !profile.Capabilities.ApplyTemplate {
-		estimated = []string{"system", "memory", "tools", "history", "files", "results", "summary"}
+		estimated = []string{"system", "memory", "tools", "history", "files", "results", "fetched", "summary"}
 		count := func(text string) int {
 			value, err := client.Tokenize(ctx, text, false)
 			if err != nil {

@@ -46,7 +46,17 @@
   "tools": {
     "read_file": { "default_limit": 200, "max_limit": 400, "max_line_chars": 500 },
     "list_dir": { "max_entries": 300, "ignore": [".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"] },
-    "grep": { "max_matches": 50, "max_line_chars": 200 }
+    "grep": { "max_matches": 50, "max_line_chars": 200 },
+    "fetch": {
+      "timeout_s": 20,
+      "max_bytes": 2097152,
+      "max_redirects": 5,
+      "default_limit": 200,
+      "max_limit": 400,
+      "max_line_chars": 500,
+      "allow_domains": [],
+      "allow_internal_hosts": []
+    }
   },
   "shell": {
     "command": ["powershell", "-NoProfile", "-NonInteractive", "-Command"],

@@ -32,8 +32,12 @@ When Windows denies a built-in file operation, or shell output looks like an OS 
 
 Agent_b has no user authentication and ships with `listen` bound to loopback. Each launch generates an unguessable mutation token delivered through the same-origin state stream; every non-read request requires that token, cross-origin browser mutations are rejected, framing is denied, and a restrictive Content Security Policy is sent. This is a browser/CSRF barrier, not authentication against another process running as the operator. Moving the listener off loopback exposes an endpoint that can run shell commands and requires a real TLS/authentication design.
 
+The `fetch` tool is the governed public-network path. It performs GET-only, cookie-free requests with no model-supplied headers, rechecks every redirect and resolved address, denies loopback/private/link-local destinations unless the exact host is configured in `tools.fetch.allow_internal_hosts`, caps time and bytes, refuses binary content, and labels the returned text as untrusted in both model context and the timeline. Its browser-shaped TLS ClientHello improves compatibility; it does not impersonate a signed-in browser or make fetched instructions trustworthy. DNS/IP validation and domain allowlists reduce SSRF exposure but are application guards, not a network sandbox; `tools.fetch.allow_domains` is empty for first-run usability, but an explicit allowlist is recommended for untrusted workloads. On a hardened Windows host, the service-account firewall blocks public network access from `shell`; `fetch` runs in the Agent_b process and is therefore the only sanctioned service-context path. Operator mode deliberately removes that firewall enforcement, and an unhardened host may let shell clients reach the network.
+
 ## Stored model content
 
 `logs/*.jsonl` contains complete prompts and responses, including file contents and command output, and is ignored for that reason.
 
 `memory/*.md` contains model-authored notes that are injected into future sessions' system prompts for the same workspace. A note derived from untrusted content can therefore persist across sessions. Review it—the settings sheet shows the content—and remove the note file manually if it should not be trusted or retained.
+
+Fetched text is one such untrusted source. The envelope does not follow content into a later `remember` call automatically, so review durable notes derived from fetched material with the same care as the original page.

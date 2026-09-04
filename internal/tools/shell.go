@@ -54,7 +54,7 @@ func NewShell(cfg config.Shell) *Shell {
 }
 func (*Shell) Name() string { return "shell" }
 func (*Shell) Description() string {
-	return "Run a non-interactive shell command from the workspace root with a timeout and bounded output. Direct file discovery and reads are refused; use glob or read_file."
+	return "Run a non-interactive shell command from the workspace root with a timeout and bounded output. Direct file discovery and reads are refused; use glob or read_file. Network access belongs in fetch."
 }
 func (s *Shell) Schema() map[string]any {
 	cfg := s.config()

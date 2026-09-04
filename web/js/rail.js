@@ -7,6 +7,7 @@ const root = document.getElementById("rail"),
     "history",
     "files",
     "results",
+    "fetched",
     "summary",
   ];
 export function renderRail() {

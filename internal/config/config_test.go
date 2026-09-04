@@ -78,6 +78,27 @@ func TestServiceAccountSplitDefaultsOffWithLocalAccountDefaults(t *testing.T) {
 	}
 }
 
+func TestFetchDefaultsAndAllowListValidation(t *testing.T) {
+	cfg := Config{Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 1}}, Shell: Shell{Command: []string{"unused"}}}
+	ApplyDefaults(&cfg)
+	if cfg.Tools.Fetch.TimeoutS != 20 || cfg.Tools.Fetch.MaxBytes != 2<<20 || cfg.Tools.Fetch.MaxRedirects != 5 {
+		t.Fatalf("fetch defaults = %+v", cfg.Tools.Fetch)
+	}
+	if len(cfg.Tools.Fetch.AllowDomains) != 0 || len(cfg.Tools.Fetch.AllowInternalHosts) != 0 {
+		t.Fatalf("fetch allow lists should default empty: %+v", cfg.Tools.Fetch)
+	}
+	full := Defaults(t.TempDir())
+	full.Tools.Fetch.AllowDomains = []string{"https://example.com"}
+	if err := full.Validate(); err == nil {
+		t.Fatal("fetch allow-list entry with scheme was accepted")
+	}
+	full = Defaults(t.TempDir())
+	full.Tools.Fetch.AllowInternalHosts = []string{"::1"}
+	if err := full.Validate(); err != nil {
+		t.Fatalf("IPv6 internal host refused: %v", err)
+	}
+}
+
 func TestOperatorContextNeverPersistsOrRestartsEnabled(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "harness.json")
 	cfg := Defaults(t.TempDir())

@@ -1,6 +1,6 @@
 # Agent_b
 
-Agent_b is a small, standard-library Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, eight identity-guarded tools, exact-or-labeled context accounting, compaction, durable workspace notes, and a unified Chat, Console, and Settings interface.
+Agent_b is a small Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, nine governed tools, exact-or-labeled context accounting, compaction, durable workspace notes, and a unified Chat, Console, and Settings interface. The browser remains dependency-free; the backend uses the listed TLS-fingerprinting and HTML parsing modules for `fetch`.
 
 Choose one serving path before you start.
 
@@ -14,7 +14,7 @@ To remove the installed application, use **Settings → Apps → Installed apps 
 
 ## Path A — an endpoint you already run (~5 minutes)
 
-Prerequisites: Go 1.24+ and an OpenAI-compatible endpoint you already run, such as Ollama, LM Studio, vLLM, or a hosted API. Nothing else is required: no GPU, CUDA, model download, or network access at build time.
+Prerequisites: Go 1.24+ and an OpenAI-compatible endpoint you already run, such as Ollama, LM Studio, vLLM, or a hosted API. Nothing else is required: no GPU, CUDA, or model download. The first source build needs access to the Go module proxy (or a populated module cache) for the fetch tool's pinned dependencies; running the built binary does not.
 
 ```text
 git clone <repo-url>
@@ -52,6 +52,8 @@ Profiles hold an endpoint, model, sampling, reasoning, context settings, and mea
 Sessions are ephemeral views onto a workspace and may use different profiles. Point several sessions at one workspace for a swarm; file-write conflicts force a re-read instead of silently overwriting another session. Agent_b schedules two runs by default, but a llama.cpp server started with `--parallel 1` interleaves their slot work instead of decoding two requests simultaneously.
 
 With the service-account split enabled, shell and file tools use the `agentb-svc` Windows identity. Relative file paths start in the workspace; absolute paths are accepted when that account's Windows permissions allow them. A permission or identity failure pauses and offers **Run once as operator**. The failed command or file call is never retried automatically. Approval reruns only the displayed operation once under the Windows account running Agent_b, is required even when normal approvals are off, and is logged. It does not grant lasting permission or run as Administrator.
+
+Use `fetch` for public HTTP/HTTPS text. It sends GET requests without model-supplied headers, cookies, or credentials; extracts readable HTML; refuses binary responses and private, loopback, or link-local destinations; and marks every result as untrusted external data. `tools.fetch.allow_domains` optionally limits public domains (an empty list permits all public domains), while `allow_internal_hosts` is an exact-host exception for deliberately configured private endpoints. Defaults are a 20-second request timeout, five redirects, a 2 MiB response cap, and 200 returned lines (maximum 400).
 
 ## Bring your own model
 
@@ -91,9 +93,11 @@ The generated JSONL, workspaces, server logs, score sheets, and summary stay und
 | Profiles | `servers[].{id,label,base_url,model,api_key,request_timeout_s,probe_mode,sampling,reasoning,context,system_prompt_override,capabilities}` |
 | Runs | `run.{max_turns,cycle_window,max_consecutive_tool_errors,max_concurrent,queue_depth}`, `approval.mode` |
 | Context and memory | `context.{soft_pct,summary_pct,accounting}`, `memory.{enabled,dir,max_tokens}` |
-| Tool caps | `tools.{read_file,list_dir,grep}`, `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,file_routing_guard,operator_context,operator_context_timeout_minutes,service_account,deny}` (`file_routing_guard` defaults on; `operator_context` and `service_account.enabled` default off; operator context is session-only and auto-disables after 60 minutes by default) |
+| Tool caps | `tools.{read_file,list_dir,grep,fetch:{timeout_s,max_bytes,max_redirects,default_limit,max_limit,max_line_chars,allow_domains,allow_internal_hosts}}`, `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,file_routing_guard,operator_context,operator_context_timeout_minutes,service_account,deny}` (`fetch` defaults to public hosts with private-network access denied; `file_routing_guard` defaults on; `operator_context` and `service_account.enabled` default off; operator context is session-only and auto-disables after 60 minutes by default) |
 
 See [web/DESIGN.md](web/DESIGN.md) for the UI contract, [INTERFACES.md](INTERFACES.md) for events and APIs, and [SECURITY.md](SECURITY.md) plus [Windows host hardening](docs/HARDENING.md) before granting a model shell access. The UI uses only the six-color industrial-console system; artwork and vendored fonts live under `web/assets/`.
+
+Dependency licenses and included transitive modules are recorded in [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).
 
 ## Deferred boundaries
 

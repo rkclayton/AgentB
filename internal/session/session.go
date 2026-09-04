@@ -60,7 +60,7 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tools := make([]ToolState, 0, len(s.ToolsEnabled))
-	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "grep", "shell", "remember", "glob"} {
+	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "grep", "shell", "remember", "fetch", "glob"} {
 		enabled, ok := s.ToolsEnabled[name]
 		if ok {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, SchemaTokens: s.SchemaTokens[name]})

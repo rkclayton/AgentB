@@ -68,7 +68,7 @@ func (c *Compactor) ElideOld(s *session.Session, runID string, used, target int,
 		if used <= target {
 			break
 		}
-		if skip[index] || item.Elided || (item.Category != "files" && item.Category != "results") {
+		if skip[index] || item.Elided || (item.Category != "files" && item.Category != "results" && item.Category != "fetched") {
 			continue
 		}
 		call, _ := callFor(messages, item.ToolCallID)

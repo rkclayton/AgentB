@@ -199,6 +199,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			content         string
 			ok              bool
 			operatorContext bool
+			category        string
+			untrusted       bool
+			metadata        map[string]any
 			ms              int64
 		}
 		results := []result{}
@@ -223,18 +226,27 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 					item.content = "error: " + item.argErr.Error()
 					item.ok = false
 				} else {
-					item.content, item.ok, item.operatorContext = r.executeTool(ctx, s, runID, item.call.ID, item.call.Name, item.args)
+					outcome := r.executeTool(ctx, s, runID, item.call.ID, item.call.Name, item.args)
+					item.content, item.ok, item.operatorContext = outcome.Content, outcome.OK, outcome.OperatorContext
+					item.category, item.untrusted, item.metadata = outcome.Category, outcome.Untrusted, outcome.Metadata
 				}
 				item.ms = time.Since(start).Milliseconds()
-				r.bus.Publish(events.New(events.ToolResult, s.ID, runID, map[string]any{"turn": turn, "call_id": item.call.ID, "name": item.call.Name, "ok": item.ok, "operator_context": item.operatorContext, "ms": item.ms, "bytes": len(item.content), "tokens": r.textTokens(ctx, profile, item.content), "preview": preview(item.content)}))
+				data := map[string]any{"turn": turn, "call_id": item.call.ID, "name": item.call.Name, "ok": item.ok, "operator_context": item.operatorContext, "untrusted": item.untrusted, "ms": item.ms, "bytes": len(item.content), "tokens": r.textTokens(ctx, profile, item.content), "preview": preview(item.content)}
+				for key, value := range item.metadata {
+					data[key] = value
+				}
+				r.bus.Publish(events.New(events.ToolResult, s.ID, runID, data))
 			}
 		})
 		r.stage(s, runID, turn, "append", func() {
 			s.Append(assistant)
 			r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": assistant}))
 			for _, item := range results {
-				category := "results"
-				if item.call.Name == "read_file" {
+				category := item.category
+				if category == "" {
+					category = "results"
+				}
+				if item.call.Name == "read_file" && item.category == "" {
 					category = "files"
 				}
 				message, _ := r.makeMessage(ctx, profile, "tool", item.content, category, turn)
@@ -260,17 +272,17 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	}
 }
 
-func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) (string, bool, bool) {
+func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) tools.CallOutcome {
 	approved, gateErr := r.gate.Wait(ctx, s, runID, callID, name, args)
 	if gateErr != nil {
-		return "error: call canceled", false, false
+		return tools.CallOutcome{Content: "error: call canceled"}
 	}
 	if !approved {
-		return "error: call denied by user", false, false
+		return tools.CallOutcome{Content: "error: call denied by user"}
 	}
 	outcome := r.tools.CallDetailed(ctx, s, name, args)
 	if !outcome.OperatorOverrideAvailable {
-		return outcome.Content, outcome.OK, outcome.OperatorContext
+		return outcome
 	}
 	command, _ := args["command"].(string)
 	path, _ := args["path"].(string)
@@ -294,11 +306,13 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	}
 	overrideApproved, overrideErr := r.gate.WaitRequired(ctx, s, runID, overrideID, name+".operator_override", overrideArgs)
 	if overrideErr != nil {
-		return outcome.Content + "\n\noperator-identity override canceled", false, false
+		outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override canceled", false, false
+		return outcome
 	}
 	if !overrideApproved {
 		log.Printf("%s operator-identity override denied: session=%s call=%s command=%q path=%q", name, s.ID, callID, command, path)
-		return outcome.Content + "\n\noperator-identity override was offered and denied by the user", false, false
+		outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override was offered and denied by the user", false, false
+		return outcome
 	}
 	log.Printf("SECURITY: %s operator-identity override approved: session=%s call=%s command=%q path=%q", name, s.ID, callID, command, path)
 	overrideContent, overrideOK := r.tools.CallAsOperator(ctx, s, name, args)
@@ -306,9 +320,11 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 		if strings.TrimSpace(overrideContent) == "" {
 			overrideContent = "the tool completed with no output"
 		}
-		return "operator-identity override succeeded; exact " + subject + " rerun once:\n" + overrideContent, true, false
+		outcome.Content, outcome.OK, outcome.OperatorContext = "operator-identity override succeeded; exact "+subject+" rerun once:\n"+overrideContent, true, false
+		return outcome
 	}
-	return outcome.Content + "\n\noperator-identity override was attempted but failed:\n" + overrideContent, false, false
+	outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override was attempted but failed:\n"+overrideContent, false, false
+	return outcome
 }
 
 func (r *Runner) stage(s *session.Session, runID string, turn int, name string, fn func()) {

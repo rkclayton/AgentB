@@ -139,6 +139,10 @@ function toolRow(session, call, callEvent, resultEvent, state) {
     : result.ok === false
       ? "Failed"
       : "Done";
+  if (result.untrusted) {
+    row.node.classList.add("untrusted");
+    row.head.children[4].textContent = `Untrusted · ${result.ok === false ? "Failed" : "Done"}`;
+  }
   addBlock(
     row.expansion,
     "arguments",
@@ -289,7 +293,7 @@ function formatSigned(value) {
 
 function keyArgument(args) {
   if (!args || typeof args !== "object") return "";
-  for (const key of ["path", "pattern", "query", "command", "note"]) {
+  for (const key of ["url", "path", "pattern", "query", "command", "note"]) {
     if (args[key]) return String(args[key]).replaceAll("\n", " ").slice(0, 120);
   }
   return "";
