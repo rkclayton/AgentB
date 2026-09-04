@@ -38,6 +38,18 @@ try {
     if ($launcherSource -notmatch "'chat'" -or $launcherSource -notmatch 'Show-AgentBWindow -Url \$appUrl -ReplaceExisting') {
         throw 'Installed launcher is not configured to open the Chat-first application view.'
     }
+    if ($launcherSource -notmatch '\[switch\]\$Detached' -or
+        $launcherSource -notmatch '\[switch\]\$NoPause' -or
+        $launcherSource -notmatch "WindowStyle = 'Hidden'" -or
+        $launcherSource -notmatch 'launcher-errors\.log') {
+        throw 'Installed PowerShell launcher is missing detached automation or durable failure logging.'
+    }
+    $batchLauncherSource = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'Agent_b.cmd')
+    if ($batchLauncherSource -match '(?im)^\s*pause\s*$' -or
+        $batchLauncherSource -notmatch 'timeout /t 10 /nobreak' -or
+        $batchLauncherSource -notmatch 'AGENT_B_AUTO_CLOSE') {
+        throw 'Installed batch launcher can still wait indefinitely after a failure.'
+    }
     $indexSource = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'web\index.html')
     $chatSource = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'web\chat.html')
     if ($indexSource -match 'target=' -or $chatSource -match 'target=') {

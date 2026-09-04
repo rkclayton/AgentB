@@ -4,6 +4,8 @@ param(
     [ValidateRange(5, 300)]
     [int]$StartupTimeoutSeconds = 30,
     [switch]$NoBrowser,
+    [switch]$Detached,
+    [switch]$NoPause,
     [switch]$Check
 )
 
@@ -14,6 +16,22 @@ if ([string]::IsNullOrWhiteSpace($RootDirectory)) {
 $root = [IO.Path]::GetFullPath($RootDirectory).TrimEnd('\')
 $executable = Join-Path $root 'Agent_b.exe'
 $configPath = Join-Path $root 'harness.json'
+$launcherErrorLog = Join-Path $root 'logs\launcher-errors.log'
+
+trap {
+    $message = ($_.Exception.Message -replace '[\r\n]+', ' ').Trim()
+    $logged = $false
+    try {
+        $null = New-Item -ItemType Directory -Path (Split-Path -Parent $launcherErrorLog) -Force
+        Add-Content -LiteralPath $launcherErrorLog -Encoding UTF8 -Value ('{0} {1}' -f [DateTime]::Now.ToString('yyyy-MM-dd HH:mm:ss zzz'), $message)
+        $logged = $true
+    } catch { }
+    [Console]::Error.WriteLine("Agent_b launch failed: $message")
+    if ($logged) {
+        [Console]::Error.WriteLine("Details were appended to $launcherErrorLog")
+    }
+    exit 1
+}
 
 function Get-AgentBUrl {
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
@@ -156,9 +174,24 @@ try {
         throw 'Agent_b must be launched normally, not from an elevated terminal or Run as administrator.'
     }
 
-    Write-Host 'Starting Agent_b. Close this window or press Ctrl+C to stop it.'
+    if ($Detached) {
+        Write-Host 'Starting Agent_b in the background.'
+    } else {
+        Write-Host 'Starting Agent_b. Close this window or press Ctrl+C to stop it.'
+    }
     $configArgument = '-config "' + $configPath.Replace('"', '\"') + '"'
-    $process = Start-Process -FilePath $executable -ArgumentList $configArgument -WorkingDirectory $root -NoNewWindow -PassThru
+    $start = @{
+        FilePath = $executable
+        ArgumentList = $configArgument
+        WorkingDirectory = $root
+        PassThru = $true
+    }
+    if ($Detached) {
+        $start.WindowStyle = 'Hidden'
+    } else {
+        $start.NoNewWindow = $true
+    }
+    $process = Start-Process @start
     $state = Wait-AgentBEndpoint -Url $url -Process $process -Seconds $StartupTimeoutSeconds
     if ($state -eq 'exited') {
         $process.WaitForExit()
@@ -166,7 +199,7 @@ try {
     }
     if ($state -eq 'timeout') {
         Write-Warning "Agent_b process $($process.Id) is running, but $url did not become ready within $StartupTimeoutSeconds seconds. No browser was opened."
-        Write-Host 'The process is being left running in this console so delayed startup remains visible.'
+        Write-Host $(if ($Detached) { 'The process is being left running in the background; inspect logs or use -Check to confirm readiness.' } else { 'The process is being left running in this console so delayed startup remains visible.' })
     } else {
         Write-Host "Agent_b is ready at $appUrl"
         Show-AgentBWindow -Url $appUrl -ReplaceExisting
@@ -174,6 +207,11 @@ try {
 } finally {
     if ($locked) { $mutex.ReleaseMutex() }
     $mutex.Dispose()
+}
+
+if ($Detached) {
+    Write-Host "Agent_b is running in the background as process $($process.Id)."
+    exit 0
 }
 
 $process.WaitForExit()

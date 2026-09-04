@@ -8,6 +8,8 @@ On Windows, double-click **`install-Agent_b.cmd`** once for the normal per-user 
 
 Developers can instead double-click **`start-Agent_b.cmd`** to build and run directly from the checkout. Both paths find Go on `PATH` or in the ignored local `.tools\go` directory. No PowerShell command is required.
 
+The normal launcher console owns the Agent_b process, so it remains open while the server is running and closes with it. A launch failure is appended to `logs\launcher-errors.log`; the wrapper shows the error for 10 seconds and closes automatically instead of waiting for a keypress. Test automation should use `Agent_b.cmd -Detached -NoBrowser -NoPause` (or the same switches with `start-Agent_b.cmd`): the server starts in a hidden background process and the launcher returns after its readiness check. A detached server does not stop when its browser closes, so automation must stop the exact Agent_b process it started after confirming sessions are idle.
+
 Agent_b refuses to start with an elevated Administrator token. Membership in the local Administrators group is fine: double-click the launcher normally, without **Run as administrator** and outside an elevated terminal.
 
 To remove the installed application, use **Settings → Apps → Installed apps → Agent_b → Uninstall**. The uninstaller asks whether to remove local connection settings, credential, logs, memory, and workspace; choosing **No** keeps them for a later reinstall. The service account and host firewall policy may be shared, so remove Host protections in Agent_b Settings before uninstalling if they are no longer needed.
