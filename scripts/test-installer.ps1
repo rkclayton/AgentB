@@ -46,6 +46,18 @@ try {
     foreach ($required in @('id="chat-console"', 'id="chat-settings"', 'id="chat-stop"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
         if ($chatSource -notmatch [regex]::Escape($required)) { throw "Installed Chat view is missing: $required" }
     }
+    foreach ($link in @(
+        @{ Source = $indexSource; Pattern = '<a id="chat-launch"[^>]+href="/chat"'; Name = 'Console-to-Chat link' },
+        @{ Source = $indexSource; Pattern = '<a id="console-launch"[^>]+href="/"'; Name = 'Console selector' },
+        @{ Source = $chatSource; Pattern = '<a id="chat-console"[^>]+href="/"'; Name = 'Chat-to-Console link' },
+        @{ Source = $chatSource; Pattern = '<a id="chat-settings"[^>]+href="/#settings/servers"'; Name = 'Chat-to-Settings link' }
+    )) {
+        if ($link.Source -notmatch $link.Pattern) { throw "Installed application is missing its native $($link.Name)." }
+    }
+    $chatCSS = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'web\css\chat.css')
+    foreach ($required in @('.chat-identity-alarm { grid-row: 2; }', '.chat-budget { grid-row: 3; }', '.chat-log { grid-row: 4; }', '.chat-composer { grid-row: 5; }', '#chat-send {')) {
+        if ($chatCSS -notmatch [regex]::Escape($required)) { throw "Installed Chat layout is missing: $required" }
+    }
     $manifestPath = Join-Path $testInstall 'web\app.webmanifest'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         throw 'Installed application manifest is missing.'

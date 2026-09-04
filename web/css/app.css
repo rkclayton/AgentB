@@ -1095,6 +1095,7 @@
   opacity: 1;
 }
 .icon-button { width: 28px; min-height: 26px; padding: 3px; }
+.icon-button.selected { color: var(--ink); background: rgba(216, 221, 227, 0.16); }
 .tabs { height: 28px; padding-left: 8px; }
 .tab { min-width: 150px; padding: 0 8px; }
 .tab-select,

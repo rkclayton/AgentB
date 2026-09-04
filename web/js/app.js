@@ -9,6 +9,7 @@ import { initSettings } from "./settings.js";
 const form = document.getElementById("composer"),
   input = document.getElementById("task"),
   chatLaunch = document.getElementById("chat-launch"),
+  consoleLaunch = document.getElementById("console-launch"),
   stop = document.getElementById("stop");
 const requestedSession = new URLSearchParams(location.search).get("session");
 let initialSession = requestedSession;
@@ -34,6 +35,11 @@ subscribe((_state, event) => {
 		: "";
   const s = store.sessions[store.active],
     busy = s && s.run.status !== "idle";
+  const query = new URLSearchParams();
+  if (s) query.set("session", s.id);
+  const suffix = query.size ? `?${query}` : "";
+  chatLaunch.href = `/chat${suffix}`;
+  consoleLaunch.href = `/${suffix}`;
   input.disabled = !!busy;
 	stop.hidden = !!store.replay;
 	document.getElementById("mode").textContent = store.replay ? "replay" : "";
@@ -46,12 +52,6 @@ subscribe((_state, event) => {
         ? "Run in progress"
         : "Send a task";
 });
-chatLaunch.onclick = () => {
-  const session = store.sessions[store.active];
-  const query = new URLSearchParams();
-  if (session) query.set("session", session.id);
-  location.assign(`/chat${query.size ? `?${query}` : ""}`);
-};
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const s = store.sessions[store.active],

@@ -9,6 +9,7 @@ const input = document.getElementById("chat-task");
 const send = document.getElementById("chat-send");
 const notice = document.getElementById("chat-notice");
 const identityAlarm = document.getElementById("chat-identity-alarm");
+const chatCurrent = document.getElementById("chat-current");
 const consoleButton = document.getElementById("chat-console");
 const settingsButton = document.getElementById("chat-settings");
 const requested = new URLSearchParams(location.search).get("session");
@@ -19,9 +20,6 @@ let page = 0;
 let localNotice = "";
 let localAlarm = false;
 let frame = 0;
-
-consoleButton.onclick = () => location.assign(consoleURL());
-settingsButton.onclick = () => location.assign(`${consoleURL()}#settings/servers`);
 
 function consoleURL() {
   const query = new URLSearchParams();
@@ -46,6 +44,11 @@ function schedule() {
 
 function render() {
   const session = store.sessions[bound];
+  const query = new URLSearchParams();
+  if (bound) query.set("session", bound);
+  chatCurrent.href = `/chat${query.size ? `?${query}` : ""}`;
+  consoleButton.href = consoleURL();
+  settingsButton.href = `${consoleURL()}#settings/servers`;
   renderIdentityAlarm();
   renderBinding(session);
   renderHeader(session);

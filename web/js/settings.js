@@ -2,6 +2,7 @@ import { api, reduce, setActive, store, subscribe } from "./bus.js";
 
 const sheet = document.getElementById("settings-page");
 const gear = document.getElementById("settings");
+const consoleLaunch = document.getElementById("console-launch");
 const expanded = new Set();
 const armed = new Set();
 const drafts = new Map();
@@ -39,6 +40,11 @@ const sectionLabels = [
 
 export function initSettings() {
   gear.addEventListener("click", () => (open ? closeSettings() : openSettings()));
+  consoleLaunch.addEventListener("click", (event) => {
+    if (!open) return;
+    event.preventDefault();
+    closeSettings();
+  });
   document.addEventListener("settings.open", (event) => openSettings(event.detail?.section));
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && open) closeSettings();
@@ -98,6 +104,10 @@ function openSettings(section = "") {
   sheet.setAttribute("aria-hidden", "false");
   gear.setAttribute("aria-expanded", "true");
   gear.setAttribute("aria-label", "Close settings");
+  gear.setAttribute("aria-pressed", "true");
+  gear.classList.add("selected");
+  consoleLaunch.classList.remove("selected");
+  consoleLaunch.removeAttribute("aria-current");
   history.replaceState(null, "", `#settings/${activeSection}`);
   render();
   refreshServiceAccountStatus();
@@ -111,6 +121,10 @@ function closeSettings() {
   sheet.setAttribute("aria-hidden", "true");
   gear.setAttribute("aria-expanded", "false");
   gear.setAttribute("aria-label", "Settings");
+  gear.setAttribute("aria-pressed", "false");
+  gear.classList.remove("selected");
+  consoleLaunch.classList.add("selected");
+  consoleLaunch.setAttribute("aria-current", "page");
   history.replaceState(null, "", `${location.pathname}${location.search}`);
   (lastFocus || gear).focus();
 }
