@@ -659,10 +659,28 @@
   font-size: 12px;
   font-weight: 400;
 }
+.settings-head span.alarm {
+  color: var(--alarm);
+}
 .settings-head button {
   color: var(--mute);
   background: transparent;
   font-size: 18px;
+}
+.settings-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-head .settings-save {
+  min-width: 76px;
+  padding: 4px 10px;
+  color: var(--ink);
+  background: rgba(216, 221, 227, 0.08);
+  font-size: 12px;
+}
+.settings-head .settings-save:not(:disabled):hover {
+  background: rgba(216, 221, 227, 0.14);
 }
 .settings-layout {
   min-height: 0;
@@ -884,6 +902,10 @@
 }
 .settings-page button.confirm {
   color: var(--alarm);
+}
+.settings-page button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
 }
 .secret-control {
   width: 100%;

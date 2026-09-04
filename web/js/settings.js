@@ -5,6 +5,7 @@ const gear = document.getElementById("settings");
 const expanded = new Set();
 const armed = new Set();
 const drafts = new Map();
+const draftKinds = new Map();
 const errors = new Map();
 const shownKeys = new Set();
 let open = false;
@@ -19,6 +20,9 @@ let hardeningStatus = { loaded: false, supported: true, applied: false };
 let hardeningBusy = false;
 let hardeningMessage = "";
 let hardeningAlarm = false;
+let settingsSaving = false;
+let settingsSaveMessage = "All changes saved";
+let settingsSaveAlarm = false;
 let activeSection = "servers";
 let hardeningServerID = "";
 
@@ -38,13 +42,22 @@ export function initSettings() {
   document.addEventListener("settings.open", (event) => openSettings(event.detail?.section));
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && open) closeSettings();
+    if (open && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      saveSettings();
+    }
   });
   sheet.addEventListener("click", click);
   sheet.addEventListener("focusout", blur);
   sheet.addEventListener("change", change);
   sheet.addEventListener("input", (event) => {
-    if (event.target.matches(".setting-input[data-path]"))
+    if (event.target.matches(".setting-input[data-path]")) {
       drafts.set(event.target.dataset.path, event.target.value);
+      draftKinds.set(event.target.dataset.path, event.target.dataset.kind || "text");
+      settingsSaveMessage = "Unsaved changes";
+      settingsSaveAlarm = false;
+      refreshSaveControls();
+    }
   });
   subscribe((_state, event) => {
     if (
@@ -122,8 +135,12 @@ function render() {
     session: () => sessionControls(active),
   };
   const label = sectionLabels.find(([id]) => id === activeSection)?.[1] || "Settings";
+  const saveLabel = settingsSaving ? "Saving…" : drafts.size ? `Save (${drafts.size})` : "Saved";
   sheet.innerHTML = `
-    <header class="settings-head"><div><strong>Settings</strong><span>Changes save automatically</span></div><button type="button" data-action="close" aria-label="Close settings">×</button></header>
+    <header class="settings-head">
+      <div><strong>Settings</strong><span data-save-status class="${settingsSaveAlarm ? "alarm" : ""}">${html(settingsSaveMessage)}</span></div>
+      <div class="settings-head-actions"><button type="button" class="settings-save" data-action="save-settings" ${settingsSaving || !drafts.size ? "disabled" : ""}>${saveLabel}</button><button type="button" data-action="close" aria-label="Close settings">×</button></div>
+    </header>
     <div class="settings-layout">
       <nav class="settings-nav" aria-label="Settings sections">
         ${sectionLabels.map(([id, name]) => `<button type="button" class="${id === activeSection ? "selected" : ""}" data-action="settings-section" data-id="${id}" aria-current="${id === activeSection ? "page" : "false"}">${name}</button>`).join("")}
@@ -141,6 +158,19 @@ function render() {
   focusNode?.focus({ preventScroll: true });
 }
 
+function refreshSaveControls() {
+  const status = sheet.querySelector("[data-save-status]");
+  const button = sheet.querySelector('[data-action="save-settings"]');
+  if (status) {
+    status.textContent = settingsSaveMessage;
+    status.classList.toggle("alarm", settingsSaveAlarm);
+  }
+  if (button) {
+    button.textContent = settingsSaving ? "Saving…" : drafts.size ? `Save (${drafts.size})` : "Saved";
+    button.disabled = settingsSaving || !drafts.size;
+  }
+}
+
 function controlKey(node) {
   if (!node || !sheet.contains(node)) return "";
   return node.id || node.dataset?.path || [node.dataset?.action, node.dataset?.id || node.dataset?.setupAction].filter(Boolean).join(":") || node.getAttribute?.("aria-label") || "";
@@ -154,6 +184,7 @@ function servers() {
   const rows = store.servers
     .map((profile) => {
       const isOpen = expanded.has(profile.id);
+      const hasPendingChanges = [...drafts.keys()].some((path) => path.startsWith(`servers.${profile.id}.`));
       const reason = profileReason(profile);
       const failed = (profile.capabilities?.findings || []).some((x) =>
         x.startsWith("probe failed:"),
@@ -171,7 +202,7 @@ function servers() {
           <button type="button" class="profile-summary" data-action="profile-toggle" data-id="${attr(profile.id)}">
             <span class="lamp ${lamp}"></span><span>${html(profile.label)}</span><span class="profile-url">${html(profile.base_url)}</span><span class="profile-state">${testState}</span>
           </button>
-          <button type="button" data-action="probe" data-id="${attr(profile.id)}" ${profile._probing ? "disabled" : ""}>${profile._probing ? "Testing…" : "Test"}</button>
+          <button type="button" data-action="probe" data-id="${attr(profile.id)}" title="${hasPendingChanges ? "Save this connection before testing it." : ""}" ${profile._probing || hasPendingChanges ? "disabled" : ""}>${profile._probing ? "Testing…" : "Test"}</button>
         </div>
         <div class="profile-expansion"><div class="profile-fields">
           ${profileFields(profile, reason)}
@@ -366,7 +397,22 @@ function shell(active) {
 			: protectionReady
 				? "ACL + outbound policy verified"
 				: `${hardeningStatus.acl?.summary || "ACL not applied"} · ${hardeningStatus.firewall?.summary || "firewall not applied"}`;
-	const canApply = !hardeningBusy && !serviceAccountBusy && service.enabled && credential.stored && serviceAccountStatus.exists && !serviceAccountStatus.administrator && !!profile;
+	const applyBlocker = drafts.size
+		? "Save pending settings before applying host protections."
+		: serviceAccountBusy
+			? "Wait for the service-account operation to finish."
+			: !service.enabled
+				? "Enable the service identity and save first."
+				: !credential.stored
+					? "Store the service-account credential first."
+					: !serviceAccountStatus.exists
+						? "Create the service account first."
+						: serviceAccountStatus.administrator
+							? "The service account is an Administrator and cannot be used."
+							: !profile
+								? "Test and select a runnable model connection first."
+								: "";
+	const canApply = !hardeningBusy && !applyBlocker;
 	const canInspect = !hardeningBusy && hardeningStatus.loaded && hardeningStatus.supported && serviceAccountStatus.exists;
   return `<div class="settings-subhead">Service identity</div>
     ${row("status", `<span class="account-status"><span class="lamp ${serviceAccountStatus.administrator ? "alarm" : serviceAccountStatus.exists ? "live" : ""}"></span>${html(accountState)}</span>`)}
@@ -384,12 +430,12 @@ function shell(active) {
 	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
 	${row("model route", `<select id="hardening-server" aria-label="Model route for host protections">${hardeningProfiles()}</select>`)}
 	<div class="settings-actions">
-	  <button type="button" data-action="apply-hardening" ${canApply ? "" : "disabled"}>Apply + verify</button>
+	  <button type="button" data-action="apply-hardening" title="${attr(applyBlocker)}" aria-busy="${hardeningBusy}" ${canApply ? "" : "disabled"}>${hardeningBusy ? "Working…" : "Apply + verify"}</button>
 	  <button type="button" data-action="verify-hardening" ${canInspect ? "" : "disabled"}>Verify</button>
-	  <button type="button" data-action="refresh-hardening" ${hardeningBusy ? "disabled" : ""}>Refresh</button>
+	  <button type="button" data-action="refresh-hardening">Refresh</button>
 	  <button type="button" class="${armed.has("hardening:remove") ? "confirm" : ""}" data-action="remove-hardening" ${canInspect ? "" : "disabled"}>${armed.has("hardening:remove") ? "Confirm remove" : "Remove"}</button>
 	</div>
-	${feedback(hardeningMessage, hardeningAlarm, "Apply requests Windows approval, protects the application tree, and leaves the workspace writable.")}
+	${feedback(hardeningMessage, hardeningAlarm, applyBlocker || "Apply requests Windows approval, protects the application tree, and leaves the workspace writable.")}
     <details class="settings-advanced">
       <summary>Advanced</summary>
       ${toggle("shell.service_account.enabled", "service identity", service.enabled)}
@@ -437,6 +483,11 @@ function current(path, fallback) {
   return drafts.has(path) ? drafts.get(path) : fallback ?? "";
 }
 
+function currentValue(path, fallback) {
+  if (!drafts.has(path)) return fallback;
+  return draftValue(drafts.get(path), draftKinds.get(path));
+}
+
 function issue(path) {
   for (const [field, message] of errors) {
     if (field === path || field.startsWith(`${path}.`) || path.startsWith(`${field}.`))
@@ -470,10 +521,12 @@ function secret(path, label, value, id) {
 }
 
 function toggle(path, label, value) {
-  return field(path, label, `<button type="button" role="switch" aria-checked="${!!value}" class="switch ${value ? "on" : ""}" data-action="config-toggle" data-path="${attr(path)}" data-value="${value ? "false" : "true"}"></button>`);
+  const selected = !!currentValue(path, value);
+  return field(path, label, `<button type="button" role="switch" aria-checked="${selected}" class="switch ${selected ? "on" : ""}" data-action="config-toggle" data-path="${attr(path)}" data-value="${selected ? "false" : "true"}"></button>`);
 }
 
 function choices(path, label, values, selected) {
+  selected = currentValue(path, selected);
   return field(path, label, `<span class="choice-row">${values.map((value) => `<button type="button" class="${value === selected ? "selected" : ""}" data-action="config-choice" data-path="${attr(path)}" data-value="${attr(value)}">${html(value)}</button>`).join("")}</span>`);
 }
 
@@ -500,8 +553,16 @@ async function click(event) {
     shownKeys.has(id) ? shownKeys.delete(id) : shownKeys.add(id);
     return render();
   }
-  if (action === "config-toggle" || action === "config-choice")
-    return update(button.dataset.path, action === "config-toggle" ? button.dataset.value === "true" : button.dataset.value);
+  if (action === "save-settings") return saveSettings();
+  if (action === "config-toggle" || action === "config-choice") {
+    const path = button.dataset.path;
+    const value = action === "config-toggle" ? button.dataset.value === "true" : button.dataset.value;
+    drafts.set(path, value);
+    draftKinds.set(path, action === "config-toggle" ? "boolean" : "text");
+    settingsSaveMessage = "Unsaved changes";
+    settingsSaveAlarm = false;
+    return render();
+  }
   if (action === "probe") {
     const profile = store.servers.find((x) => x.id === id);
     if (profile) profile._probing = true;
@@ -578,7 +639,12 @@ async function refreshHardeningStatus(preserveMessage = false) {
 	try {
 		const status = await api(`/api/hardening?server_id=${encodeURIComponent(serverID)}`, undefined, "GET");
 		hardeningStatus = { ...status, loaded: true };
-		if (!preserveMessage) {
+		const operation = status.operation || {};
+		hardeningBusy = operation.state === "running";
+		if (operation.message && (!preserveMessage || operation.state === "running")) {
+			hardeningMessage = operation.message;
+			hardeningAlarm = operation.state === "failed";
+		} else if (!preserveMessage) {
 			hardeningMessage = "";
 			hardeningAlarm = false;
 		}
@@ -592,6 +658,11 @@ async function refreshHardeningStatus(preserveMessage = false) {
 
 async function hardeningAction(action) {
 	const serverID = selectedHardeningServerID();
+	if (!serverID) {
+		hardeningMessage = "Test and select a runnable model connection before changing host protections.";
+		hardeningAlarm = true;
+		return render();
+	}
 	hardeningBusy = true;
 	hardeningAlarm = false;
 	hardeningMessage = action === "verify"
@@ -603,14 +674,15 @@ async function hardeningAction(action) {
 	try {
 		const result = await api("/api/hardening", { action, server_id: serverID });
 		hardeningStatus = { ...(result.status || hardeningStatus), loaded: true };
-		hardeningMessage = result.message;
-		hardeningAlarm = action === "apply" && !hardeningStatus.applied;
+		if (result.operation) hardeningStatus.operation = result.operation;
+		hardeningMessage = result.operation?.message || result.message;
+		hardeningAlarm = result.ok === false || result.operation?.state === "failed" || (action === "apply" && !hardeningStatus.applied);
 	} catch (error) {
 		hardeningMessage = error.message;
 		hardeningAlarm = true;
 		await refreshHardeningStatus(true);
 	} finally {
-		hardeningBusy = false;
+		hardeningBusy = hardeningStatus.operation?.state === "running";
 		if (open) render();
 	}
 }
@@ -701,13 +773,11 @@ async function blur(event) {
   if (input.matches(".setting-input[data-path]")) {
     const path = input.dataset.path;
     if (input.dataset.kind === "secret" && input.value === "•••• set") return;
-    let value = input.value;
-    if (input.dataset.kind === "number") value = Number(value);
-    if (input.dataset.kind === "percent") value = Number(value) / 100;
-    if (input.dataset.kind === "list") value = value.split(",").map((x) => x.trim()).filter(Boolean);
-    if (input.dataset.kind === "command") value = value.trim().split(/\s+/).filter(Boolean);
     drafts.set(path, input.value);
-    await update(path, value);
+    draftKinds.set(path, input.dataset.kind || "text");
+    settingsSaveMessage = "Unsaved changes";
+    settingsSaveAlarm = false;
+    refreshSaveControls();
   }
   if (input.matches("[data-session-label]")) {
     try {
@@ -744,37 +814,65 @@ async function change(event) {
   }
 }
 
-async function update(path, value) {
-  try {
-    const result = await api("/api/config", patch(path, value));
-    drafts.delete(path);
-    errors.delete(path);
-    reduce({ type: "config.changed", data: { config: result } });
-    if (path === "shell.service_account.account" || path === "shell.service_account.domain")
-      await refreshServiceAccountStatus();
-  } catch (error) {
-    errors.set(error.field || path, error.message);
-    render();
-  }
+function draftValue(raw, kind = "text") {
+  if (kind === "boolean") return raw === true || raw === "true";
+  if (kind === "number") return Number(raw);
+  if (kind === "percent") return Number(raw) / 100;
+  if (kind === "list") return String(raw).split(",").map((value) => value.trim()).filter(Boolean);
+  if (kind === "command") return String(raw).trim().split(/\s+/).filter(Boolean);
+  return raw;
 }
 
-function patch(path, value) {
-  const parts = path.split(".");
-  if (parts[0] === "servers") {
-    const item = { id: parts[1] };
-    assign(item, parts.slice(2), value);
-    return { servers: [item] };
-  }
+function combinedPatch(entries) {
   const result = {};
-  assign(result, parts, value);
+  const servers = new Map();
+  for (const [path, raw] of entries) {
+    const parts = path.split(".");
+    const value = draftValue(raw, draftKinds.get(path));
+    if (parts[0] === "servers") {
+      const item = servers.get(parts[1]) || { id: parts[1] };
+      assign(item, parts.slice(2), value);
+      servers.set(parts[1], item);
+    } else assign(result, parts, value);
+  }
+  if (servers.size) result.servers = [...servers.values()];
   return result;
+}
+
+async function saveSettings() {
+  if (settingsSaving || !drafts.size) return;
+  const entries = [...drafts.entries()];
+  const changedPaths = entries.map(([path]) => path);
+  settingsSaving = true;
+  settingsSaveMessage = "Saving changes…";
+  settingsSaveAlarm = false;
+  refreshSaveControls();
+  try {
+    const result = await api("/api/config", combinedPatch(entries));
+    for (const path of changedPaths) {
+      drafts.delete(path);
+      draftKinds.delete(path);
+      errors.delete(path);
+    }
+    reduce({ type: "config.changed", data: { config: result } });
+    settingsSaveMessage = "All changes saved";
+    if (changedPaths.some((path) => path === "shell.service_account.account" || path === "shell.service_account.domain"))
+      await refreshServiceAccountStatus();
+  } catch (error) {
+    errors.set(error.field || "config", error.message);
+    settingsSaveMessage = `Save failed: ${error.message}`;
+    settingsSaveAlarm = true;
+  } finally {
+    settingsSaving = false;
+    if (open) render();
+  }
 }
 
 function assign(target, parts, value) {
   let node = target;
   parts.forEach((part, index) => {
     if (index === parts.length - 1) node[part] = value;
-    else node = node[part] = {};
+    else node = node[part] ||= {};
   });
 }
 

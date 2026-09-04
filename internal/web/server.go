@@ -42,6 +42,8 @@ type Server struct {
 	shell         *tools.Shell
 	account       serviceaccount.Manager
 	hardening     hardening.Manager
+	hardeningMu   sync.RWMutex
+	hardeningOp   hardeningOperation
 	shellTest     func(context.Context) (string, error)
 	accountMu     sync.Mutex
 	mutationToken string
