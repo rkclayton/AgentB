@@ -43,6 +43,15 @@ try {
     if ($indexSource -match 'target=' -or $chatSource -match 'target=') {
         throw 'Installed application still contains second-window navigation.'
     }
+    if ($indexSource -match 'class="brand"' -or $chatSource -match 'class="chat-brand"') {
+        throw 'Installed application still contains redundant in-page Agent_b branding.'
+    }
+    if ($indexSource -notmatch '<header class="header window-titlebar">\s+<nav id="tabs"' -or
+        $indexSource.IndexOf('id="stop"') -gt $indexSource.IndexOf('id="chat-launch"') -or
+        $chatSource.IndexOf('id="chat-stop"') -gt $chatSource.IndexOf('id="chat-current"') -or
+        $indexSource -notmatch 'class="stop-sign"' -or $chatSource -notmatch 'class="stop-sign"') {
+        throw 'Installed application is missing the consolidated tab header or leading stop-sign control.'
+    }
     foreach ($required in @('id="chat-console"', 'id="chat-settings"', 'id="chat-stop"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
         if ($chatSource -notmatch [regex]::Escape($required)) { throw "Installed Chat view is missing: $required" }
     }
@@ -150,7 +159,7 @@ try {
         (Test-Path -LiteralPath $testRegistry)) {
         throw 'Uninstall left a program, shortcut, or registration artifact.'
     }
-    Write-Host 'PASS: isolated Chat-first install, compact same-window navigation, native-controls manifest, simplified Console, branded app and shortcut icons, registration, settings and ACL-preserving upgrade, stale-file cleanup, preserving uninstall, reinstall, and purging uninstall'
+    Write-Host 'PASS: isolated Chat-first install, consolidated session header, leading stop-sign control, compact same-window navigation, native-controls manifest, simplified Console, branded app and shortcut icons, registration, settings and ACL-preserving upgrade, stale-file cleanup, preserving uninstall, reinstall, and purging uninstall'
 } finally {
     if (Test-Path -LiteralPath $testRegistry) { Remove-Item -LiteralPath $testRegistry -Recurse -Force }
     if (Test-Path -LiteralPath $testRoot) {

@@ -11,13 +11,12 @@
 </head>
 <body class="chat-page">
   <header class="chat-header window-titlebar">
-    <div class="chat-brand"><img src="/static/assets/mark.svg" alt=""><span>Agent_b</span></div>
     <div id="chat-binding"></div>
     <span id="chat-status"></span>
     <span id="connection" role="status"></span>
     <nav class="chat-nav" aria-label="Application">
+      <button id="chat-stop" class="stop-sign" type="button" aria-label="Stop" title="Stop"><span aria-hidden="true"></span></button>
       <a id="chat-current" class="chat-header-action selected" href="/chat" aria-current="page">Chat</a>
-      <button id="chat-stop" class="chat-header-action chat-stop" type="button">Stop</button>
       <a id="chat-console" class="chat-header-action" href="/">Console</a>
       <a id="chat-settings" class="chat-icon-button" href="/#settings/servers" aria-label="Settings" title="Settings">⚙</a>
     </nav>
