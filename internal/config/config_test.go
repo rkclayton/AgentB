@@ -70,7 +70,33 @@ func TestServiceAccountSplitDefaultsOffWithLocalAccountDefaults(t *testing.T) {
 	if cfg.Shell.OperatorContext {
 		t.Fatal("operator context defaulted on")
 	}
+	if cfg.Shell.OperatorContextTimeoutMinutes != 60 {
+		t.Fatalf("operator context timeout=%d, want 60", cfg.Shell.OperatorContextTimeoutMinutes)
+	}
 	if cfg.Shell.ServiceAccount.Account != "agentb-svc" || cfg.Shell.ServiceAccount.Domain != "." {
 		t.Fatalf("service-account defaults = %+v", cfg.Shell.ServiceAccount)
+	}
+}
+
+func TestOperatorContextNeverPersistsOrRestartsEnabled(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	cfg := Defaults(t.TempDir())
+	cfg.Shell.OperatorContext = true
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(data, []byte(`"operator_context": true`)) {
+		t.Fatal("operator context was persisted on")
+	}
+	loaded, _, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Shell.OperatorContext {
+		t.Fatal("operator context restarted on")
 	}
 }

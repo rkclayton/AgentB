@@ -46,6 +46,7 @@ export function renderTimeline() {
         "workspace.conflict",
         "message.queued",
         "run.queued",
+        "operator.context",
         "compaction",
         "run.stopped",
       ].includes(event.type)
@@ -133,7 +134,11 @@ function toolRow(session, call, callEvent, resultEvent, state) {
   row.head.children[1].textContent = friendly(call.name);
   row.head.children[2].textContent = keyArgument(args);
   row.head.children[3].textContent = formatDuration(result.ms || 0);
-  row.head.children[4].textContent = result.ok === false ? "Failed" : "Done";
+  row.head.children[4].textContent = result.operator_context
+    ? `Operator · ${result.ok === false ? "Failed" : "Done"}`
+    : result.ok === false
+      ? "Failed"
+      : "Done";
   addBlock(
     row.expansion,
     "arguments",
@@ -200,6 +205,11 @@ function inlineRow(session, event, decisions, state) {
     text.textContent = `Queued · message ${String(data.message_id || "").replace(/\D/g, "")} · position ${data.position}`;
   } else if (event.type === "run.queued") {
     text.textContent = `Waiting · position ${data.position}`;
+  } else if (event.type === "operator.context") {
+    text.textContent = data.enabled
+      ? `Operator context · on${data.expires_at ? ` · until ${new Date(data.expires_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}`
+      : `Operator context · off · ${data.reason || "operator request"}`;
+    if (data.enabled) row.node.classList.add("fault");
   } else if (event.type === "compaction") {
     const affected = data.affected_ids?.length || "",
       delta = (data.after || 0) - (data.before || 0);

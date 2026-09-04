@@ -28,29 +28,42 @@ import (
 )
 
 type Server struct {
-	mu            sync.RWMutex
-	cfg           *config.Config
-	configPath    string
-	bus           *events.Bus
-	registry      *session.Registry
-	webDir        string
-	scheduler     *agent.Scheduler
-	runner        *agent.Runner
-	prompt        *agent.PromptRenderer
-	replay        *events.Replay
-	credential    *credential.Store
-	shell         *tools.Shell
-	account       serviceaccount.Manager
-	hardening     hardening.Manager
-	hardeningMu   sync.RWMutex
-	hardeningOp   hardeningOperation
-	shellTest     func(context.Context) (string, error)
-	accountMu     sync.Mutex
-	mutationToken string
+	mu               sync.RWMutex
+	cfg              *config.Config
+	configPath       string
+	bus              *events.Bus
+	registry         *session.Registry
+	webDir           string
+	scheduler        *agent.Scheduler
+	runner           *agent.Runner
+	prompt           *agent.PromptRenderer
+	replay           *events.Replay
+	credential       *credential.Store
+	shell            *tools.Shell
+	account          serviceaccount.Manager
+	hardening        hardening.Manager
+	hardeningMu      sync.RWMutex
+	hardeningOp      hardeningOperation
+	shellTest        func(context.Context) (string, error)
+	accountMu        sync.Mutex
+	mutationToken    string
+	operatorMu       sync.Mutex
+	operatorEnabled  bool
+	operatorExpires  string
+	operatorTimer    *time.Timer
+	operatorEpoch    uint64
+	operatorRequest  func(*http.Request) error
+	operatorDuration func(int) time.Duration
 }
 
 func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
-	return &Server{cfg: cfg, configPath: path, webDir: webDir, bus: bus, mutationToken: newMutationToken()}
+	cfg.Shell.OperatorContext = false
+	cfg.Shell.OperatorContextExpiresAt = ""
+	return &Server{
+		cfg: cfg, configPath: path, webDir: webDir, bus: bus, mutationToken: newMutationToken(),
+		operatorRequest:  requireOperatorHTTPClient,
+		operatorDuration: func(minutes int) time.Duration { return time.Duration(minutes) * time.Minute },
+	}
 }
 func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry }
 func (s *Server) SetReplay(replay *events.Replay)        { s.replay = replay }
@@ -66,7 +79,16 @@ func (s *Server) SetRuntime(scheduler *agent.Scheduler, runner *agent.Runner, pr
 	s.runner = runner
 	s.prompt = prompt
 }
-func (s *Server) ConfigSnapshot() config.Config { s.mu.RLock(); defer s.mu.RUnlock(); return *s.cfg }
+func (s *Server) ConfigSnapshot() config.Config {
+	s.mu.RLock()
+	result := *s.cfg
+	s.mu.RUnlock()
+	s.operatorMu.Lock()
+	result.Shell.OperatorContext = s.operatorEnabled
+	result.Shell.OperatorContextExpiresAt = s.operatorExpires
+	s.operatorMu.Unlock()
+	return result
+}
 func (s *Server) Profile(id string) (*config.Profile, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -219,9 +241,7 @@ func (s *Server) snapshot() map[string]any {
 	return s.snapshotWithSessions(sessions, false)
 }
 func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any {
-	s.mu.RLock()
-	masked := s.cfg.Masked()
-	s.mu.RUnlock()
+	masked := s.ConfigSnapshot().Masked()
 	credentialStatus := credential.Status{}
 	identityStatus := tools.ShellIdentityStatus{}
 	if s.credential != nil {
@@ -639,13 +659,16 @@ func (contextBackground) Value(any) any               { return nil }
 func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
-		s.mu.RLock()
-		masked := s.cfg.Masked()
-		s.mu.RUnlock()
-		writeJSON(w, 200, masked)
+		writeJSON(w, 200, s.ConfigSnapshot().Masked())
 	case http.MethodPost:
 		var patch map[string]any
 		if !decode(w, r, &patch) {
+			return
+		}
+		if !s.requireOperatorConfigRequest(w, r, patch) {
+			return
+		}
+		if s.applyOperatorContextPatch(w, r, patch) {
 			return
 		}
 		s.mu.Lock()
@@ -675,7 +698,7 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		masked := next.Masked()
 		s.mu.Unlock()
 		if s.runner != nil {
-			s.runner.Configure(next)
+			s.runner.Configure(s.ConfigSnapshot())
 		}
 		if s.registry != nil {
 			s.registry.RefreshRunnable()

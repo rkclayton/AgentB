@@ -136,15 +136,18 @@ type GrepTool struct {
 	MaxLineChars int `json:"max_line_chars"`
 }
 type Shell struct {
-	Command            []string            `json:"command"`
-	TimeoutS           int                 `json:"timeout_s"`
-	MaxTimeoutS        int                 `json:"max_timeout_s"`
-	MaxOutputLinesHead int                 `json:"max_output_lines_head"`
-	MaxOutputLinesTail int                 `json:"max_output_lines_tail"`
-	FileRoutingGuard   *bool               `json:"file_routing_guard"`
-	OperatorContext    bool                `json:"operator_context"`
-	ServiceAccount     ShellServiceAccount `json:"service_account"`
-	Deny               []string            `json:"deny"`
+	Command            []string `json:"command"`
+	TimeoutS           int      `json:"timeout_s"`
+	MaxTimeoutS        int      `json:"max_timeout_s"`
+	MaxOutputLinesHead int      `json:"max_output_lines_head"`
+	MaxOutputLinesTail int      `json:"max_output_lines_tail"`
+	FileRoutingGuard   *bool    `json:"file_routing_guard"`
+	// OperatorContext is exposed to the UI but Save always persists it as false.
+	OperatorContext               bool                `json:"operator_context"`
+	OperatorContextExpiresAt      string              `json:"-"`
+	OperatorContextTimeoutMinutes int                 `json:"operator_context_timeout_minutes"`
+	ServiceAccount                ShellServiceAccount `json:"service_account"`
+	Deny                          []string            `json:"deny"`
 }
 
 type ShellServiceAccount struct {
@@ -165,7 +168,7 @@ func Defaults(workspace string) Config {
 		Servers: []Profile{{ID: "local", Label: "Local", BaseURL: "http://127.0.0.1:8080", Model: "", RequestTimeoutS: 900, ProbeMode: "full", Sampling: SamplingPair{Thinking: thinking, Nonthinking: nonthinking}, Reasoning: Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}}, Context: Context{ReserveOutput: 10240}, Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}}}},
 		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: "mutating"}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
 		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}},
-		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
+		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextTimeoutMinutes: 60, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
 	}
 }
 
@@ -195,6 +198,9 @@ func Load(path string) (*Config, bool, bool, error) {
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, false, created, err
 	}
+	// Operator context is a launch-scoped state, never a startup instruction.
+	cfg.Shell.OperatorContext = false
+	cfg.Shell.OperatorContextExpiresAt = ""
 	applyDefaults(&cfg)
 	if err := cfg.Validate(); err != nil {
 		return nil, false, created, err
@@ -211,7 +217,10 @@ func (c Config) Save(path string) error {
 	if err := c.Validate(); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(c, "", "  ")
+	persisted := c
+	persisted.Shell.OperatorContext = false
+	persisted.Shell.OperatorContextExpiresAt = ""
+	data, err := json.MarshalIndent(persisted, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -320,6 +329,9 @@ func (c Config) Validate() error {
 	if c.Shell.MaxOutputLinesHead < 0 || c.Shell.MaxOutputLinesTail < 0 {
 		return fmt.Errorf("shell: output line limits cannot be negative")
 	}
+	if c.Shell.OperatorContextTimeoutMinutes < 1 || c.Shell.OperatorContextTimeoutMinutes > 1440 {
+		return fmt.Errorf("shell.operator_context_timeout_minutes: must be between 1 and 1440")
+	}
 	if strings.TrimSpace(c.Shell.ServiceAccount.Account) == "" {
 		return fmt.Errorf("shell.service_account.account: required")
 	}
@@ -381,6 +393,9 @@ func applyDefaults(c *Config) {
 	}
 	if c.Shell.FileRoutingGuard == nil {
 		c.Shell.FileRoutingGuard = boolPointer(true)
+	}
+	if c.Shell.OperatorContextTimeoutMinutes == 0 {
+		c.Shell.OperatorContextTimeoutMinutes = d.Shell.OperatorContextTimeoutMinutes
 	}
 	if c.Shell.ServiceAccount.Account == "" {
 		c.Shell.ServiceAccount.Account = d.Shell.ServiceAccount.Account

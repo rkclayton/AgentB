@@ -111,11 +111,11 @@ func TestFileIdentityOperatorContextUsesOperatorOSAccessOutsideWorkspace(t *test
 	cfg.Shell.OperatorContext = true
 	cfg.Shell.ServiceAccount.Enabled = true
 	identity.Configure(cfg)
-	result, err := identity.Wrap(NewListDir(cfg.Tools.ListDir)).Call(
+	detail := identity.Wrap(NewListDir(cfg.Tools.ListDir)).(DetailedTool).CallDetailed(
 		context.Background(), &session.Session{Workspace: workspace, LastSeen: map[string]time.Time{}}, map[string]any{"path": external},
 	)
-	if err != nil || !strings.Contains(result, "operator-visible.txt") {
-		t.Fatalf("result=%q err=%v", result, err)
+	if detail.Err != nil || !detail.OperatorContext || !strings.Contains(detail.Content, "operator-visible.txt") {
+		t.Fatalf("detail=%+v", detail)
 	}
 }
 

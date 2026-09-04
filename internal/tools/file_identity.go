@@ -75,7 +75,7 @@ func (t *identityFileTool) CallDetailed(ctx context.Context, s *session.Session,
 	service, operatorContext, credential, runner := t.identity.snapshot()
 	if operatorContext {
 		result, err := t.tool.Call(withOSPathPolicy(ctx), s, args)
-		return CallDetail{Content: result, Err: err}
+		return CallDetail{Content: result, Err: err, OperatorContext: true}
 	}
 	if !service.Enabled {
 		result, err := t.tool.Call(ctx, s, args)

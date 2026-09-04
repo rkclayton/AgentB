@@ -40,6 +40,7 @@ type ShellIdentityStatus struct {
 	Fallback                 bool   `json:"fallback"`
 	OperatorApprovalRequired bool   `json:"operator_approval_required"`
 	OperatorContext          bool   `json:"operator_context"`
+	OperatorContextExpiresAt string `json:"operator_context_expires_at"`
 	Reason                   string `json:"reason"`
 	Since                    string `json:"since"`
 }
@@ -75,8 +76,9 @@ func (s *Shell) CallAsOperator(ctx context.Context, item *session.Session, args 
 	return detail.Content, detail.Err
 }
 
-func (s *Shell) call(ctx context.Context, item *session.Session, args map[string]any, forceOperator bool) CallDetail {
+func (s *Shell) call(ctx context.Context, item *session.Session, args map[string]any, forceOperator bool) (detail CallDetail) {
 	cfg := s.config()
+	defer func() { detail.OperatorContext = cfg.OperatorContext && !forceOperator }()
 	command, ok := args["command"].(string)
 	if !ok || strings.TrimSpace(command) == "" {
 		return CallDetail{Err: fmt.Errorf("command is required")}
@@ -327,9 +329,10 @@ func (s *Shell) configuredIdentityStatus() ShellIdentityStatus {
 		return ShellIdentityStatus{}
 	}
 	return ShellIdentityStatus{
-		OperatorContext: true,
-		Reason:          "operator context is enabled; tools are running as the Windows account that launched Agent_b",
-		Since:           time.Now().UTC().Format(time.RFC3339),
+		OperatorContext:          true,
+		OperatorContextExpiresAt: s.config().OperatorContextExpiresAt,
+		Reason:                   "operator context is enabled; tools are running as the Windows account that launched Agent_b",
+		Since:                    time.Now().UTC().Format(time.RFC3339),
 	}
 }
 

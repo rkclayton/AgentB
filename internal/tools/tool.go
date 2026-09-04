@@ -22,6 +22,7 @@ type Tool interface {
 type CallOutcome struct {
 	Content                   string
 	OK                        bool
+	OperatorContext           bool
 	OperatorOverrideAvailable bool
 	OperatorOverrideReason    string
 }
@@ -35,6 +36,7 @@ type DetailedTool interface {
 type CallDetail struct {
 	Content                string
 	Err                    error
+	OperatorContext        bool
 	OperatorOverrideReason string
 }
 
@@ -104,6 +106,12 @@ func (r *Registry) CallDetailed(ctx context.Context, s *session.Session, name st
 	if detailed, ok := tool.(DetailedTool); ok {
 		detail := detailed.CallDetailed(ctx, s, args)
 		result, err, overrideReason = detail.Content, detail.Err, detail.OperatorOverrideReason
+		if err == nil && overrideReason != "" {
+			return CallOutcome{Content: result, OperatorContext: detail.OperatorContext, OperatorOverrideAvailable: true, OperatorOverrideReason: overrideReason}
+		}
+		if err == nil {
+			return CallOutcome{Content: result, OK: true, OperatorContext: detail.OperatorContext}
+		}
 	} else {
 		result, err = tool.Call(ctx, s, args)
 	}

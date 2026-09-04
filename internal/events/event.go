@@ -24,6 +24,7 @@ const (
 	ConfigChanged     = "config.changed"
 	ShellIdentity     = "shell.identity"
 	ShellCredential   = "shell.credential"
+	OperatorContext   = "operator.context"
 	Error             = "error"
 	RunQueued         = "run.queued"
 	RunStarted        = "run.started"

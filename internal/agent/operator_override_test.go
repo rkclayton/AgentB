@@ -54,7 +54,7 @@ func TestOperatorOverrideRequiresApprovalEvenWhenApprovalModeOff(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		content, ok := runner.executeTool(context.Background(), s, "run", "call", "shell", map[string]any{"command": "Set-Content protected.txt value"})
+		content, ok, _ := runner.executeTool(context.Background(), s, "run", "call", "shell", map[string]any{"command": "Set-Content protected.txt value"})
 		done <- result{content: content, ok: ok}
 	}()
 
@@ -107,10 +107,14 @@ func TestOperatorOverrideDenialDoesNotRetry(t *testing.T) {
 	runner := &Runner{bus: bus, tools: tools.New(tool), cfg: func() config.Config { return cfg }}
 	runner.gate = NewGate(bus, runner.cfg)
 	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"shell": true}}
-	done := make(chan struct{}, 1)
+	type denialResult struct {
+		content string
+		ok      bool
+	}
+	done := make(chan denialResult, 1)
 	go func() {
-		_, _ = runner.executeTool(context.Background(), s, "run", "call", "shell", map[string]any{"command": "Set-Content protected.txt value"})
-		done <- struct{}{}
+		content, ok, _ := runner.executeTool(context.Background(), s, "run", "call", "shell", map[string]any{"command": "Set-Content protected.txt value"})
+		done <- denialResult{content: content, ok: ok}
 	}()
 	select {
 	case <-eventCh:
@@ -121,7 +125,11 @@ func TestOperatorOverrideDenialDoesNotRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case <-done:
+	case got := <-done:
+		denialReported := strings.Contains(got.content, "denied by the user") || strings.Contains(got.content, "denied by user")
+		if got.ok || !denialReported || !strings.Contains(got.content, "Access to the path is denied") {
+			t.Fatalf("denial result=%#v", got)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for denied retry")
 	}
@@ -146,7 +154,7 @@ func TestFileToolOperatorOverrideUsesPathAndExactCall(t *testing.T) {
 	}
 	done := make(chan fileResult, 1)
 	go func() {
-		content, ok := runner.executeTool(context.Background(), s, "run", "call", "read_file", map[string]any{"path": `C:\allowed.txt`})
+		content, ok, _ := runner.executeTool(context.Background(), s, "run", "call", "read_file", map[string]any{"path": `C:\allowed.txt`})
 		done <- fileResult{content: content, ok: ok}
 	}()
 	required := <-eventCh
@@ -182,7 +190,7 @@ func TestSuccessfulEmptyOperatorOverrideIsUnambiguous(t *testing.T) {
 	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"list_dir": true}}
 	done := make(chan string, 1)
 	go func() {
-		content, _ := runner.executeTool(context.Background(), s, "run", "call", "list_dir", map[string]any{})
+		content, _, _ := runner.executeTool(context.Background(), s, "run", "call", "list_dir", map[string]any{})
 		done <- content
 	}()
 	<-eventCh

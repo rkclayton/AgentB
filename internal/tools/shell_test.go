@@ -136,9 +136,9 @@ func TestShellOperatorContextBypassesServiceIdentityAndRaisesPersistentWarning(t
 	if runtime.GOOS == "windows" {
 		command = "Write-Output operator-ok"
 	}
-	result, err := shell.Call(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
-	if err != nil || !strings.Contains(result, "operator-ok") {
-		t.Fatalf("result=%q err=%v", result, err)
+	detail := shell.CallDetailed(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
+	if detail.Err != nil || !detail.OperatorContext || !strings.Contains(detail.Content, "operator-ok") {
+		t.Fatalf("detail=%+v", detail)
 	}
 	if serviceStarted || !reported.OperatorContext || reported.OperatorApprovalRequired || reported.Since == "" {
 		t.Fatalf("serviceStarted=%v identity=%+v", serviceStarted, reported)
