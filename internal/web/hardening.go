@@ -77,7 +77,7 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 		}
 		cfg := s.ConfigSnapshot()
 		if !cfg.Shell.ServiceAccount.Enabled || s.credential == nil || !s.credential.Status().Stored {
-			fail(http.StatusConflict, "create, store, enable, and test the service identity before applying host protections", "shell.service_account")
+			fail(http.StatusConflict, "create, store, and enable the service identity before applying host protections", "shell.service_account")
 			return
 		}
 		if s.account == nil {
@@ -93,14 +93,6 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.shellTest == nil {
 			fail(http.StatusConflict, "service-identity spawn test is unavailable", "shell.service_account")
-			return
-		}
-		s.progressHardening("Testing the service identity before Windows approval…")
-		testContext, testCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		message, testErr := s.shellTest(testContext)
-		testCancel()
-		if testErr != nil {
-			fail(http.StatusConflict, "service-identity spawn test failed: "+message, "shell.service_account")
 			return
 		}
 	}
@@ -139,6 +131,18 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 		s.finishHardening("failed", message)
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": message, "status": status, "operation": s.hardeningOperation()})
 		return
+	}
+	if body.Action == "apply" {
+		s.progressHardening("Host protections verified; testing service-account workspace access…")
+		testContext, testCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		testMessage, testErr := s.shellTest(testContext)
+		testCancel()
+		if testErr != nil {
+			message = "host protections were applied, but service-account workspace access failed: " + testMessage
+			s.finishHardening("failed", message)
+			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": message, "status": status, "operation": s.hardeningOperation()})
+			return
+		}
 	}
 	s.finishHardening("succeeded", message)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": message, "status": status, "operation": s.hardeningOperation()})

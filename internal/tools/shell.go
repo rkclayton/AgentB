@@ -216,17 +216,17 @@ func (s *Shell) TestServiceAccount(ctx context.Context) (string, error) {
 	cfg, workspace := s.configWithWorkspace()
 	workspace, err := usableShellWorkspace(workspace)
 	if err != nil {
-		return "service-account working directory is unavailable", err
+		return s.failedServiceTest("service-account working directory is unavailable", err)
 	}
 	if s.credential == nil {
-		return "service-account credential is not configured", errors.New("service-account credential is not configured")
+		return s.failedServiceTest("service-account credential is not configured", errors.New("service-account credential is not configured"))
 	}
 	password, err := s.credential.Read()
 	if errors.Is(err, credential.ErrNotStored) {
-		return "service-account credential is not stored", err
+		return s.failedServiceTest("service-account credential is not stored", err)
 	}
 	if err != nil {
-		return "service-account credential cannot be decrypted by this Agent_b process identity", err
+		return s.failedServiceTest("service-account credential cannot be decrypted by this Agent_b process identity", err)
 	}
 	defer clearBytes(password)
 	command := shellNoop(cfg.Command[0])
@@ -234,7 +234,7 @@ func (s *Shell) TestServiceAccount(ctx context.Context) (string, error) {
 	var output lockedBuffer
 	process, err := s.startService(cfg.Command[0], argv, workspace, minimalShellEnvironment(cfg.ServiceAccount, workspace), cfg.ServiceAccount, password, &output)
 	if err != nil {
-		return serviceSpawnReason(err), err
+		return s.failedServiceTest(serviceSpawnReason(err), err)
 	}
 	type waitResult struct {
 		code int
@@ -249,17 +249,23 @@ func (s *Shell) TestServiceAccount(ctx context.Context) (string, error) {
 	case <-ctx.Done():
 		process.KillTree()
 		<-done
-		return "service-account test timed out", ctx.Err()
+		return s.failedServiceTest("service-account test timed out", ctx.Err())
 	case result := <-done:
 		if result.err != nil {
-			return "service-account test process failed", result.err
+			return s.failedServiceTest("service-account test process failed", result.err)
 		}
 		if result.code != 0 {
-			return fmt.Sprintf("service-account test process exited %d", result.code), errors.New("test process returned nonzero exit")
+			return s.failedServiceTest(fmt.Sprintf("service-account test process exited %d", result.code), errors.New("test process returned nonzero exit"))
 		}
 		s.setIdentity(ShellIdentityStatus{})
 		return "service-account shell spawn succeeded", nil
 	}
+}
+
+func (s *Shell) failedServiceTest(reason string, err error) (string, error) {
+	s.setIdentity(ShellIdentityStatus{OperatorApprovalRequired: true, Reason: reason, Since: time.Now().UTC().Format(time.RFC3339)})
+	log.Printf("ALARM: service-account test failed; operator approval required: %s", reason)
+	return reason, err
 }
 
 func (s *Shell) SetCredentialStore(reader shellCredentialReader) {

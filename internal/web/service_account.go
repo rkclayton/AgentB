@@ -156,9 +156,6 @@ func (s *Server) setupServiceAccount(w http.ResponseWriter, r *http.Request, acc
 	s.bus.Publish(events.New(events.ShellCredential, "", "", credentialStatus))
 	s.bus.Publish(events.New(events.ConfigChanged, "", "", map[string]any{"config": masked}))
 
-	testContext, testCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	message, testErr := s.shellTest(testContext)
-	testCancel()
 	currentStatus := status
 	inspectContext, inspectCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	if inspected, inspectErr := s.account.Status(inspectContext, account); inspectErr == nil {
@@ -166,15 +163,12 @@ func (s *Server) setupServiceAccount(w http.ResponseWriter, r *http.Request, acc
 	}
 	inspectCancel()
 	response := map[string]any{
-		"ok":         testErr == nil,
-		"message":    message,
+		"ok":         true,
+		"message":    "account and credential updated and authenticated; apply host protection to grant workspace access, then test identity",
 		"account":    currentStatus,
 		"credential": credentialStatus,
 		"identity":   s.shell.IdentityStatus(),
 		"config":     masked,
-	}
-	if testErr != nil {
-		response["message"] = "account and credential updated, but the service-identity spawn test failed: " + message
 	}
 	writeJSON(w, http.StatusOK, response)
 }

@@ -414,6 +414,7 @@ function shell(active) {
 								: "";
 	const canApply = !hardeningBusy && !applyBlocker;
 	const canInspect = !hardeningBusy && hardeningStatus.loaded && hardeningStatus.supported && serviceAccountStatus.exists;
+	const canTestIdentity = !serviceAccountBusy && credential.stored && protectionReady;
 	const protectionFeedback = applyBlocker
 		? `Apply unavailable: ${applyBlocker}${hardeningMessage ? ` Last result: ${hardeningMessage}` : ""}`
 		: hardeningMessage;
@@ -424,7 +425,7 @@ function shell(active) {
     ${row("repeat", `<input id="service-account-setup-confirmation" type="password" autocomplete="new-password" aria-label="Repeat new service-account password" ${setupDisabled ? "disabled" : ""}>`)}
     <div class="settings-actions">
       <button type="button" data-action="setup-service-account" data-setup-action="${setupAction}" ${setupDisabled ? "disabled" : ""}>${setupLabel}</button>
-      <button type="button" data-action="test-shell-credential" ${serviceAccountBusy || !credential.stored ? "disabled" : ""}>Test identity</button>
+      <button type="button" data-action="test-shell-credential" title="${protectionReady ? "" : "Apply host protection before testing workspace access."}" ${canTestIdentity ? "" : "disabled"}>Test identity</button>
       <button type="button" data-action="refresh-service-account" ${serviceAccountBusy ? "disabled" : ""}>Refresh</button>
     </div>
     ${feedback(serviceAccountMessage, serviceAccountAlarm, "Create or reset the non-admin Windows account. Windows may request approval.")}
@@ -433,12 +434,12 @@ function shell(active) {
 	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
 	${row("model route", `<select id="hardening-server" aria-label="Model route for host protections">${hardeningProfiles()}</select>`)}
 	<div class="settings-actions">
-	  <button type="button" data-action="apply-hardening" title="${attr(applyBlocker)}" aria-busy="${hardeningBusy}" ${canApply ? "" : "disabled"}>${hardeningBusy ? "Working…" : drafts.size ? "Save first" : "Apply + verify"}</button>
+	  <button type="button" data-action="apply-hardening" title="${attr(applyBlocker)}" aria-busy="${hardeningBusy}" ${canApply ? "" : "disabled"}>${hardeningBusy ? "Working…" : drafts.size ? "Save first" : "Apply protection"}</button>
 	  <button type="button" data-action="verify-hardening" ${canInspect ? "" : "disabled"}>Verify</button>
 	  <button type="button" data-action="refresh-hardening">Refresh</button>
 	  <button type="button" class="${armed.has("hardening:remove") ? "confirm" : ""}" data-action="remove-hardening" ${canInspect ? "" : "disabled"}>${armed.has("hardening:remove") ? "Confirm remove" : "Remove"}</button>
 	</div>
-	${feedback(protectionFeedback, hardeningAlarm || !!applyBlocker, "Apply requests Windows approval, protects the application tree, and leaves the workspace writable.")}
+	${feedback(protectionFeedback, hardeningAlarm || !!applyBlocker, "Apply protection requests Windows approval, grants workspace access, then tests the service identity.")}
     <details class="settings-advanced">
       <summary>Advanced</summary>
       ${toggle("shell.service_account.enabled", "service identity", service.enabled)}

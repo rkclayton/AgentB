@@ -17,6 +17,7 @@ func TestServiceSpawnFailureClassification(t *testing.T) {
 	}{
 		{syscall.Errno(1326), "authentication failed"},
 		{syscall.Errno(1385), "logon right"},
+		{syscall.Errno(267), "cannot access the configured workspace"},
 		{syscall.Errno(5), "CreateProcessWithLogonW failed"},
 	} {
 		if got := serviceSpawnReason(classifyLogonFailure(test.err)); !strings.Contains(got, test.want) {

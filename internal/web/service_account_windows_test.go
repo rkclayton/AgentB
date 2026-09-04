@@ -74,12 +74,17 @@ func randomTestPassword(t *testing.T) string {
 	return hex.EncodeToString(value)
 }
 
-func TestServiceAccountSetupStoresEnablesAndTestsWithoutReturningPassword(t *testing.T) {
+func TestServiceAccountSetupStoresEnablesWithoutPrematureWorkspaceTest(t *testing.T) {
 	manager := &fakeAccountManager{
 		status:      serviceaccount.Status{Supported: true, Account: "agentb-svc"},
 		setupResult: serviceaccount.SetupResult{Attempted: true},
 	}
 	server, store, configPath := serviceAccountTestServer(t, manager)
+	testCalls := 0
+	server.shellTest = func(context.Context) (string, error) {
+		testCalls++
+		return "workspace is not granted yet", errors.New("premature workspace test")
+	}
 	password := randomTestPassword(t)
 	body := `{"action":"create","password":"` + password + `","confirmation":"` + password + `"}`
 	request := httptest.NewRequest(http.MethodPost, "/api/service-account", strings.NewReader(body))
@@ -94,7 +99,7 @@ func TestServiceAccountSetupStoresEnablesAndTestsWithoutReturningPassword(t *tes
 	if bytes.Contains(response.Body.Bytes(), []byte(password)) {
 		t.Fatalf("response returned password: %s", response.Body)
 	}
-	if !strings.Contains(response.Body.String(), `"ok":true`) || manager.setupCalls != 1 || manager.setupAccount != "agentb-svc" || manager.setupPath != store.Path() || manager.setupReset {
+	if !strings.Contains(response.Body.String(), `"ok":true`) || !strings.Contains(response.Body.String(), "apply host protection") || testCalls != 0 || manager.setupCalls != 1 || manager.setupAccount != "agentb-svc" || manager.setupPath != store.Path() || manager.setupReset {
 		t.Fatalf("unexpected setup result: calls=%d account=%q path=%q reset=%v body=%s", manager.setupCalls, manager.setupAccount, manager.setupPath, manager.setupReset, response.Body)
 	}
 	stored, err := store.Read()

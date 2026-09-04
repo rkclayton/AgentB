@@ -138,6 +138,23 @@ func TestShellServiceAccountSuccessClearsPersistentIdentityAlarm(t *testing.T) {
 	}
 }
 
+func TestShellServiceAccountTestFailureRaisesPersistentIdentityAlarm(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root).Shell
+	cfg.ServiceAccount.Enabled = true
+	shell := NewShell(cfg)
+	shell.Configure(config.Config{Workspace: root, Shell: cfg})
+	shell.SetCredentialStore(presentShellCredential{})
+	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
+		return nil, &serviceSpawnError{kind: "service account cannot access the configured workspace"}
+	}
+	message, err := shell.TestServiceAccount(context.Background())
+	status := shell.IdentityStatus()
+	if err == nil || !strings.Contains(message, "workspace") || !status.OperatorApprovalRequired || status.Reason != message || status.Since == "" {
+		t.Fatalf("message=%q err=%v status=%+v", message, err, status)
+	}
+}
+
 func TestShellServiceAccountTestResolvesRelativeWorkspace(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")

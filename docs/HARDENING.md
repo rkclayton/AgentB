@@ -14,7 +14,7 @@ Agent_b gives alternate-identity shell children only Windows system paths, a wor
 
 In Settings → Security, enter a new password twice under **Service identity**, select **Create account**, and respond if Windows presents a UAC prompt. The default local account is `agentb-svc`; its advanced account and domain fields are available only when a different identity is intentional.
 
-The helper creates a non-administrator local account, retains ordinary Users membership, validates the credential with Windows, stores the DPAPI credential, enables the identity split, and tests a no-op alternate-identity process. If the account already exists, the button becomes **Reset password**.
+The helper creates a non-administrator local account, retains ordinary Users membership, validates the credential with Windows, stores the DPAPI credential, and enables the identity split. If the account already exists, the button becomes **Reset password**. The real shell test follows host protection because the ACL operation grants the service account access to the configured workspace.
 
 Canceling UAC starts no account operation and restores the previous stored credential. A failure after the elevated helper starts is reported as potentially partial; use **Reset password + enable** to recover. Supplying different administrator credentials at UAC will fail safely because another Windows user cannot decrypt the operator-scoped DPAPI blob.
 
@@ -22,7 +22,7 @@ Run an approved `whoami` shell command and require the returned identity to end 
 
 ## 3. Apply host protections
 
-Stop active Agent_b tasks. In Settings → Security → **Host protections**, confirm the displayed model route, select **Apply + verify**, and respond if Windows presents a UAC prompt. The button remains disabled until the account exists, the credential is stored, and service identity is enabled. Local UAC policy can suppress consent for trusted Windows binaries, so trust the reported post-condition rather than the presence of a dialog.
+Stop active Agent_b tasks. In Settings → Security → **Host protections**, confirm the displayed model route, select **Apply protection**, and respond if Windows presents a UAC prompt. **Save** stores configuration; **Apply protection** changes Windows policy; **Verify** is read-only. The Apply operation grants workspace access before testing the real service-account shell, avoiding a circular first-run dependency. The button remains disabled until the account exists, the credential is stored, and service identity is enabled. Local UAC policy can suppress consent for trusted Windows binaries, so trust the reported post-condition rather than the presence of a dialog.
 
 The operation applies and immediately verifies both controls:
 
@@ -32,13 +32,13 @@ The operation applies and immediately verifies both controls:
 
 Select **Verify** at any time to detect missing or replaced ACL entries and firewall drift. Reapply after updating, rebuilding, or adding files to Agent_b because a newly created or replaced application file may not retain its explicit deny.
 
-The per-user installer preserves settings during upgrades but installs program files into a new control tree. After the first installed launch, use **Apply + verify** for that installed location even if a source checkout was already hardened.
+The per-user installer preserves settings during upgrades but installs program files into a new control tree. After the first installed launch, use **Apply protection** for that installed location even if a source checkout was already hardened.
 
 The network rule permits every loopback and Tailscale destination, not only the model server. It prevents ordinary public/LAN egress by this Windows identity; it is not a domain allowlist, protocol inspection, or protection against a kernel-level exploit.
 
 ## 4. RBAC demonstration checks
 
-Run these through Agent_b after **Apply + verify**:
+Run these through Agent_b after **Apply protection** succeeds:
 
 1. `whoami` returns the service account.
 2. Creating and deleting a file in the workspace succeeds.

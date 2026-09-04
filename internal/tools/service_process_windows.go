@@ -32,6 +32,7 @@ const (
 	stillActive              = 259
 	errorLogonFailure        = syscall.Errno(1326)
 	errorLogonTypeNotGranted = syscall.Errno(1385)
+	errorDirectory           = syscall.Errno(267)
 )
 
 var (
@@ -269,6 +270,8 @@ func classifyLogonFailure(err error) error {
 			return &serviceSpawnError{kind: "service-account authentication failed", err: errno}
 		case errorLogonTypeNotGranted:
 			return &serviceSpawnError{kind: "service account lacks the required logon right", err: errno}
+		case errorDirectory:
+			return &serviceSpawnError{kind: "service account cannot access the configured workspace", err: errno}
 		}
 	}
 	return &serviceSpawnError{kind: "CreateProcessWithLogonW failed", err: err}

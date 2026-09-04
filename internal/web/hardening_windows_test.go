@@ -33,7 +33,7 @@ func (m *fakeHardeningManager) Run(_ context.Context, action string, request har
 	return hardening.RunResult{Attempted: true}, m.runErr
 }
 
-func TestHardeningEndpointAppliesOnlyAfterVerifiedIdentity(t *testing.T) {
+func TestHardeningEndpointAppliesBeforeTestingWorkspaceIdentity(t *testing.T) {
 	account := &fakeAccountManager{status: serviceaccount.Status{Supported: true, Account: "agentb-svc", Exists: true, Enabled: true}}
 	server, store, _ := serviceAccountTestServer(t, account)
 	server.cfg.Servers[0].BaseURL = "http://198.51.100.10:8080/v1"
@@ -44,21 +44,54 @@ func TestHardeningEndpointAppliesOnlyAfterVerifiedIdentity(t *testing.T) {
 	}
 	manager := &fakeHardeningManager{status: hardening.Status{Supported: true, Applied: true}}
 	server.SetHardeningManager(manager)
+	testCalls := 0
+	server.shellTest = func(context.Context) (string, error) {
+		testCalls++
+		if manager.runCalls != 1 {
+			return "workspace tested before protection was applied", errors.New("wrong operation order")
+		}
+		return "service-account shell spawn succeeded", nil
+	}
 
 	request := httptest.NewRequest(http.MethodPost, "/api/hardening", strings.NewReader(`{"action":"apply","server_id":"local"}`))
 	request.Header.Set("Content-Type", "application/json")
 	authorizeMutation(request, server)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || manager.runCalls != 1 || manager.runAction != "apply" {
-		t.Fatalf("status=%d calls=%d action=%q body=%s", response.Code, manager.runCalls, manager.runAction, response.Body)
+	if response.Code != http.StatusOK || manager.runCalls != 1 || manager.runAction != "apply" || testCalls != 1 {
+		t.Fatalf("status=%d calls=%d action=%q tests=%d body=%s", response.Code, manager.runCalls, manager.runAction, testCalls, response.Body)
 	}
 	if manager.runRequest.ModelAddress != "198.51.100.10" || manager.runRequest.ModelPort != 8080 || manager.runRequest.AccountName != "agentb-svc" {
 		t.Fatalf("unexpected hardening request: %+v", manager.runRequest)
 	}
 }
 
-func TestHardeningEndpointRejectsUnverifiedIdentity(t *testing.T) {
+func TestHardeningReportsWorkspaceTestFailureAfterApplyingPolicy(t *testing.T) {
+	account := &fakeAccountManager{status: serviceaccount.Status{Supported: true, Account: "agentb-svc", Exists: true, Enabled: true}}
+	server, store, _ := serviceAccountTestServer(t, account)
+	server.cfg.Servers[0].BaseURL = "http://127.0.0.1:8080"
+	server.cfg.Shell.ServiceAccount.Enabled = true
+	server.registry = &session.Registry{}
+	if err := store.Write([]byte(randomTestPassword(t))); err != nil {
+		t.Fatal(err)
+	}
+	manager := &fakeHardeningManager{status: hardening.Status{Supported: true, Applied: true}}
+	server.SetHardeningManager(manager)
+	server.shellTest = func(context.Context) (string, error) {
+		return "service account cannot access the configured workspace", errors.New("directory unavailable")
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/api/hardening", strings.NewReader(`{"action":"apply","server_id":"local"}`))
+	request.Header.Set("Content-Type", "application/json")
+	authorizeMutation(request, server)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || manager.runCalls != 1 || !strings.Contains(response.Body.String(), `"ok":false`) || !strings.Contains(response.Body.String(), "workspace access failed") {
+		t.Fatalf("post-apply identity failure was not reported: status=%d calls=%d body=%s", response.Code, manager.runCalls, response.Body)
+	}
+}
+
+func TestHardeningEndpointRejectsUnconfiguredIdentity(t *testing.T) {
 	account := &fakeAccountManager{status: serviceaccount.Status{Supported: true, Account: "agentb-svc", Exists: true, Enabled: true}}
 	server, _, _ := serviceAccountTestServer(t, account)
 	server.cfg.Servers[0].BaseURL = "http://127.0.0.1:8080"
