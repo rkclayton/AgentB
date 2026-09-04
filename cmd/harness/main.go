@@ -22,7 +22,6 @@ import (
 	"harness/internal/hardening"
 	"harness/internal/llm"
 	"harness/internal/memory"
-	"harness/internal/probe"
 	"harness/internal/serviceaccount"
 	"harness/internal/session"
 	"harness/internal/tools"
@@ -71,23 +70,6 @@ func main() {
 	defer writers.Close()
 	bus := events.NewBus()
 	bus.SetSink(writers.Write)
-	profile := &cfg.Servers[0]
-	if reason := config.ProfileSetupReason(profile); reason != "" {
-		log.Printf("probe %s skipped: %s", profile.ID, reason)
-	} else {
-		caps, findings, probeErr := probe.Probe(context.Background(), profile)
-		if probeErr != nil {
-			bus.Publish(events.New(events.Error, "", "", map[string]any{"where": "probe", "message": probeErr.Error()}))
-			log.Printf("probe %s: %v", profile.ID, probeErr)
-		} else {
-			profile.Capabilities = caps
-			profile.Reasoning.ValidEfforts = append([]string(nil), caps.ValidEfforts...)
-			if err := cfg.Save(*configPath); err != nil {
-				log.Fatal(err)
-			}
-			bus.Publish(events.New(events.ServerProbed, "", "", map[string]any{"server_id": profile.ID, "capabilities": caps, "findings": findings}))
-		}
-	}
 	web := webserver.New(cfg, *configPath, "web", bus)
 	memoryManager := memory.New(filepath.Dir(*configPath), web.ConfigSnapshot, func(ctx context.Context, serverID, text string) (int, error) {
 		profile, ok := web.Profile(serverID)
@@ -132,7 +114,13 @@ func main() {
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)
 	web.SetRuntime(scheduler, runner, renderer)
-	mainSession, err := registry.Create("main", cfg.Servers[0].ID, cfg.Workspace)
+	mainServerID := startupServerID(cfg.Servers, registry.ProfileRunnable)
+	if ready, reason := registry.ProfileRunnable(mainServerID); ready {
+		log.Printf("startup profile %s ready from saved capabilities", mainServerID)
+	} else {
+		log.Printf("startup profile %s not runnable: %s; use Connections > Test", mainServerID, reason)
+	}
+	mainSession, err := registry.Create("main", mainServerID, cfg.Workspace)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -140,6 +128,18 @@ func main() {
 	if err := serve(cfg, web.Handler()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func startupServerID(profiles []config.Profile, runnable func(string) (bool, string)) string {
+	if len(profiles) == 0 {
+		return ""
+	}
+	for index := range profiles {
+		if ready, _ := runnable(profiles[index].ID); ready {
+			return profiles[index].ID
+		}
+	}
+	return profiles[0].ID
 }
 
 func startupElevationError(elevated bool) error {

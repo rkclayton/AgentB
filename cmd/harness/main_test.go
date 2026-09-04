@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"harness/internal/config"
 )
 
 func TestReadServingFactsCompleteness(t *testing.T) {
@@ -24,6 +26,21 @@ func TestReadServingFactsCompleteness(t *testing.T) {
 	facts := readServingFacts(path)
 	if !facts.Complete || facts.TokenizeIdleMS != 8 || facts.TokenizeBusyMS != 9 || facts.TokenizeBlocksOnSlot != "no" {
 		t.Fatalf("unexpected facts: %+v", facts)
+	}
+}
+
+func TestStartupServerPrefersFirstRunnableProfile(t *testing.T) {
+	profiles := []config.Profile{{ID: "local"}, {ID: "homepc"}, {ID: "backup"}}
+	checks := []string{}
+	got := startupServerID(profiles, func(id string) (bool, string) {
+		checks = append(checks, id)
+		return id == "homepc", "not ready"
+	})
+	if got != "homepc" || strings.Join(checks, ",") != "local,homepc" {
+		t.Fatalf("startupServerID=%q checks=%v", got, checks)
+	}
+	if got := startupServerID(profiles, func(string) (bool, string) { return false, "not ready" }); got != "local" {
+		t.Fatalf("fallback startupServerID=%q", got)
 	}
 }
 
