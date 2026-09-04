@@ -26,7 +26,7 @@ type Glob struct{}
 func NewGlob() *Glob       { return &Glob{} }
 func (*Glob) Name() string { return "glob" }
 func (*Glob) Description() string {
-	return "Find files by name pattern under a workspace path. Returns sorted relative paths; skips .git, node_modules, logs, and memory."
+	return "Find files by name pattern under an allowed path. Returns sorted paths; skips .git, node_modules, logs, and memory."
 }
 func (*Glob) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"pattern": map[string]any{"type": "string"}, "path": map[string]any{"type": "string", "default": "."}}, "required": []string{"pattern"}}
@@ -44,18 +44,15 @@ func (*Glob) Call(ctx context.Context, s *session.Session, args map[string]any) 
 	if path == "" {
 		path = "."
 	}
-	root, err := Resolve(s.Workspace, path)
+	root, err := resolveForTool(ctx, s.Workspace, path)
 	if err != nil {
 		return "", err
 	}
-	workspaceRoot, err := Resolve(s.Workspace, ".")
+	workspaceRoot, err := resolveForTool(ctx, s.Workspace, ".")
 	if err != nil {
 		return "", err
 	}
-	rootRel, err := filepath.Rel(workspaceRoot, root)
-	if err != nil {
-		return "", err
-	}
+	rootRel := workspaceRel(workspaceRoot, root)
 	if containsIgnoredDir(rootRel) {
 		return "no matches", nil
 	}
@@ -83,10 +80,7 @@ func (*Glob) Call(ctx context.Context, s *session.Session, args map[string]any) 
 		if !matched {
 			return nil
 		}
-		rel, err := filepath.Rel(workspaceRoot, filePath)
-		if err != nil {
-			return err
-		}
+		rel := workspaceRel(workspaceRoot, filePath)
 		total++
 		if len(matches) < globMaxResults {
 			matches = append(matches, filepath.ToSlash(rel))

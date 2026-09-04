@@ -1,6 +1,6 @@
 # Windows host hardening
 
-These controls reduce the reach of Agent_b's model-selected shell. Shell children run under a dedicated local account, that account can write only the selected workspace inside the Agent_b tree, and its outbound traffic is limited to IPv4 loopback, Tailscale's `100.64.0.0/10`, and IPv6 loopback. This is blast-radius reduction on a dedicated Windows host, not a sandbox or exploit boundary.
+These controls reduce the reach of Agent_b's model-selected OS operations. Shell children and built-in file tools use a dedicated local account; relative file paths start in the workspace, while absolute paths succeed only where Windows ACLs grant that account access. The managed Agent_b tree grants writes only to its workspace, and service-account outbound traffic is limited to IPv4 loopback, Tailscale's `100.64.0.0/10`, and IPv6 loopback. This is blast-radius reduction on a dedicated Windows host, not a sandbox or exploit boundary.
 
 The normal onboarding path is entirely in Settings → Security. Start Agent_b normally from Explorer so it receives the UAC-filtered token; local Administrators can use this path normally. Agent_b refuses to start from **Run as administrator** or an elevated terminal, before it reads configuration or opens its listener. Windows elevation is reserved for the narrowly scoped account and hardening helpers. Passwords are write-only, encrypted with user-scoped DPAPI, and never placed in process arguments, responses, or logs.
 
@@ -42,15 +42,16 @@ Run these through Agent_b after **Apply protection** succeeds:
 
 1. `whoami` returns the service account.
 2. Creating and deleting a file in the workspace succeeds.
-3. Creating a file under the sibling `web` directory reports a permission denial.
-4. Choose **Keep denied** and confirm no operator retry occurs.
-5. Repeat, choose **Run once as operator**, and confirm the exact command succeeds only once. This path runs as the account that launched Agent_b and inherits its environment. Keep Agent_b non-elevated so this override does not acquire Administrator authority.
-6. A connection to the configured loopback or Tailscale model endpoint succeeds.
-7. A direct connection to a public test address fails under the service identity.
-8. A timed-out command loses its complete process tree.
-9. The timeline/log contains the original command, the approval decision, and the operator retry result.
+3. `list_dir` on an absolute path that Windows allows for the service account succeeds outside the workspace.
+4. Creating a file under the sibling `web` directory reports a permission denial.
+5. Choose **Keep denied** and confirm no operator retry occurs.
+6. Repeat, choose **Run once as operator**, and confirm the exact operation succeeds only once. This path runs as the account that launched Agent_b and inherits its permissions. Keep Agent_b non-elevated so this override does not acquire Administrator authority.
+7. A connection to the configured loopback or Tailscale model endpoint succeeds.
+8. A direct connection to a public test address fails under the service identity.
+9. A timed-out command loses its complete process tree.
+10. The timeline/log contains the original operation, the approval decision, and the operator retry result.
 
-The permission classifier reads command output heuristically. A model can print denial-looking text, so the prompt is not proof of an OS decision: always inspect the exact displayed command.
+File-tool denials come directly from Windows while Agent_b is impersonating the service account. Shell permission classification reads command output heuristically, so a shell prompt is not proof of an OS decision: always inspect the exact displayed operation.
 
 ## Manual script fallback
 

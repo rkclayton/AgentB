@@ -429,7 +429,7 @@ function shell(active) {
       <button type="button" data-action="test-shell-credential" title="${protectionReady ? "" : "Apply host protection before testing workspace access."}" ${canTestIdentity ? "" : "disabled"}>Test identity</button>
       <button type="button" data-action="refresh-service-account" ${serviceAccountBusy ? "disabled" : ""}>Refresh</button>
     </div>
-    ${feedback(serviceAccountMessage, serviceAccountAlarm, "Create or reset the non-admin Windows account. Windows may request approval.")}
+    ${feedback(serviceAccountMessage, serviceAccountAlarm, "The non-admin Windows account used by shell and file tools. Windows may request approval.")}
 	<div class="settings-subhead">Host protections</div>
 	${row("Agent_b", `<span class="account-status ${hardeningStatus.harness_elevated ? "alarm" : ""}">${html(elevationState)}</span>`)}
 	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}

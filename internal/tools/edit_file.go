@@ -38,7 +38,7 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 	if old == "" {
 		return "", fmt.Errorf("old_string is empty; use write_file to create a file, or give the exact text to replace.")
 	}
-	resolved, err := Resolve(s.Workspace, path)
+	resolved, err := resolveForTool(ctx, s.Workspace, path)
 	if err != nil {
 		return "", err
 	}

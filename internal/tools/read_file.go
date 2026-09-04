@@ -20,7 +20,7 @@ type ReadFile struct {
 func NewReadFile(cfg config.ReadFileTool) *ReadFile { return &ReadFile{cfg: cfg} }
 func (*ReadFile) Name() string                      { return "read_file" }
 func (*ReadFile) Description() string {
-	return "Read a UTF-8 text file in the workspace. Returns lines from offset, at most limit lines; a trailing note says how many lines remain."
+	return "Read a UTF-8 text file allowed by the current file identity. Returns lines from offset, at most limit lines; a trailing note says how many lines remain."
 }
 func (r *ReadFile) Schema() map[string]any {
 	cfg := r.config()
@@ -33,7 +33,7 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 	if !ok || path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	resolved, err := Resolve(s.Workspace, path)
+	resolved, err := resolveForTool(ctx, s.Workspace, path)
 	if err != nil {
 		return "", err
 	}

@@ -33,7 +33,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 - `tool.call` [4] `{turn,call_id,name,args}`; `tool.result` [4] `{turn,call_id,name,ok,ms,bytes,tokens,preview}`; `tool.toggled` [4] `{name,enabled}`.
 - `message.appended` [4] `{message}`; `message.updated` [8] `{id,patch}`; `message.queued` [6] `{message_id,position}`.
 - `budget` [4] uses the `Budget` shape. Prompt 4 emits a rough estimate; prompt 8 resolves exact versus estimated accounting.
-- `approval.required` [6] `{call_id,name,args}`; `approval.decided` [6] `{call_id,decision}`; `cycle.detected` [6] `{call_id,name,args,prior_call_id}`; `workspace.conflict` [6] `{path,session_id,other_session_id,other_label,age_s}`. The dispatcher-only `shell.operator_override` approval uses args `{command,identity,reason,scope}` and is mandatory regardless of `approval.mode`; approval reruns only the original shell arguments once under the Agent_b process identity.
+- `approval.required` [6] `{call_id,name,args}`; `approval.decided` [6] `{call_id,decision}`; `cycle.detected` [6] `{call_id,name,args,prior_call_id}`; `workspace.conflict` [6] `{path,session_id,other_session_id,other_label,age_s}`. Dispatcher-only `<tool>.operator_override` approvals use `{command?|path?,identity,reason,scope}` and are mandatory regardless of `approval.mode`; approval reruns only the original tool arguments once under the Agent_b process identity.
 - `compaction` [8] `{kind:elide|summarize,before,after,affected_ids,summary_message_id?}`; `memory.noted` [8] `{note,path}`.
 
 ## HTTP API
@@ -56,7 +56,7 @@ The main page uses `Ctrl+1` through `Ctrl+9` to switch sessions and Escape to cl
 
 ## Behavior notes
 
-- A write from one session blocks another session's `write_file` or `edit_file` until that session re-reads the shared path; the refusal identifies the other session and publishes `workspace.conflict`.
+- A write from one session blocks another session's `write_file` or `edit_file` until that session re-reads the shared path; the refusal identifies the other session and publishes `workspace.conflict`. When `shell.service_account.enabled` is true on Windows, `read_file`, `list_dir`, `write_file`, `edit_file`, `grep`, and `glob` impersonate that account for their complete filesystem operation; relative paths start at the workspace and absolute paths rely on Windows ACLs. With the split disabled, the workspace path boundary remains in force.
 - With `run.queue_depth > 0`, messages posted during a run wait per session and start in order after it ends; `user_stop` discards the remaining messages. Depth `0` keeps the immediate 409 behavior.
 - `run.cycle_window: 0` disables repeated-call cycle detection. `run.max_consecutive_tool_errors: 0` disables the consecutive tool-error stop.
 

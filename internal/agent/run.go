@@ -272,24 +272,36 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 		return outcome.Content, outcome.OK
 	}
 	command, _ := args["command"].(string)
+	path, _ := args["path"].(string)
+	subject := "tool call"
+	scope := "rerun this exact tool call once"
+	if name == "shell" {
+		subject = "command"
+		scope = "rerun this exact command once"
+	}
 	overrideID := callID + ":operator"
 	overrideArgs := map[string]any{
-		"command":  command,
 		"identity": "Agent_b operator (not Administrator)",
 		"reason":   outcome.OperatorOverrideReason,
-		"scope":    "rerun this exact command once",
+		"scope":    scope,
 	}
-	overrideApproved, overrideErr := r.gate.WaitRequired(ctx, s, runID, overrideID, "shell.operator_override", overrideArgs)
+	if command != "" {
+		overrideArgs["command"] = command
+	}
+	if path != "" {
+		overrideArgs["path"] = path
+	}
+	overrideApproved, overrideErr := r.gate.WaitRequired(ctx, s, runID, overrideID, name+".operator_override", overrideArgs)
 	if overrideErr != nil {
 		return outcome.Content + "\n\noperator-identity override canceled", false
 	}
 	if !overrideApproved {
-		log.Printf("shell operator-identity override denied: session=%s call=%s command=%q", s.ID, callID, command)
+		log.Printf("%s operator-identity override denied: session=%s call=%s command=%q path=%q", name, s.ID, callID, command, path)
 		return outcome.Content + "\n\noperator-identity override was offered and denied by the user", outcome.OK
 	}
-	log.Printf("SECURITY: shell operator-identity override approved: session=%s call=%s command=%q", s.ID, callID, command)
+	log.Printf("SECURITY: %s operator-identity override approved: session=%s call=%s command=%q path=%q", name, s.ID, callID, command, path)
 	overrideContent, overrideOK := r.tools.CallAsOperator(ctx, s, name, args)
-	return outcome.Content + "\n\noperator-identity override approved; exact command rerun once:\n" + overrideContent, overrideOK
+	return outcome.Content + "\n\noperator-identity override approved; exact " + subject + " rerun once:\n" + overrideContent, overrideOK
 }
 
 func (r *Runner) stage(s *session.Session, runID string, turn int, name string, fn func()) {

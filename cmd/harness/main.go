@@ -88,6 +88,8 @@ func main() {
 	workspaces := session.NewWorkspaceRegistry()
 	coordinator := tools.NewFileCoordinator(workspaces, registry.Label, bus)
 	credentialStore := credential.New(*configPath)
+	fileIdentity := tools.NewFileIdentity(credentialStore)
+	fileIdentity.Configure(*cfg)
 	shellTool := tools.NewShell(cfg.Shell)
 	shellTool.Configure(*cfg)
 	shellTool.SetCredentialStore(credentialStore)
@@ -102,14 +104,14 @@ func main() {
 		filepath.Join("scripts", "apply-hardening.ps1"),
 	))
 	toolRegistry := tools.New(
-		tools.NewReadFile(cfg.Tools.ReadFile),
-		tools.NewListDir(cfg.Tools.ListDir),
-		tools.NewWriteFile(coordinator),
-		tools.NewEditFile(coordinator),
-		tools.NewGrep(cfg.Tools.Grep, cfg.Tools.ListDir),
+		fileIdentity.Wrap(tools.NewReadFile(cfg.Tools.ReadFile)),
+		fileIdentity.Wrap(tools.NewListDir(cfg.Tools.ListDir)),
+		fileIdentity.Wrap(tools.NewWriteFile(coordinator)),
+		fileIdentity.Wrap(tools.NewEditFile(coordinator)),
+		fileIdentity.Wrap(tools.NewGrep(cfg.Tools.Grep, cfg.Tools.ListDir)),
 		shellTool,
 		tools.NewRemember(memoryManager, bus),
-		tools.NewGlob(),
+		fileIdentity.Wrap(tools.NewGlob()),
 	)
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)

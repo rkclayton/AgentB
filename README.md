@@ -1,6 +1,6 @@
 # Agent_b
 
-Agent_b is a small, standard-library Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, eight guarded workspace tools, exact-or-labeled context accounting, compaction, durable workspace notes, an industrial-console UI, and a standalone chat window.
+Agent_b is a small, standard-library Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, eight identity-guarded tools, exact-or-labeled context accounting, compaction, durable workspace notes, an industrial-console UI, and a standalone chat window.
 
 Choose one serving path before you start.
 
@@ -51,7 +51,7 @@ Profiles hold an endpoint, model, sampling, reasoning, context settings, and mea
 
 Sessions are ephemeral views onto a workspace and may use different profiles. Point several sessions at one workspace for a swarm; file-write conflicts force a re-read instead of silently overwriting another session. Agent_b schedules two runs by default, but a llama.cpp server started with `--parallel 1` interleaves their slot work instead of decoding two requests simultaneously.
 
-With the service-account split enabled, a shell permission denial or service-identity launch failure pauses and offers **Run once as operator**. The failed command is never retried automatically. Approval reruns only the displayed command once under the Windows account running Agent_b, is required even when normal approvals are off, and is logged. It does not grant a lasting permission or run as Administrator.
+With the service-account split enabled, shell and file tools use the `agentb-svc` Windows identity. Relative file paths start in the workspace; absolute paths are accepted when that account's Windows permissions allow them. A permission or identity failure pauses and offers **Run once as operator**. The failed command or file call is never retried automatically. Approval reruns only the displayed operation once under the Windows account running Agent_b, is required even when normal approvals are off, and is logged. It does not grant lasting permission or run as Administrator.
 
 ## Bring your own model
 

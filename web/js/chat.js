@@ -481,10 +481,10 @@ function noticeContent(session, entry) {
   } else if (event.type === "memory.noted") content.textContent = "noted for next session";
   else if (event.type === "approval.required") {
     content.className += " chat-approval";
-    const operatorOverride = data.name === "shell.operator_override";
+    const operatorOverride = data.name?.endsWith(".operator_override");
     if (operatorOverride) content.classList.add("alarm");
     content.append(document.createTextNode(operatorOverride
-	  ? `${data.args?.reason || "service identity could not run command"}: run once as your Windows account? ${keyArgument(data.args || {})}`
+	  ? `${data.args?.reason || "service identity could not run operation"}: run once as your Windows account? ${keyArgument(data.args || {})}`
       : `approval: ${data.name} ${keyArgument(data.args || {})}`));
     const decision = entry.decisions.get(data.call_id);
     if (decision) content.append(document.createTextNode(` ${decision}`));

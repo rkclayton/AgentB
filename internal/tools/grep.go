@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -54,7 +55,7 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 			return "", fmt.Errorf("invalid glob: %v", err)
 		}
 	}
-	root, err := Resolve(s.Workspace, path)
+	root, err := resolveForTool(ctx, s.Workspace, path)
 	if err != nil {
 		return "", err
 	}
@@ -81,6 +82,9 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 		}
 		data, readErr := os.ReadFile(filePath)
 		if readErr != nil {
+			if errors.Is(readErr, os.ErrPermission) {
+				return readErr
+			}
 			return nil
 		}
 		sample := data
@@ -90,7 +94,7 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 		if strings.IndexByte(string(sample), 0) >= 0 {
 			return nil
 		}
-		rel, _ := filepath.Rel(s.Workspace, filePath)
+		rel := workspaceRel(s.Workspace, filePath)
 		for index, line := range strings.Split(normalizeLF(string(data)), "\n") {
 			if !re.MatchString(line) {
 				continue

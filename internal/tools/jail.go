@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,24 @@ import (
 )
 
 func Resolve(workspace, path string) (string, error) {
+	return resolvePath(workspace, path, true)
+}
+
+type osPathPolicyKey struct{}
+
+func withOSPathPolicy(ctx context.Context) context.Context {
+	return context.WithValue(ctx, osPathPolicyKey{}, true)
+}
+
+func resolveForTool(ctx context.Context, workspace, path string) (string, error) {
+	enforceWorkspace := true
+	if allowed, _ := ctx.Value(osPathPolicyKey{}).(bool); allowed {
+		enforceWorkspace = false
+	}
+	return resolvePath(workspace, path, enforceWorkspace)
+}
+
+func resolvePath(workspace, path string, enforceWorkspace bool) (string, error) {
 	if path == "" {
 		path = "."
 	}
@@ -46,6 +65,9 @@ func Resolve(workspace, path string) (string, error) {
 		return "", err
 	}
 	candidate = filepath.Join(resolved, rest)
+	if !enforceWorkspace {
+		return candidate, nil
+	}
 	rel, err := filepath.Rel(root, candidate)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", fmt.Errorf("path is outside the workspace")

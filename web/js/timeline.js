@@ -166,10 +166,10 @@ function inlineRow(session, event, decisions, state) {
   }
   row.head.replaceChildren(text);
   if (event.type === "approval.required") {
-    const operatorOverride = data.name === "shell.operator_override";
+    const operatorOverride = data.name?.endsWith(".operator_override");
     const path = data.args?.path || "";
     text.textContent = operatorOverride
-	  ? `${data.args?.reason || "service identity could not run command"} — operator retry requested`
+	  ? `${data.args?.reason || "service identity could not run operation"} — operator retry requested`
       : `approval  ${data.name} ${path}`;
     if (operatorOverride) row.node.classList.add("fault");
     const decision = decisions.get(data.call_id);

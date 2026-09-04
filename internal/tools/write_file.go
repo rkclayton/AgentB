@@ -24,7 +24,7 @@ func NewFileCoordinator(workspaces *session.WorkspaceRegistry, label func(string
 func cleanRel(path string) string { return filepath.ToSlash(filepath.Clean(filepath.FromSlash(path))) }
 func workspaceRel(workspace, resolved string) string {
 	rel, err := filepath.Rel(workspace, resolved)
-	if err != nil {
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return cleanRel(resolved)
 	}
 	return cleanRel(rel)
@@ -74,7 +74,7 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 	if len(content) > 512*1024 {
 		return "", fmt.Errorf("content exceeds the 512 KB limit")
 	}
-	resolved, err := Resolve(s.Workspace, path)
+	resolved, err := resolveForTool(ctx, s.Workspace, path)
 	if err != nil {
 		return "", err
 	}

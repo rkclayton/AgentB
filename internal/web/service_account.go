@@ -209,6 +209,9 @@ func (s *Server) enableConfiguredServiceAccount(account string) (any, error) {
 	masked := s.cfg.Masked()
 	s.mu.Unlock()
 	s.shell.Configure(next)
+	if s.runner != nil {
+		s.runner.Configure(next)
+	}
 	return masked, nil
 }
 

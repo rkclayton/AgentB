@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,11 +13,17 @@ import (
 )
 
 type overrideTestTool struct {
+	name          string
 	normalCalls   int
 	overrideCalls int
 }
 
-func (*overrideTestTool) Name() string           { return "shell" }
+func (t *overrideTestTool) Name() string {
+	if t.name == "" {
+		return "shell"
+	}
+	return t.name
+}
 func (*overrideTestTool) Description() string    { return "test" }
 func (*overrideTestTool) Schema() map[string]any { return map[string]any{} }
 func (*overrideTestTool) Call(context.Context, *session.Session, map[string]any) (string, error) {
@@ -117,5 +124,39 @@ func TestOperatorOverrideDenialDoesNotRetry(t *testing.T) {
 	}
 	if tool.overrideCalls != 0 {
 		t.Fatalf("denied override ran %d times", tool.overrideCalls)
+	}
+}
+
+func TestFileToolOperatorOverrideUsesPathAndExactCall(t *testing.T) {
+	bus := events.NewBus()
+	eventCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	cfg := config.Defaults(t.TempDir())
+	cfg.Approval.Mode = "off"
+	tool := &overrideTestTool{name: "read_file"}
+	runner := &Runner{bus: bus, tools: tools.New(tool), cfg: func() config.Config { return cfg }}
+	runner.gate = NewGate(bus, runner.cfg)
+	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"read_file": true}}
+	type fileResult struct {
+		content string
+		ok      bool
+	}
+	done := make(chan fileResult, 1)
+	go func() {
+		content, ok := runner.executeTool(context.Background(), s, "run", "call", "read_file", map[string]any{"path": `C:\allowed.txt`})
+		done <- fileResult{content: content, ok: ok}
+	}()
+	required := <-eventCh
+	data := required.Data.(map[string]any)
+	args := data["args"].(map[string]any)
+	if data["name"] != "read_file.operator_override" || args["path"] != `C:\allowed.txt` || args["scope"] != "rerun this exact tool call once" {
+		t.Fatalf("approval data=%#v", data)
+	}
+	if err := runner.gate.Decide(s.ID, "call:operator", "approve"); err != nil {
+		t.Fatal(err)
+	}
+	got := <-done
+	if !got.ok || !strings.Contains(got.content, "exact tool call rerun once") || tool.overrideCalls != 1 {
+		t.Fatalf("result=%#v override calls=%d", got, tool.overrideCalls)
 	}
 }

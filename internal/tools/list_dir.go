@@ -28,7 +28,7 @@ func NewListDir(cfg config.ListDirTool) *ListDir {
 }
 func (*ListDir) Name() string { return "list_dir" }
 func (*ListDir) Description() string {
-	return "List a workspace directory, one entry per line, directories end with /. Skips .git and build folders."
+	return "List an allowed directory, one entry per line; directories end with /. Skips .git and build folders."
 }
 func (*ListDir) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string", "default": "."}, "depth": map[string]any{"type": "integer", "default": 1, "maximum": 3}}}
@@ -43,7 +43,7 @@ func (t *ListDir) Call(ctx context.Context, s *session.Session, args map[string]
 	if depth < 1 || depth > 3 {
 		return "", fmt.Errorf("depth must be between 1 and 3")
 	}
-	root, err := Resolve(s.Workspace, path)
+	root, err := resolveForTool(ctx, s.Workspace, path)
 	if err != nil {
 		return "", err
 	}
