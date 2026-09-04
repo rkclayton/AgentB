@@ -40,6 +40,8 @@ The `fetch` tool is the governed public-network path. It performs GET-only, cook
 
 `logs/*.jsonl` contains complete prompts and responses, including file contents and command output, and is ignored for that reason.
 
-`memory/*.md` contains model-authored notes that are injected into future sessions' system prompts for the same workspace. A note derived from untrusted content can therefore persist across sessions. Review it—the settings sheet shows the content—and remove the note file manually if it should not be trusted or retained.
+`memory/*.md` contains model-authored notes that are injected into future sessions' system prompts for the same workspace. The `remember` and `recall` tools deliberately run as the Agent_b application identity rather than through the service-account `FileIdentity` wrapper. This is a narrow exception: neither tool accepts a path, filename, workspace, or routing argument; the application derives the one reachable file from the operator-configured memory directory and the active session workspace. The model supplies only note content to `remember`, while `recall` is read-only. Operator mode does not widen either tool. Running these tools through the service identity would also conflict with the hardened installation's deliberate write denial on the memory directory.
+
+A note derived from untrusted content can persist across sessions. Review it—the settings sheet shows the content and `recall` returns the dated stored entries—and remove the note file manually if it should not be trusted or retained.
 
 Fetched text is one such untrusted source. The envelope does not follow content into a later `remember` call automatically, so review durable notes derived from fetched material with the same care as the original page.

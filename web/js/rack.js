@@ -9,6 +9,7 @@ const labels = {
   grep: "Search text",
   shell: "Shell",
   remember: "Remember",
+  recall: "Recall",
   glob: "Find files",
 };
 export function renderRack() {

@@ -57,7 +57,7 @@ The main page uses `Ctrl+1` through `Ctrl+9` to switch sessions and Escape to cl
 ## Behavior notes
 
 - A write from one session blocks another session's `write_file` or `edit_file` until that session re-reads the shared path; the refusal identifies the other session and publishes `workspace.conflict`. When `shell.service_account.enabled` is true on Windows, `read_file`, `list_dir`, `write_file`, `edit_file`, `grep`, and `glob` impersonate that account for their complete filesystem operation; relative paths start at the workspace and absolute paths rely on Windows ACLs. With the split disabled, the workspace path boundary remains in force.
-- Tool order is `read_file`, `list_dir`, `write_file`, `edit_file`, `grep`, `shell`, `remember`, `fetch`, `glob`. Fetch is intentionally not impersonated: it is the application-owned, policy-checked network path and its result tokens are charged to `fetched` rather than ordinary `results`.
+- Tool order is `read_file`, `list_dir`, `write_file`, `edit_file`, `grep`, `shell`, `remember`, `recall`, `fetch`, `glob`. The memory tools are intentionally not impersonated: they can reach only the application-derived note file for the active workspace and accept no path input. Fetch is also not impersonated: it is the application-owned, policy-checked network path and its result tokens are charged to `fetched` rather than ordinary `results`.
 - With `run.queue_depth > 0`, messages posted during a run wait per session and start in order after it ends; `user_stop` discards the remaining messages. Depth `0` keeps the immediate 409 behavior.
 - `run.cycle_window: 0` disables repeated-call cycle detection. `run.max_consecutive_tool_errors: 0` disables the consecutive tool-error stop.
 

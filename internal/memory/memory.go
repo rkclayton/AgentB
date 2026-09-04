@@ -82,6 +82,20 @@ func (m *Manager) Load(ctx context.Context, workspace, serverID string) (string,
 	}
 	return "", path, nil
 }
+
+func (m *Manager) Read(workspace string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	data, err := os.ReadFile(m.Path(workspace))
+	if os.IsNotExist(err) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimRight(normalize(string(data)), "\n"), nil
+}
+
 func memoryBlock(lines []string, dropped int) string {
 	if len(lines) == 0 {
 		return ""

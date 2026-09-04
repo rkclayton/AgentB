@@ -58,7 +58,7 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 		return nil, err
 	}
 	runnable, reason := runnable(profile, r.config().Context.Accounting)
-	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "grep": true, "shell": true, "remember": true, "fetch": true, "glob": true}
+	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "grep": true, "shell": true, "remember": true, "recall": true, "fetch": true, "glob": true}
 	memoryBlock, memoryPath := "", ""
 	if r.memory != nil {
 		memoryBlock, memoryPath, err = r.memory(context.Background(), abs, serverID)
