@@ -55,6 +55,21 @@ try {
         (Get-FileHash -LiteralPath $credentialPath -Algorithm SHA256).Hash
     } else { '' }
 
+    $webDirectory = Join-Path $testInstall 'web'
+    $webAcl = Get-Acl -LiteralPath $webDirectory
+    $aclMarker = [Security.AccessControl.FileSystemAccessRule]::new(
+        [Security.Principal.WindowsIdentity]::GetCurrent().User,
+        [Security.AccessControl.FileSystemRights]::ReadPermissions,
+        [Security.AccessControl.InheritanceFlags]::None,
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Allow
+    )
+    $null = $webAcl.AddAccessRule($aclMarker)
+    Set-Acl -LiteralPath $webDirectory -AclObject $webAcl
+    $aclBeforeUpgrade = (Get-Acl -LiteralPath $webDirectory).Sddl
+    $staleFile = Join-Path $webDirectory 'stale-upgrade-test.txt'
+    Set-Content -LiteralPath $staleFile -Value 'removed by upgrade'
+
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer -InstallDirectory $testInstall -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry
     if ($LASTEXITCODE -ne 0) { throw "Upgrade exited $LASTEXITCODE." }
     if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -ne $configHash) {
@@ -62,6 +77,12 @@ try {
     }
     if ($credentialHash -and (Get-FileHash -LiteralPath $credentialPath -Algorithm SHA256).Hash -ne $credentialHash) {
         throw 'Upgrade changed the installed credential.'
+    }
+    if ((Get-Acl -LiteralPath $webDirectory).Sddl -ne $aclBeforeUpgrade) {
+        throw 'Upgrade replaced the protected web directory or changed its ACL.'
+    }
+    if (Test-Path -LiteralPath $staleFile) {
+        throw 'Upgrade retained a stale program file.'
     }
 
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $uninstaller -InstallDirectory $testInstall -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -Quiet
@@ -87,7 +108,7 @@ try {
         (Test-Path -LiteralPath $testRegistry)) {
         throw 'Uninstall left a program, shortcut, or registration artifact.'
     }
-    Write-Host 'PASS: isolated install, branded shortcut, registration, upgrade preservation, preserving uninstall, reinstall, and purging uninstall'
+    Write-Host 'PASS: isolated install, branded shortcut, registration, settings and ACL-preserving upgrade, stale-file cleanup, preserving uninstall, reinstall, and purging uninstall'
 } finally {
     if (Test-Path -LiteralPath $testRegistry) { Remove-Item -LiteralPath $testRegistry -Recurse -Force }
     if (Test-Path -LiteralPath $testRoot) {

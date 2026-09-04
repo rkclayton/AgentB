@@ -32,7 +32,7 @@ The operation applies and immediately verifies both controls:
 
 Select **Verify** at any time to detect missing or replaced ACL entries and firewall drift. Reapply after updating, rebuilding, or adding files to Agent_b because a newly created or replaced application file may not retain its explicit deny.
 
-The per-user installer preserves settings during upgrades but installs program files into a new control tree. After the first installed launch, use **Apply protection** for that installed location even if a source checkout was already hardened.
+The per-user installer preserves settings and existing protected top-level program-directory ACLs during upgrades. After the first installed launch, use **Apply protection** for that installed location even if a source checkout was already hardened; continue to Verify after upgrades because a release that adds a new top-level artifact still needs a new explicit rule.
 
 The network rule permits every loopback and Tailscale destination, not only the model server. It prevents ordinary public/LAN egress by this Windows identity; it is not a domain allowlist, protocol inspection, or protection against a kernel-level exploit.
 

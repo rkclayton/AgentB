@@ -4,7 +4,7 @@ Agent_b is a small, standard-library Go coding agent for OpenAI-compatible model
 
 Choose one serving path before you start.
 
-On Windows, double-click **`install-Agent_b.cmd`** once for the normal per-user installation. It builds Agent_b, creates a branded Start Menu shortcut, and registers **Agent_b** in Windows Installed apps without requiring administrator elevation. A first install imports this checkout's local connection settings and user-scoped service credential when present; upgrades preserve the installed settings. Open **Agent_b** from Start afterward. Reopening the shortcut focuses an existing Agent_b browser window and never starts a second healthy server; an unresponsive existing process is reported by PID and left for the operator instead of being killed automatically.
+On Windows, double-click **`install-Agent_b.cmd`** once for the normal per-user installation. It builds Agent_b, creates a branded Start Menu shortcut, and registers **Agent_b** in Windows Installed apps without requiring administrator elevation. A first install imports this checkout's local connection settings and user-scoped service credential when present; upgrades preserve the installed settings and protected program-directory ACLs. Open **Agent_b** from Start afterward. Reopening the shortcut focuses an existing Agent_b browser window and never starts a second healthy server; an unresponsive existing process is reported by PID and left for the operator instead of being killed automatically.
 
 Developers can instead double-click **`start-Agent_b.cmd`** to build and run directly from the checkout. Both paths find Go on `PATH` or in the ignored local `.tools\go` directory. No PowerShell command is required.
 

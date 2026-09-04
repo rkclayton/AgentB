@@ -61,8 +61,18 @@ function Copy-ProgramDirectory {
     $from = Join-Path $Source $Name
     $to = Join-Path $Destination $Name
     if (-not (Test-Path -LiteralPath $from -PathType Container)) { throw "Required program directory is missing: $from" }
-    if (Test-Path -LiteralPath $to) { Remove-Item -LiteralPath $to -Recurse -Force }
-    Copy-Item -LiteralPath $from -Destination $to -Recurse -Force
+    if (-not (Test-Path -LiteralPath $to -PathType Container)) {
+        $null = New-Item -ItemType Directory -Path $to -Force
+    } else {
+        # Keep the managed top-level directory itself: replacing it discards the
+        # service-account deny ACE that protects the installed control surface.
+        foreach ($item in Get-ChildItem -LiteralPath $to -Force) {
+            Remove-Item -LiteralPath $item.FullName -Recurse -Force
+        }
+    }
+    foreach ($item in Get-ChildItem -LiteralPath $from -Force) {
+        Copy-Item -LiteralPath $item.FullName -Destination $to -Recurse -Force
+    }
 }
 
 function Import-FirstInstallSettings {
