@@ -2,6 +2,42 @@ package config
 
 import "encoding/json"
 
+func migrateByteWindows(data []byte, version int) (bool, []byte, error) {
+	if version >= 4 {
+		return false, data, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false, nil, err
+	}
+	var tools map[string]json.RawMessage
+	if value, ok := raw["tools"]; ok {
+		if err := json.Unmarshal(value, &tools); err != nil {
+			return false, nil, err
+		}
+	} else {
+		tools = map[string]json.RawMessage{}
+	}
+	for _, name := range []string{"read_file", "fetch"} {
+		var settings map[string]json.RawMessage
+		value, ok := tools[name]
+		if !ok {
+			continue
+		}
+		if err := json.Unmarshal(value, &settings); err != nil {
+			return false, nil, err
+		}
+		settings["default_limit"], _ = json.Marshal(16 << 10)
+		settings["max_limit"], _ = json.Marshal(64 << 10)
+		delete(settings, "max_line_chars")
+		tools[name], _ = json.Marshal(settings)
+	}
+	raw["tools"], _ = json.Marshal(tools)
+	raw["config_version"], _ = json.Marshal(CurrentConfigVersion)
+	out, err := json.Marshal(raw)
+	return true, out, err
+}
+
 func migrateOperatorIdleTimeout(data []byte, version int) (bool, bool, []byte, error) {
 	if version == CurrentConfigVersion {
 		return false, false, data, nil

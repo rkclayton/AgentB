@@ -39,7 +39,7 @@ func NewFetch(cfg config.FetchTool) *Fetch {
 
 func (*Fetch) Name() string { return "fetch_url" }
 func (*Fetch) Description() string {
-	return "Fetch public HTTP(S) text from url, starting at offset and capped by limit. Unlike read_file, it uses the network and returns untrusted content."
+	return "Fetch untrusted public HTTP(S) text by byte offset and limit. Unlike read_file, it uses the network."
 }
 func (*Fetch) ResultCategory() string { return "fetched" }
 func (*Fetch) ResultUntrusted() bool  { return true }
@@ -50,8 +50,8 @@ func (f *Fetch) Schema() map[string]any {
 		"type": "object",
 		"properties": map[string]any{
 			"url":    map[string]any{"type": "string", "description": "HTTP or HTTPS URL"},
-			"offset": map[string]any{"type": "integer", "default": 1},
-			"limit":  map[string]any{"type": "integer", "default": min(cfg.DefaultLimit, cfg.MaxLimit), "maximum": cfg.MaxLimit},
+			"offset": map[string]any{"type": "integer", "description": "One-based byte offset", "default": 1},
+			"limit":  map[string]any{"type": "integer", "description": "Maximum bytes to return", "default": min(cfg.DefaultLimit, cfg.MaxLimit), "maximum": cfg.MaxLimit},
 		},
 		"required": []string{"url"},
 	}
@@ -163,20 +163,24 @@ func (f *Fetch) CallDetailed(ctx context.Context, _ *session.Session, args map[s
 		f.audit(rawURL, status, len(data), truncated, err)
 		return detail
 	}
-	page, remaining, err := paginateFetch(readable, offset, limit, cfg.MaxLineChars)
+	window, err := windowUTF8(readable, offset, limit)
 	if err != nil {
 		detail.Err = err
 		f.audit(rawURL, status, len(data), truncated, err)
 		return detail
 	}
-	if remaining > 0 {
-		page += fmt.Sprintf("\n[… %d more lines; fetch_url offset=%d]", remaining, offset+limit)
+	meta["window_offset"] = window.Offset
+	meta["window_bytes"] = window.Bytes
+	meta["total_bytes"] = window.TotalBytes
+	meta["more"] = window.More
+	if window.More {
+		meta["next_offset"] = window.NextOffset
 	}
 	finalURL, _ := meta["final_url"].(string)
 	if finalURL == "" {
 		finalURL = target.String()
 	}
-	detail.Content = untrustedFetchEnvelope(finalURL, status, mediaType, len(data), truncated, page)
+	detail.Content = untrustedFetchEnvelope(finalURL, status, mediaType, len(data), truncated, window)
 	f.audit(rawURL, status, len(data), truncated, nil)
 	return detail
 }
@@ -432,30 +436,14 @@ func writeHTMLBreak(out *strings.Builder) {
 	}
 }
 
-func paginateFetch(text string, offset, limit, maxLineChars int) (string, int, error) {
-	text = strings.ReplaceAll(text, "\r", "")
-	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if len(lines) == 1 && lines[0] == "" {
-		lines = []string{""}
-	}
-	if offset > len(lines) {
-		return "", 0, fmt.Errorf("offset %d exceeds fetched text length %d", offset, len(lines))
-	}
-	end := min(len(lines), offset-1+limit)
-	selected := append([]string(nil), lines[offset-1:end]...)
-	for index, line := range selected {
-		runes := []rune(line)
-		if len(runes) > maxLineChars {
-			selected[index] = string(runes[:maxLineChars]) + "…"
-		}
-	}
-	return strings.Join(selected, "\n"), len(lines) - end, nil
-}
-
-func untrustedFetchEnvelope(source string, status int, mediaType string, bytes int, truncated bool, content string) string {
-	lines := strings.Split(content, "\n")
+func untrustedFetchEnvelope(source string, status int, mediaType string, bytes int, truncated bool, window byteWindow) string {
+	lines := strings.Split(window.Content, "\n")
 	for index := range lines {
 		lines[index] = "> " + lines[index]
+	}
+	nextOffset := ""
+	if window.More {
+		nextOffset = "next_offset: " + strconv.Itoa(window.NextOffset) + "\n"
 	}
 	return "[BEGIN UNTRUSTED FETCHED CONTENT]\n" +
 		fetchWarning + "\n" +
@@ -464,6 +452,11 @@ func untrustedFetchEnvelope(source string, status int, mediaType string, bytes i
 		"content_type: " + mediaType + "\n" +
 		"source_bytes: " + strconv.Itoa(bytes) + "\n" +
 		"source_truncated: " + strconv.FormatBool(truncated) + "\n" +
+		"window_offset: " + strconv.Itoa(window.Offset) + "\n" +
+		"window_bytes: " + strconv.Itoa(window.Bytes) + "\n" +
+		"total_bytes: " + strconv.Itoa(window.TotalBytes) + "\n" +
+		"more: " + strconv.FormatBool(window.More) + "\n" +
+		nextOffset +
 		strings.Join(lines, "\n") + "\n" +
 		"[END UNTRUSTED FETCHED CONTENT]"
 }

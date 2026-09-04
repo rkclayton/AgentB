@@ -1,5 +1,5 @@
 {
-  "config_version": 3,
+  "config_version": 4,
   "listen": "127.0.0.1:8790",
   "workspace": "./workspace",
   "log_dir": "logs",
@@ -45,16 +45,15 @@
   "context": { "soft_pct": 0.75, "summary_pct": 0.85, "accounting": "auto" },
   "memory": { "enabled": true, "dir": "memory", "max_tokens": 1500 },
   "tools": {
-    "read_file": { "default_limit": 200, "max_limit": 400, "max_line_chars": 500 },
+    "read_file": { "default_limit": 16384, "max_limit": 65536 },
     "list_dir": { "max_entries": 300, "ignore": [".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"] },
     "grep": { "max_matches": 50, "max_line_chars": 200 },
     "fetch": {
       "timeout_s": 20,
       "max_bytes": 2097152,
       "max_redirects": 5,
-      "default_limit": 200,
-      "max_limit": 400,
-      "max_line_chars": 500,
+      "default_limit": 16384,
+      "max_limit": 65536,
       "allow_domains": [],
       "allow_internal_hosts": []
     }

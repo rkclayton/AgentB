@@ -1,11 +1,10 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"fmt"
-	"math"
 	"os"
-	"strings"
 	"sync"
 
 	"harness/internal/config"
@@ -20,12 +19,12 @@ type ReadFile struct {
 func NewReadFile(cfg config.ReadFileTool) *ReadFile { return &ReadFile{cfg: cfg} }
 func (*ReadFile) Name() string                      { return "read_file" }
 func (*ReadFile) Description() string {
-	return "Read local UTF-8 file lines from path, starting at offset and capped by limit. Unlike fetch_url, it reads the filesystem."
+	return "Read local UTF-8 text by byte offset and limit. Unlike fetch_url, it reads the filesystem."
 }
 func (r *ReadFile) Schema() map[string]any {
 	cfg := r.config()
 	defaultLimit := min(cfg.DefaultLimit, cfg.MaxLimit)
-	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "default": 1}, "limit": map[string]any{"type": "integer", "default": defaultLimit, "maximum": cfg.MaxLimit}}, "required": []string{"path"}}
+	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "description": "One-based byte offset", "default": 1}, "limit": map[string]any{"type": "integer", "description": "Maximum bytes to return", "default": defaultLimit, "maximum": cfg.MaxLimit}}, "required": []string{"path"}}
 }
 func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
 	cfg := r.config()
@@ -45,37 +44,17 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 	if len(sample) > 8192 {
 		sample = sample[:8192]
 	}
-	if strings.IndexByte(string(sample), 0) >= 0 {
+	if bytes.IndexByte(sample, 0) >= 0 {
 		return "", fmt.Errorf("binary file refused: %s", path)
 	}
 	offset := number(args["offset"], 1)
 	limit := number(args["limit"], cfg.DefaultLimit)
-	if offset < 1 {
-		return "", fmt.Errorf("offset must be at least 1")
+	limit = min(limit, cfg.MaxLimit)
+	window, err := windowUTF8(string(data), offset, limit)
+	if err != nil {
+		return "", err
 	}
-	if limit < 1 {
-		return "", fmt.Errorf("limit must be positive")
-	}
-	limit = int(math.Min(float64(limit), float64(cfg.MaxLimit)))
-	text := strings.ReplaceAll(string(data), "\r", "")
-	lines := strings.Split(strings.TrimSuffix(text, "\n"), "\n")
-	if offset > len(lines) {
-		return "", fmt.Errorf("offset %d exceeds file length %d", offset, len(lines))
-	}
-	end := offset - 1 + limit
-	if end > len(lines) {
-		end = len(lines)
-	}
-	selected := append([]string(nil), lines[offset-1:end]...)
-	for i, line := range selected {
-		if len([]rune(line)) > cfg.MaxLineChars {
-			selected[i] = string([]rune(line)[:cfg.MaxLineChars]) + "…"
-		}
-	}
-	result := strings.Join(selected, "\n")
-	if left := len(lines) - end; left > 0 {
-		result += fmt.Sprintf("\n[… %d more lines; read_file offset=%d]", left, end+1)
-	}
+	result := byteWindowHeader(window) + "\n" + window.Content
 	s.Touch(workspaceRel(s.Workspace, resolved))
 	return result, nil
 }

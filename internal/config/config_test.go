@@ -171,7 +171,7 @@ func TestOperatorIdleTimeoutSchemaMigration(t *testing.T) {
 	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || loaded.Shell.OperatorContextIdleTimeoutMinutes != 37 {
 		t.Fatalf("migrated=%t version=%d idle=%d", migrated, loaded.ConfigVersion, loaded.Shell.OperatorContextIdleTimeoutMinutes)
 	}
-	if len(loaded.LoadNotices) != 1 || loaded.LoadNotices[0] != OperatorIdleTimeoutMigrationNotice {
+	if len(loaded.LoadNotices) != 2 || loaded.LoadNotices[0] != OperatorIdleTimeoutMigrationNotice || loaded.LoadNotices[1] != ByteWindowMigrationNotice {
 		t.Fatalf("migration notices=%#v", loaded.LoadNotices)
 	}
 	persisted, err := os.ReadFile(path)
@@ -211,6 +211,60 @@ func TestCurrentOperatorIdleTimeoutConfigIsUntouched(t *testing.T) {
 	}
 	if migrated || loaded.Shell.OperatorContextIdleTimeoutMinutes != 11 || !bytes.Equal(before, after) {
 		t.Fatalf("migrated=%t idle=%d changed=%t", migrated, loaded.Shell.OperatorContextIdleTimeoutMinutes, !bytes.Equal(before, after))
+	}
+}
+
+func TestVersion3LineLimitsMigrateToByteWindows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	cfg := Defaults(t.TempDir())
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	document["config_version"] = float64(3)
+	toolSettings := document["tools"].(map[string]any)
+	for _, name := range []string{"read_file", "fetch"} {
+		settings := toolSettings[name].(map[string]any)
+		settings["default_limit"] = float64(200)
+		settings["max_limit"] = float64(400)
+		settings["max_line_chars"] = float64(500)
+	}
+	data, err = json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, migrated, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || loaded.Tools.ReadFile.DefaultLimit != 16<<10 || loaded.Tools.ReadFile.MaxLimit != 64<<10 || loaded.Tools.Fetch.DefaultLimit != 16<<10 || loaded.Tools.Fetch.MaxLimit != 64<<10 {
+		t.Fatalf("migrated=%t config=%+v", migrated, loaded.Tools)
+	}
+	if len(loaded.LoadNotices) != 1 || loaded.LoadNotices[0] != ByteWindowMigrationNotice {
+		t.Fatalf("migration notices=%#v", loaded.LoadNotices)
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		Tools map[string]map[string]any `json:"tools"`
+	}
+	if err := json.Unmarshal(persisted, &saved); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"read_file", "fetch"} {
+		if _, exists := saved.Tools[name]["max_line_chars"]; exists {
+			t.Fatalf("legacy %s line cap persisted: %s", name, persisted)
+		}
 	}
 }
 

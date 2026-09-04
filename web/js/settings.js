@@ -312,9 +312,8 @@ function tools(active) {
   const head = (name) => `<div class="tool-setting-head"><code>${name}</code><span>${costs[name] ?? 0} tokens</span></div>`;
   const cfg = store.config;
   return `${head("read_file")}
-    ${number("tools.read_file.default_limit", "default limit", cfg.tools?.read_file?.default_limit)}
-    ${number("tools.read_file.max_limit", "max limit", cfg.tools?.read_file?.max_limit)}
-    ${number("tools.read_file.max_line_chars", "max line chars", cfg.tools?.read_file?.max_line_chars)}
+    ${number("tools.read_file.default_limit", "default bytes", cfg.tools?.read_file?.default_limit)}
+    ${number("tools.read_file.max_limit", "max bytes per call", cfg.tools?.read_file?.max_limit)}
     ${head("list_dir")}
     ${number("tools.list_dir.max_entries", "max entries", cfg.tools?.list_dir?.max_entries)}
     ${text("tools.list_dir.ignore", "ignore", (cfg.tools?.list_dir?.ignore || []).join(", "), "list")}

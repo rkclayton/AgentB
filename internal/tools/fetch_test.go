@@ -32,13 +32,51 @@ func TestFetchExtractsReadableHTMLAndKeepsLinks(t *testing.T) {
 	}
 }
 
-func TestFetchPaginationMatchesReadFileSemantics(t *testing.T) {
-	page, remaining, err := paginateFetch("one\ntwo\nthree\nfour", 2, 2, 500)
-	if err != nil || page != "two\nthree" || remaining != 1 {
-		t.Fatalf("page=%q remaining=%d err=%v", page, remaining, err)
+func TestFetchSingleLineByteWindowsDoNotRepeat(t *testing.T) {
+	var source strings.Builder
+	for index := 0; index < 120; index++ {
+		fmt.Fprintf(&source, "item-%04d|", index)
 	}
-	if _, _, err := paginateFetch("one", 2, 1, 500); err == nil {
-		t.Fatal("offset past end was accepted")
+	source.WriteString("🙂-tail")
+	payload := source.String()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		fmt.Fprint(w, payload)
+	}))
+	defer server.Close()
+
+	offset := 1
+	seen := map[string]bool{}
+	var rebuilt strings.Builder
+	for {
+		detail := NewFetch(fetchTestConfig()).CallDetailed(context.Background(), &session.Session{}, map[string]any{"url": server.URL, "offset": offset, "limit": 73})
+		if detail.Err != nil {
+			t.Fatal(detail.Err)
+		}
+		window := envelopePayload(t, detail.Content)
+		if seen[window] {
+			t.Fatalf("fetch_url repeated window %q at offset %d", window, offset)
+		}
+		seen[window] = true
+		rebuilt.WriteString(window)
+		if detail.Metadata["window_offset"] != offset || detail.Metadata["window_bytes"] != len([]byte(window)) || detail.Metadata["total_bytes"] != len([]byte(payload)) {
+			t.Fatalf("window metadata=%#v content=%q", detail.Metadata, window)
+		}
+		more, _ := detail.Metadata["more"].(bool)
+		if !more {
+			if _, exists := detail.Metadata["next_offset"]; exists {
+				t.Fatalf("completed response retained cursor: %#v", detail.Metadata)
+			}
+			break
+		}
+		next, ok := detail.Metadata["next_offset"].(int)
+		if !ok || next <= offset {
+			t.Fatalf("invalid next cursor in %#v", detail.Metadata)
+		}
+		offset = next
+	}
+	if rebuilt.String() != payload {
+		t.Fatalf("rebuilt payload=%q want=%q", rebuilt.String(), payload)
 	}
 }
 
@@ -76,7 +114,7 @@ func TestFetchResponseSizeLimitAndEnvelope(t *testing.T) {
 	if detail.Err != nil {
 		t.Fatal(detail.Err)
 	}
-	for _, want := range []string{"[BEGIN UNTRUSTED FETCHED CONTENT]", fetchWarning, "source_bytes: 5", "source_truncated: true", "> 12345", "[END UNTRUSTED FETCHED CONTENT]"} {
+	for _, want := range []string{"[BEGIN UNTRUSTED FETCHED CONTENT]", fetchWarning, "source_bytes: 5", "source_truncated: true", "window_offset: 1", "window_bytes: 5", "total_bytes: 5", "more: false", "> 12345", "[END UNTRUSTED FETCHED CONTENT]"} {
 		if !strings.Contains(detail.Content, want) {
 			t.Fatalf("envelope missing %q: %q", want, detail.Content)
 		}
@@ -153,7 +191,18 @@ func TestFetchSSRFGuardAndSpecificInternalException(t *testing.T) {
 }
 
 func fetchTestConfig() config.FetchTool {
-	return config.FetchTool{TimeoutS: 5, MaxBytes: 1 << 20, MaxRedirects: 3, DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500, AllowDomains: []string{}, AllowInternalHosts: []string{"127.0.0.1"}}
+	return config.FetchTool{TimeoutS: 5, MaxBytes: 1 << 20, MaxRedirects: 3, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, AllowInternalHosts: []string{"127.0.0.1"}}
+}
+
+func envelopePayload(t *testing.T, envelope string) string {
+	t.Helper()
+	for _, line := range strings.Split(envelope, "\n") {
+		if strings.HasPrefix(line, "> ") {
+			return strings.TrimPrefix(line, "> ")
+		}
+	}
+	t.Fatalf("envelope has no content line: %q", envelope)
+	return ""
 }
 
 func mustURL(t *testing.T, raw string) *url.URL {

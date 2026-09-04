@@ -118,6 +118,23 @@ func TestShellServiceAccountDisabledDoesNotRaiseIdentityAlarm(t *testing.T) {
 	}
 }
 
+func TestShellNonzeroExitIsFailureAndIncludesStderr(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root).Shell
+	command := "printf stderr-marker >&2; exit 7"
+	if runtime.GOOS == "windows" {
+		command = "[Console]::Error.WriteLine('stderr-marker'); exit 7"
+	} else {
+		cfg.Command = []string{"sh", "-c"}
+	}
+	registry := New(NewShell(cfg))
+	item := &session.Session{ID: "test", Workspace: root, ToolsEnabled: map[string]bool{"shell": true}}
+	outcome := registry.CallDetailed(context.Background(), item, "shell", map[string]any{"command": command})
+	if outcome.OK || !strings.HasPrefix(outcome.Content, "error: command failed\nexit=7") || !strings.Contains(outcome.Content, "stderr-marker") {
+		t.Fatalf("nonzero shell outcome=%+v", outcome)
+	}
+}
+
 func TestShellOperatorContextBypassesServiceIdentityAndRaisesPersistentWarning(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root).Shell

@@ -233,10 +233,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 					item.category, item.untrusted, item.metadata = outcome.Category, outcome.Untrusted, outcome.Metadata
 				}
 				item.ms = time.Since(start).Milliseconds()
-				data := map[string]any{"turn": turn, "call_id": item.call.ID, "name": item.call.Name, "ok": item.ok, "operator_context": item.operatorContext, "untrusted": item.untrusted, "ms": item.ms, "bytes": len(item.content), "tokens": r.textTokens(ctx, profile, item.content), "preview": preview(item.content)}
-				for key, value := range item.metadata {
-					data[key] = value
-				}
+				data := toolResultEventData(turn, item.call.ID, item.call.Name, item.content, item.ok, item.operatorContext, item.untrusted, item.ms, r.textTokens(ctx, profile, item.content), item.metadata)
 				r.bus.Publish(events.New(events.ToolResult, s.ID, runID, data))
 			}
 		})
@@ -272,6 +269,18 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		}
 		r.compactAfterTurn(ctx, s, runID, turn, profile, currentReasoning)
 	}
+}
+
+func toolResultEventData(turn int, callID, name, content string, ok, operatorContext, untrusted bool, ms int64, tokens int, metadata map[string]any) map[string]any {
+	data := map[string]any{
+		"turn": turn, "call_id": callID, "name": name, "ok": ok,
+		"operator_context": operatorContext, "untrusted": untrusted, "ms": ms,
+		"bytes": len(content), "tokens": tokens, "preview": preview(content),
+	}
+	for key, value := range metadata {
+		data[key] = value
+	}
+	return data
 }
 
 func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) tools.CallOutcome {

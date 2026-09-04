@@ -112,7 +112,7 @@ type Approval struct {
 }
 
 const (
-	CurrentConfigVersion     = 3
+	CurrentConfigVersion     = 4
 	ApprovalModeBoundaryOnly = "boundary-only"
 	ApprovalModeMutating     = "mutating"
 	ApprovalModeAll          = "all"
@@ -121,6 +121,7 @@ const (
 
 const ApprovalDefaultMigrationNotice = "corrected inherited approval default from mutating to boundary-only; mutating can be reselected in Settings > Run & approval"
 const OperatorIdleTimeoutMigrationNotice = "migrated shell.operator_context_timeout_minutes to shell.operator_context_idle_timeout_minutes; operator mode now expires after agent inactivity"
+const ByteWindowMigrationNotice = "migrated read_file and fetch_url limits from line counts to UTF-8 byte windows"
 
 type GlobalContext struct {
 	SoftPct    float64 `json:"soft_pct"`
@@ -141,7 +142,6 @@ type Tools struct {
 type ReadFileTool struct {
 	DefaultLimit int `json:"default_limit"`
 	MaxLimit     int `json:"max_limit"`
-	MaxLineChars int `json:"max_line_chars"`
 }
 type ListDirTool struct {
 	MaxEntries int      `json:"max_entries"`
@@ -157,7 +157,6 @@ type FetchTool struct {
 	MaxRedirects       int      `json:"max_redirects"`
 	DefaultLimit       int      `json:"default_limit"`
 	MaxLimit           int      `json:"max_limit"`
-	MaxLineChars       int      `json:"max_line_chars"`
 	AllowDomains       []string `json:"allow_domains"`
 	AllowInternalHosts []string `json:"allow_internal_hosts"`
 }
@@ -194,7 +193,7 @@ func Defaults(workspace string) Config {
 		Listen:        "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
 		Servers: []Profile{{ID: "local", Label: "Local", BaseURL: "http://127.0.0.1:8080", Model: "", RequestTimeoutS: 900, ProbeMode: "full", Sampling: SamplingPair{Thinking: thinking, Nonthinking: nonthinking}, Reasoning: Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}}, Context: Context{ReserveOutput: 10240}, Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}}}},
 		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
-		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500, AllowDomains: []string{}, AllowInternalHosts: []string{}}},
+		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 16 << 10, MaxLimit: 64 << 10}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, AllowInternalHosts: []string{}}},
 		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextIdleTimeoutMinutes: 20, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
 	}
 }
@@ -227,7 +226,7 @@ func Load(path string) (*Config, bool, bool, error) {
 		return nil, false, created, err
 	}
 	unstamped := metadata.ConfigVersion == nil
-	if !unstamped && *metadata.ConfigVersion != 2 && *metadata.ConfigVersion != CurrentConfigVersion {
+	if !unstamped && *metadata.ConfigVersion != 2 && *metadata.ConfigVersion != 3 && *metadata.ConfigVersion != CurrentConfigVersion {
 		return nil, false, created, fmt.Errorf("config_version: unsupported value %d (current %d)", *metadata.ConfigVersion, CurrentConfigVersion)
 	}
 	migrated, data, err := migrateV1(data)
@@ -239,6 +238,10 @@ func Load(path string) (*Config, bool, bool, error) {
 		version = *metadata.ConfigVersion
 	}
 	schemaMigrated, idleTimeoutRemapped, data, err := migrateOperatorIdleTimeout(data, version)
+	if err != nil {
+		return nil, false, created, err
+	}
+	byteWindowMigrated, data, err := migrateByteWindows(data, version)
 	if err != nil {
 		return nil, false, created, err
 	}
@@ -257,7 +260,7 @@ func Load(path string) (*Config, bool, bool, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, false, created, err
 	}
-	if migrated || schemaMigrated || unstamped {
+	if migrated || schemaMigrated || byteWindowMigrated || unstamped {
 		if err := cfg.Save(path); err != nil {
 			return nil, false, created, err
 		}
@@ -268,7 +271,10 @@ func Load(path string) (*Config, bool, bool, error) {
 	if idleTimeoutRemapped {
 		cfg.LoadNotices = append(cfg.LoadNotices, OperatorIdleTimeoutMigrationNotice)
 	}
-	return &cfg, migrated || schemaMigrated, created, nil
+	if byteWindowMigrated && !unstamped {
+		cfg.LoadNotices = append(cfg.LoadNotices, ByteWindowMigrationNotice)
+	}
+	return &cfg, migrated || schemaMigrated || byteWindowMigrated, created, nil
 }
 
 func (c Config) Save(path string) error {
@@ -373,9 +379,6 @@ func (c Config) Validate() error {
 	if c.Tools.ReadFile.MaxLimit < 1 {
 		return fmt.Errorf("tools.read_file.max_limit: must be positive")
 	}
-	if c.Tools.ReadFile.MaxLineChars < 1 {
-		return fmt.Errorf("tools.read_file.max_line_chars: must be positive")
-	}
 	if c.Tools.ListDir.MaxEntries < 1 {
 		return fmt.Errorf("tools.list_dir.max_entries: must be positive")
 	}
@@ -391,8 +394,8 @@ func (c Config) Validate() error {
 	if c.Tools.Fetch.MaxRedirects < 0 || c.Tools.Fetch.MaxRedirects > 20 {
 		return fmt.Errorf("tools.fetch.max_redirects: must be between 0 and 20")
 	}
-	if c.Tools.Fetch.DefaultLimit < 1 || c.Tools.Fetch.MaxLimit < 1 || c.Tools.Fetch.DefaultLimit > c.Tools.Fetch.MaxLimit || c.Tools.Fetch.MaxLineChars < 1 {
-		return fmt.Errorf("tools.fetch: line limits must be positive and default_limit no greater than max_limit")
+	if c.Tools.Fetch.DefaultLimit < 1 || c.Tools.Fetch.MaxLimit < 1 || c.Tools.Fetch.DefaultLimit > c.Tools.Fetch.MaxLimit {
+		return fmt.Errorf("tools.fetch: byte limits must be positive and default_limit no greater than max_limit")
 	}
 	for _, host := range append(append([]string{}, c.Tools.Fetch.AllowDomains...), c.Tools.Fetch.AllowInternalHosts...) {
 		if !validFetchHost(host) {

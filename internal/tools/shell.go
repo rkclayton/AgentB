@@ -55,7 +55,7 @@ func NewShell(cfg config.Shell) *Shell {
 }
 func (*Shell) Name() string { return "shell" }
 func (*Shell) Description() string {
-	return "Run command with optional timeout from the workspace root; execution is unconfined. Prefer structured tools when one applies; shell is the fallback."
+	return "Run an unconfined command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation."
 }
 func (s *Shell) Schema() map[string]any {
 	cfg := s.config()
@@ -156,14 +156,20 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 			return CallDetail{Err: result.err}
 		}
 		body := cutOutput(output.String(), cfg.MaxOutputLinesHead, cfg.MaxOutputLinesTail)
+		if result.code != 0 {
+			content := fmt.Sprintf("exit=%d", result.code)
+			if body != "" {
+				content += "\n" + body
+			}
+			if usedService && permissionDeniedOutput(body) {
+				return CallDetail{Content: content, OperatorOverrideReason: "service account was denied permission"}
+			}
+			return CallDetail{Err: fmt.Errorf("command failed\n%s", content)}
+		}
 		if body == "" {
-			return CallDetail{Content: fmt.Sprintf("exit=%d", result.code)}
+			return CallDetail{Content: "exit=0"}
 		}
-		detail := CallDetail{Content: fmt.Sprintf("exit=%d\n%s", result.code, body)}
-		if usedService && permissionDeniedOutput(body) {
-			detail.OperatorOverrideReason = "service account was denied permission"
-		}
-		return detail
+		return CallDetail{Content: "exit=0\n" + body}
 	}
 }
 
