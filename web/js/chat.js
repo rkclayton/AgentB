@@ -1,8 +1,10 @@
 import { api, store, subscribe } from "./bus.js";
+import { renderOperatorStatus } from "./operator-status.js";
 
 const binding = document.getElementById("chat-binding");
 const status = document.getElementById("chat-status");
 const stop = document.getElementById("chat-stop");
+const operatorStatus = document.getElementById("chat-operator-status");
 const budget = document.getElementById("chat-budget");
 const log = document.getElementById("chat-log");
 const input = document.getElementById("chat-task");
@@ -69,14 +71,12 @@ function render() {
 }
 
 function renderIdentityAlarm() {
-  const operatorContext = store.shell_identity?.operator_context;
   const unavailable = store.shell_identity?.operator_approval_required || store.shell_identity?.fallback;
-  identityAlarm.hidden = !operatorContext && !unavailable;
-  identityAlarm.textContent = operatorContext
-    ? "OPERATOR CONTEXT — tools are running with your Windows permissions"
-    : unavailable
-      ? `SERVICE IDENTITY UNAVAILABLE — tools require explicit operator approval: ${store.shell_identity.reason}`
-      : "";
+  renderOperatorStatus(operatorStatus, store.shell_identity);
+  identityAlarm.hidden = !unavailable;
+  identityAlarm.textContent = unavailable
+    ? `SERVICE IDENTITY UNAVAILABLE — tools require explicit operator approval: ${store.shell_identity.reason}`
+    : "";
 }
 
 function renderBinding(session) {
