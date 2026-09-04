@@ -8,11 +8,12 @@ import (
 var ErrUnsupported = errors.New("Agent_b host hardening is supported only on Windows")
 
 type Request struct {
-	AccountName        string
-	HarnessDirectory   string
-	WorkspaceDirectory string
-	ModelAddress       string
-	ModelPort          int
+	AccountName          string
+	ApplicationDirectory string
+	DataDirectory        string
+	WorkspaceDirectory   string
+	ModelAddress         string
+	ModelPort            int
 }
 
 type ComponentStatus struct {

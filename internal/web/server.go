@@ -31,6 +31,7 @@ type Server struct {
 	mu               sync.RWMutex
 	cfg              *config.Config
 	configPath       string
+	roots            RuntimeRoots
 	bus              *events.Bus
 	registry         *session.Registry
 	webDir           string
@@ -58,15 +59,21 @@ type Server struct {
 	operatorAfter    func(time.Duration, func()) operatorTimer
 }
 
+type RuntimeRoots struct {
+	Application string
+	Data        string
+	Workspace   string
+}
+
 type operatorTimer interface {
 	Stop() bool
 }
 
-func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
+func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *events.Bus) *Server {
 	cfg.Shell.OperatorContext = false
 	cfg.Shell.OperatorContextExpiresAt = ""
 	return &Server{
-		cfg: cfg, configPath: path, webDir: webDir, bus: bus, mutationToken: newMutationToken(),
+		cfg: cfg, configPath: path, webDir: webDir, roots: roots, bus: bus, mutationToken: newMutationToken(),
 		operatorRequest: requireOperatorHTTPClient,
 		operatorNow:     time.Now,
 		operatorAfter: func(duration time.Duration, fn func()) operatorTimer {
@@ -178,17 +185,10 @@ func (s *Server) hardeningRequest(serverID string) (hardening.Request, error) {
 	if port < 1 || port > 65535 {
 		return hardening.Request{}, fmt.Errorf("model profile port must be between 1 and 65535")
 	}
-	configPath, err := filepath.Abs(s.configPath)
-	if err != nil {
-		return hardening.Request{}, fmt.Errorf("resolve config path: %w", err)
-	}
-	workspace := cfg.Workspace
-	if !filepath.IsAbs(workspace) {
-		workspace = filepath.Join(filepath.Dir(configPath), workspace)
-	}
 	return hardening.Request{
-		AccountName: cfg.Shell.ServiceAccount.Account, HarnessDirectory: filepath.Dir(configPath),
-		WorkspaceDirectory: workspace, ModelAddress: host, ModelPort: port,
+		AccountName: cfg.Shell.ServiceAccount.Account, ApplicationDirectory: s.roots.Application,
+		DataDirectory: s.roots.Data, WorkspaceDirectory: s.roots.Workspace,
+		ModelAddress: host, ModelPort: port,
 	}, nil
 }
 
@@ -267,7 +267,7 @@ func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any 
 	return map[string]any{
 		"sessions": sessions, "servers": masked.Servers, "config": masked, "replay": replay,
 		"mutation_token": s.mutationToken, "shell_credential": credentialStatus, "shell_identity": identityStatus,
-		"serving_facts": servingFacts("SERVING.md"),
+		"serving_facts": servingFacts(filepath.Join(s.roots.Application, "SERVING.md")),
 		"flow":          map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}},
 		"tools": []map[string]string{
 			{"name": "read_file", "description": "Read numbered local UTF-8 text by byte offset and limit. When more is true, pass returned next_offset as offset to advance. Unlike fetch_url, it reads the filesystem."},
@@ -720,12 +720,19 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, err.Error(), configField(err, next))
 			return
 		}
+		workspaceRoot, err := filepath.Abs(next.Workspace)
+		if err != nil {
+			s.mu.Unlock()
+			writeError(w, 400, err.Error(), "workspace")
+			return
+		}
 		if err := next.Save(s.configPath); err != nil {
 			s.mu.Unlock()
 			writeError(w, 500, err.Error(), "config")
 			return
 		}
 		s.cfg = &next
+		s.roots.Workspace = filepath.Clean(workspaceRoot)
 		masked := next.Masked()
 		s.mu.Unlock()
 		if s.runner != nil {

@@ -5,7 +5,9 @@ param(
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
     [string]$AccountName = 'agentb-svc',
     [Parameter(Mandatory = $true)]
-    [string]$HarnessDirectory,
+    [string]$ApplicationDirectory,
+    [Parameter(Mandatory = $true)]
+    [string]$DataDirectory,
     [Parameter(Mandatory = $true)]
     [string]$WorkspaceDirectory,
     [Parameter(Mandatory = $true)]
@@ -56,7 +58,7 @@ if ($requiresElevation -and -not (Test-IsAdministrator)) {
 
 $aclScript = Join-Path $PSScriptRoot 'apply-acls.ps1'
 $firewallScript = Join-Path $PSScriptRoot 'apply-firewall-rule.ps1'
-$aclArguments = @('-AccountName', $AccountName, '-HarnessDirectory', $HarnessDirectory, '-WorkspaceDirectory', $WorkspaceDirectory, '-NoPrompt')
+$aclArguments = @('-AccountName', $AccountName, '-ApplicationDirectory', $ApplicationDirectory, '-DataDirectory', $DataDirectory, '-WorkspaceDirectory', $WorkspaceDirectory, '-NoPrompt')
 $firewallArguments = @('-AccountName', $AccountName, '-ModelAddress', $ModelAddress, '-ModelPort', $ModelPort.ToString(), '-NoPrompt')
 
 if ($WhatIfPreference) {
@@ -71,7 +73,8 @@ if ($WhatIfPreference) {
 }
 
 Write-Host "Agent_b hardening orchestration: $Mode"
-Write-Host "Application: $HarnessDirectory"
+Write-Host "Application: $ApplicationDirectory"
+Write-Host "Operator data: $DataDirectory"
 Write-Host "Workspace: $WorkspaceDirectory"
 Write-Host "Model endpoint: $ModelAddress`:$ModelPort"
 
@@ -84,7 +87,7 @@ if ($Mode -eq 'Remove') {
 }
 
 if ($Mode -eq 'Apply' -and -not $WhatIfPreference) {
-    Invoke-HardeningScript -Path $aclScript -Arguments @('-AccountName', $AccountName, '-HarnessDirectory', $HarnessDirectory, '-WorkspaceDirectory', $WorkspaceDirectory, '-Verify')
+    Invoke-HardeningScript -Path $aclScript -Arguments @('-AccountName', $AccountName, '-ApplicationDirectory', $ApplicationDirectory, '-DataDirectory', $DataDirectory, '-WorkspaceDirectory', $WorkspaceDirectory, '-Verify')
     Invoke-HardeningScript -Path $firewallScript -Arguments @('-AccountName', $AccountName, '-ModelAddress', $ModelAddress, '-ModelPort', $ModelPort.ToString(), '-Verify')
 }
 

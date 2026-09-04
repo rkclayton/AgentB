@@ -24,7 +24,7 @@ func TestConfigPOSTRetainsSchemaStamp(t *testing.T) {
 	if err := cfg.Save(path); err != nil {
 		t.Fatal(err)
 	}
-	server := New(&cfg, path, root, events.NewBus())
+	server := New(&cfg, path, root, RuntimeRoots{Application: root, Data: root, Workspace: cfg.Workspace}, events.NewBus())
 	request := httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(`{"approval":{"mode":"mutating"}}`))
 	authorizeMutation(request, server)
 	request.Host = "example.com"
@@ -53,7 +53,7 @@ func TestConfigPOSTRetainsSchemaStamp(t *testing.T) {
 func TestMutationGuardRequiresLaunchTokenAndSameOrigin(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root)
-	server := New(&cfg, filepath.Join(root, "harness.json"), root, events.NewBus())
+	server := New(&cfg, filepath.Join(root, "harness.json"), root, RuntimeRoots{Application: root, Data: root, Workspace: cfg.Workspace}, events.NewBus())
 
 	request := httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(`{"approval":{"mode":"all"}}`))
 	response := httptest.NewRecorder()
@@ -85,7 +85,7 @@ func TestMutationGuardRequiresLaunchTokenAndSameOrigin(t *testing.T) {
 func TestSecurityHeaders(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root)
-	server := New(&cfg, filepath.Join(root, "harness.json"), root, events.NewBus())
+	server := New(&cfg, filepath.Join(root, "harness.json"), root, RuntimeRoots{Application: root, Data: root, Workspace: cfg.Workspace}, events.NewBus())
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
@@ -99,7 +99,7 @@ func TestSecurityHeaders(t *testing.T) {
 func TestSnapshotToolInventoryUsesPublicNames(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root)
-	server := New(&cfg, filepath.Join(root, "harness.json"), root, events.NewBus())
+	server := New(&cfg, filepath.Join(root, "harness.json"), root, RuntimeRoots{Application: root, Data: root, Workspace: cfg.Workspace}, events.NewBus())
 	raw := server.snapshotWithSessions(map[string]any{}, false)["tools"].([]map[string]string)
 	names := make([]string, 0, len(raw))
 	for _, item := range raw {

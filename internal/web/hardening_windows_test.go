@@ -36,6 +36,7 @@ func (m *fakeHardeningManager) Run(_ context.Context, action string, request har
 func TestHardeningEndpointAppliesBeforeTestingWorkspaceIdentity(t *testing.T) {
 	account := &fakeAccountManager{status: serviceaccount.Status{Supported: true, Account: "agentb-svc", Exists: true, Enabled: true}}
 	server, store, _ := serviceAccountTestServer(t, account)
+	server.roots = RuntimeRoots{Application: `C:\Program Files\Agent_b`, Data: `C:\Users\operator\AppData\Local\Agent_b`, Workspace: `C:\ProgramData\Agent_b\workspace`}
 	server.cfg.Servers[0].BaseURL = "http://198.51.100.10:8080/v1"
 	server.cfg.Shell.ServiceAccount.Enabled = true
 	server.registry = &session.Registry{}
@@ -61,7 +62,8 @@ func TestHardeningEndpointAppliesBeforeTestingWorkspaceIdentity(t *testing.T) {
 	if response.Code != http.StatusOK || manager.runCalls != 1 || manager.runAction != "apply" || testCalls != 1 {
 		t.Fatalf("status=%d calls=%d action=%q tests=%d body=%s", response.Code, manager.runCalls, manager.runAction, testCalls, response.Body)
 	}
-	if manager.runRequest.ModelAddress != "198.51.100.10" || manager.runRequest.ModelPort != 8080 || manager.runRequest.AccountName != "agentb-svc" {
+	if manager.runRequest.ModelAddress != "198.51.100.10" || manager.runRequest.ModelPort != 8080 || manager.runRequest.AccountName != "agentb-svc" ||
+		manager.runRequest.ApplicationDirectory != server.roots.Application || manager.runRequest.DataDirectory != server.roots.Data || manager.runRequest.WorkspaceDirectory != server.roots.Workspace {
 		t.Fatalf("unexpected hardening request: %+v", manager.runRequest)
 	}
 }

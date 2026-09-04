@@ -72,6 +72,30 @@ func TestLoadCreatesConfigFromExample(t *testing.T) {
 	}
 }
 
+func TestLoadWithTemplateSeparatesApplicationAndDataRoots(t *testing.T) {
+	applicationRoot := t.TempDir()
+	dataRoot := filepath.Join(t.TempDir(), "nested", "data")
+	templatePath := filepath.Join(applicationRoot, "harness.example.json")
+	configPath := filepath.Join(dataRoot, "harness.json")
+	example := Defaults(t.TempDir())
+	if err := example.Save(templatePath); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, created, err := LoadWithTemplate(configPath, templatePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !created || loaded.Listen != example.Listen {
+		t.Fatalf("created=%v loaded=%+v", created, loaded)
+	}
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("live config was not created in data root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(applicationRoot, "harness.json")); !os.IsNotExist(err) {
+		t.Fatalf("live config was written into application root: %v", err)
+	}
+}
+
 func TestApprovalModeDefaultsWhenAbsentOrEmpty(t *testing.T) {
 	for _, test := range []struct {
 		name   string

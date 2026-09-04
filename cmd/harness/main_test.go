@@ -53,3 +53,56 @@ func TestStartupElevationGuard(t *testing.T) {
 		t.Fatalf("elevated token error = %v", err)
 	}
 }
+
+func TestResolveStartupPathsPrecedence(t *testing.T) {
+	cwd := t.TempDir()
+	t.Chdir(cwd)
+	localBase := t.TempDir()
+	t.Setenv("LOCALAPPDATA", localBase)
+	installedConfig := filepath.Join(localBase, "Agent_b", "harness.json")
+	if err := os.MkdirAll(filepath.Dir(installedConfig), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(installedConfig, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	environmentConfig := filepath.Join(t.TempDir(), "environment.json")
+	explicitConfig := filepath.Join(t.TempDir(), "explicit.json")
+	t.Setenv("AGENTB_CONFIG", environmentConfig)
+
+	paths, err := resolveStartupPaths(explicitConfig, filepath.Join(cwd, "application"), filepath.Join(cwd, "data"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.Config != explicitConfig || paths.Data != filepath.Join(cwd, "data") || paths.Application != filepath.Join(cwd, "application") {
+		t.Fatalf("explicit paths = %+v", paths)
+	}
+
+	paths, err = resolveStartupPaths("", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.Config != environmentConfig || paths.Data != filepath.Join(localBase, "Agent_b") {
+		t.Fatalf("environment paths = %+v", paths)
+	}
+
+	t.Setenv("AGENTB_CONFIG", "")
+	paths, err = resolveStartupPaths("", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.Config != installedConfig || paths.Data != filepath.Join(localBase, "Agent_b") {
+		t.Fatalf("installed paths = %+v", paths)
+	}
+
+	if err := os.Remove(installedConfig); err != nil {
+		t.Fatal(err)
+	}
+	paths, err = resolveStartupPaths("", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if paths.Config != filepath.Join(cwd, "harness.json") || paths.Data != cwd || paths.Application != cwd {
+		t.Fatalf("development paths = %+v", paths)
+	}
+}

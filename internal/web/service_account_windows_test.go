@@ -52,11 +52,11 @@ func serviceAccountTestServer(t *testing.T, manager serviceaccount.Manager) (*Se
 	if err := cfg.Save(configPath); err != nil {
 		t.Fatal(err)
 	}
-	store := credential.New(configPath)
+	store := credential.New(root)
 	shell := tools.NewShell(cfg.Shell)
 	shell.Configure(cfg)
 	shell.SetCredentialStore(store)
-	server := New(&cfg, configPath, root, events.NewBus())
+	server := New(&cfg, configPath, root, RuntimeRoots{Application: root, Data: root, Workspace: cfg.Workspace}, events.NewBus())
 	server.SetShellSecurity(store, shell)
 	server.SetServiceAccountManager(manager)
 	server.shellTest = func(context.Context) (string, error) {

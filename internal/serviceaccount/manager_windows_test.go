@@ -36,7 +36,7 @@ func TestStatusUsesReadOnlyScriptInspection(t *testing.T) {
 
 func TestPowerShellReadsGoDPAPICredentialWithoutExposingIt(t *testing.T) {
 	root := t.TempDir()
-	store := credential.New(filepath.Join(root, "harness.json"))
+	store := credential.New(root)
 	passwordBytes := make([]byte, 24)
 	if _, err := rand.Read(passwordBytes); err != nil {
 		t.Fatal(err)

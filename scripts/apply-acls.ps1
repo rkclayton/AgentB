@@ -2,9 +2,12 @@
 param(
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
     [string]$AccountName = 'agentb-svc',
-    [string]$HarnessDirectory,
+    [Parameter(Mandatory = $true)]
+    [string]$ApplicationDirectory,
+    [Parameter(Mandatory = $true)]
+    [string]$DataDirectory,
+    [Parameter(Mandatory = $true)]
     [string]$WorkspaceDirectory,
-    [string]$MemoryDirectory,
     [switch]$Verify,
     [switch]$Remove,
 	[switch]$Inspect,
@@ -166,26 +169,35 @@ if (($Verify.IsPresent -and $Remove.IsPresent) -or ($Inspect.IsPresent -and ($Ve
     exit 2
 }
 
-$repositoryRoot = Split-Path -Parent $PSScriptRoot
-if ([string]::IsNullOrWhiteSpace($HarnessDirectory)) { $HarnessDirectory = $repositoryRoot }
-if ([string]::IsNullOrWhiteSpace($WorkspaceDirectory)) { $WorkspaceDirectory = Join-Path $HarnessDirectory 'workspace' }
-if ([string]::IsNullOrWhiteSpace($MemoryDirectory)) { $MemoryDirectory = Join-Path $HarnessDirectory 'memory' }
-$root = [IO.Path]::GetFullPath($HarnessDirectory).TrimEnd('\')
+$application = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\')
+$data = [IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
 $workspace = [IO.Path]::GetFullPath($WorkspaceDirectory).TrimEnd('\')
 
-if (-not (Test-Path -LiteralPath $root -PathType Container)) {
-    [Console]::Error.WriteLine("Agent_b application directory does not exist: $root")
-    exit 1
-}
-
-$rootPrefix = $root + '\'
-$workspaceInsideRoot = $workspace.StartsWith($rootPrefix, [StringComparison]::OrdinalIgnoreCase)
-if ($workspaceInsideRoot) {
-    $relativeWorkspace = $workspace.Substring($rootPrefix.Length)
-    if ([string]::IsNullOrWhiteSpace($relativeWorkspace) -or $relativeWorkspace.Contains('\')) {
-        [Console]::Error.WriteLine('When the workspace is inside the Agent_b application directory it must be one direct child directory, so the rest of the application tree can be denied recursively.')
+foreach ($required in @(
+    @{ Name = 'application'; Path = $application },
+    @{ Name = 'operator data'; Path = $data }
+)) {
+    if (-not (Test-Path -LiteralPath $required.Path -PathType Container)) {
+        [Console]::Error.WriteLine("Agent_b $($required.Name) directory does not exist: $($required.Path)")
         exit 1
     }
+}
+
+function Test-PathInside {
+    param([string]$Child, [string]$Parent)
+    return $Child.StartsWith($Parent.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
+}
+if ($application.Equals($data, [StringComparison]::OrdinalIgnoreCase) -or
+    $application.Equals($workspace, [StringComparison]::OrdinalIgnoreCase) -or
+    $data.Equals($workspace, [StringComparison]::OrdinalIgnoreCase) -or
+    (Test-PathInside -Child $application -Parent $data) -or
+    (Test-PathInside -Child $data -Parent $application) -or
+    (Test-PathInside -Child $workspace -Parent $application) -or
+    (Test-PathInside -Child $workspace -Parent $data) -or
+    (Test-PathInside -Child $application -Parent $workspace) -or
+    (Test-PathInside -Child $data -Parent $workspace)) {
+    [Console]::Error.WriteLine('Application, operator-data, and workspace directories must be three disjoint trees.')
+    exit 1
 }
 
 $denyRights = [Security.AccessControl.FileSystemRights]::WriteData `
@@ -199,6 +211,7 @@ $denyRights = [Security.AccessControl.FileSystemRights]::WriteData `
     -bor [Security.AccessControl.FileSystemRights]::ChangePermissions `
     -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
 $allowRights = [Security.AccessControl.FileSystemRights]::Modify
+$denyDataRights = [Security.AccessControl.FileSystemRights]::FullControl
 $traverseRights = [Security.AccessControl.FileSystemRights]::ReadAndExecute
 $parentTraverseRights = [Security.AccessControl.FileSystemRights]::Traverse
 $none = [Security.AccessControl.InheritanceFlags]::None
@@ -207,21 +220,28 @@ $deny = [Security.AccessControl.AccessControlType]::Deny
 $allow = [Security.AccessControl.AccessControlType]::Allow
 
 $targets = @()
-$parent = [IO.DirectoryInfo]$root
-while ($parent.Parent -and $parent.Parent.Parent) {
-    $parent = $parent.Parent
-    $targets += [pscustomobject]@{ Path = $parent.FullName.TrimEnd('\'); Rights = $parentTraverseRights; Inheritance = $none; Type = $allow; Intent = 'grant parent-directory traverse'; NativeTraverse = $true }
+$traversePaths = @{}
+$sharedAnchors = @(
+    [IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\'),
+    [IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\')
+)
+foreach ($reachable in @($application, $workspace)) {
+    $parent = [IO.DirectoryInfo]$reachable
+    while ($parent.Parent -and $parent.Parent.Parent) {
+        $parent = $parent.Parent
+        $parentPath = $parent.FullName.TrimEnd('\')
+        if ($sharedAnchors -contains $parentPath) { continue }
+        if (-not $traversePaths.ContainsKey($parentPath)) {
+            $traversePaths[$parentPath] = $true
+            $targets += [pscustomobject]@{ Path = $parentPath; Rights = $parentTraverseRights; Inheritance = $none; Type = $allow; Intent = 'grant parent-directory traverse'; NativeTraverse = $true }
+        }
+    }
 }
 $targets += @(
-    [pscustomobject]@{ Path = $root; Rights = $denyRights; Inheritance = $none; Type = $deny; Intent = 'deny control-tree entry mutation' },
-    [pscustomobject]@{ Path = $root; Rights = $traverseRights; Inheritance = $none; Type = $allow; Intent = 'grant application-root read and traverse' }
+    [pscustomobject]@{ Path = $application; Rights = $denyRights; Inheritance = $recursive; Type = $deny; Intent = 'deny application-tree mutation' },
+    [pscustomobject]@{ Path = $application; Rights = $traverseRights; Inheritance = $recursive; Type = $allow; Intent = 'grant application-tree read and execute' },
+    [pscustomobject]@{ Path = $data; Rights = $denyDataRights; Inheritance = $recursive; Type = $deny; Intent = 'deny service identity access to operator data' }
 )
-foreach ($item in Get-ChildItem -LiteralPath $root -Force | Sort-Object FullName) {
-    if ($workspaceInsideRoot -and $item.FullName.TrimEnd('\').Equals($workspace, [StringComparison]::OrdinalIgnoreCase)) { continue }
-    $inheritance = if ($item.PSIsContainer) { $recursive } else { $none }
-    $kind = if ($item.PSIsContainer) { 'directory tree' } else { 'control file' }
-    $targets += [pscustomobject]@{ Path = $item.FullName; Rights = $denyRights; Inheritance = $inheritance; Type = $deny; Intent = "deny writes to $kind" }
-}
 
 if (-not (Test-Path -LiteralPath $workspace -PathType Container) -and -not $WhatIfPreference) {
     if ($Verify -or $Inspect -or $Remove) {
@@ -233,12 +253,12 @@ if (-not (Test-Path -LiteralPath $workspace -PathType Container) -and -not $What
 }
 $targets += [pscustomobject]@{ Path = $workspace; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant workspace Modify' }
 
-Write-Host 'Agent_b complete control-tree ACL policy'
+Write-Host 'Agent_b three-root ACL policy'
 Write-Host "Identity: $env:COMPUTERNAME\$AccountName"
-Write-Host "Agent_b application directory: $root"
-Write-Host "Only shell-writable tree: $workspace"
-Write-Host 'Parent directories grant traverse-only and the application root grants read/traverse so the service identity can reach the workspace. Every other existing top-level item receives an explicit write/delete/ownership deny.'
-Write-Host 'Reapply and verify after an application update creates or replaces files.'
+Write-Host "Application: $application"
+Write-Host "Operator data: $data"
+Write-Host "Service workspace: $workspace"
+Write-Host 'The service identity can read/execute but not mutate the application tree, cannot access operator data, and can modify only the workspace.'
 
 if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $Verify -and -not $Inspect) {
     [Console]::Error.WriteLine('Administrator elevation is required to apply or remove ACLs.')
@@ -278,7 +298,7 @@ if ($Verify -or $Inspect) {
         if ($Verify) { Write-Host "$(if ($present) { 'PASS' } else { 'DRIFT' }): $($target.Intent) :: $($target.Path)" }
     }
     if ($Inspect) {
-        $status = [ordered]@{ supported = $true; account_exists = $true; applied = ($drift -eq 0); drift = $drift; summary = $(if ($drift -eq 0) { 'complete control-tree ACL policy verified' } else { "$drift ACL drift item(s)" }) }
+        $status = [ordered]@{ supported = $true; account_exists = $true; applied = ($drift -eq 0); drift = $drift; summary = $(if ($drift -eq 0) { 'three-root ACL policy verified' } else { "$drift ACL drift item(s)" }) }
         Write-Output ($statusMarker + ($status | ConvertTo-Json -Compress))
         exit 0
     }

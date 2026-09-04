@@ -22,12 +22,11 @@ type Status struct {
 
 type Store struct{ path string }
 
-func New(configPath string) *Store {
-	dir := filepath.Dir(configPath)
-	if dir == "" {
-		dir = "."
+func New(dataRoot string) *Store {
+	if dataRoot == "" {
+		dataRoot = "."
 	}
-	return &Store{path: filepath.Join(dir, FileName)}
+	return &Store{path: filepath.Join(dataRoot, FileName)}
 }
 
 func (s *Store) Path() string { return s.path }

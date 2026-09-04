@@ -15,7 +15,8 @@ import (
 func TestOperatorControlIsServedInBothHeaders(t *testing.T) {
 	webDir := filepath.Join("..", "..", "web")
 	cfg := config.Defaults(t.TempDir())
-	server := New(&cfg, filepath.Join(t.TempDir(), "harness.json"), webDir, events.NewBus())
+	root := t.TempDir()
+	server := New(&cfg, filepath.Join(root, "harness.json"), webDir, RuntimeRoots{Application: webDir, Data: root, Workspace: cfg.Workspace}, events.NewBus())
 
 	for _, item := range []struct {
 		path, stopID, operatorID string
@@ -49,7 +50,8 @@ func TestOperatorControlIsServedInBothHeaders(t *testing.T) {
 func TestOperatorHeaderAssetsAreServedAtDeclaredDimensions(t *testing.T) {
 	webDir := filepath.Join("..", "..", "web")
 	cfg := config.Defaults(t.TempDir())
-	server := New(&cfg, filepath.Join(t.TempDir(), "harness.json"), webDir, events.NewBus())
+	root := t.TempDir()
+	server := New(&cfg, filepath.Join(root, "harness.json"), webDir, RuntimeRoots{Application: webDir, Data: root, Workspace: cfg.Workspace}, events.NewBus())
 
 	for _, item := range []struct {
 		path string

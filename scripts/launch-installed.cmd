@@ -1,6 +1,5 @@
 @echo off
 setlocal EnableExtensions
-cd /d "%~dp0"
 title Agent_b
 set "AGENT_B_AUTO_CLOSE=0"
 for %%A in (%*) do (
@@ -12,7 +11,7 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\la
 set "AGENT_B_EXIT=%ERRORLEVEL%"
 if not "%AGENT_B_EXIT%"=="0" (
   echo.
-  echo Agent_b could not be opened. Review the error above or logs\launcher-errors.log.
+  echo Agent_b could not be opened. Review the error above or %LOCALAPPDATA%\Agent_b\logs\launcher-errors.log.
   if "%AGENT_B_AUTO_CLOSE%"=="0" (
     echo This window will close automatically in 10 seconds.
     timeout /t 10 /nobreak >nul 2>&1

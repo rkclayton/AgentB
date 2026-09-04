@@ -28,7 +28,7 @@ func TestSessionServerReassignment(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = writers.Close() })
 
-	server := New(&cfg, filepath.Join(root, "harness.json"), root, bus)
+	server := New(&cfg, filepath.Join(root, "harness.json"), root, RuntimeRoots{Application: root, Data: root, Workspace: cfg.Workspace}, bus)
 	registry := session.NewRegistry(bus, writers, server.Profile, cfg.Run.MaxTurns, server.ConfigSnapshot)
 	server.SetRegistry(registry)
 	item, err := registry.Create("main", "first", root)

@@ -21,9 +21,10 @@ import (
 // putting a password in an argument, environment variable, fixture, or log.
 func TestLiveServiceFileIdentity(t *testing.T) {
 	configPath := os.Getenv("AGENTB_LIVE_CONFIG")
+	dataRoot := os.Getenv("AGENTB_LIVE_DATA_ROOT")
 	targetPath := os.Getenv("AGENTB_LIVE_FILE_PATH")
-	if configPath == "" || targetPath == "" {
-		t.Skip("set AGENTB_LIVE_CONFIG and AGENTB_LIVE_FILE_PATH for the operator test")
+	if configPath == "" || dataRoot == "" || targetPath == "" {
+		t.Skip("set AGENTB_LIVE_CONFIG, AGENTB_LIVE_DATA_ROOT, and AGENTB_LIVE_FILE_PATH for the operator test")
 	}
 	cfg, _, _, err := config.Load(configPath)
 	if err != nil {
@@ -32,9 +33,9 @@ func TestLiveServiceFileIdentity(t *testing.T) {
 	if !cfg.Shell.ServiceAccount.Enabled {
 		t.Fatal("service identity is disabled")
 	}
-	identity := NewFileIdentity(credential.New(configPath))
+	identity := NewFileIdentity(credential.New(dataRoot))
 	identity.Configure(*cfg)
-	password, err := credential.New(configPath).Read()
+	password, err := credential.New(dataRoot).Read()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +63,7 @@ func TestLiveServiceFileIdentity(t *testing.T) {
 		t.Fatalf("service-account directory read required operator override: %s", detail.OperatorOverrideReason)
 	}
 
-	deniedPath := filepath.Join(filepath.Dir(configPath), ".agentb-file-identity-deny-test")
+	deniedPath := filepath.Join(dataRoot, ".agentb-file-identity-deny-test")
 	defer os.Remove(deniedPath)
 	coordinator := NewFileCoordinator(session.NewWorkspaceRegistry(), func(string) string { return "test" }, events.NewBus())
 	writer := identity.Wrap(NewWriteFile(coordinator)).(DetailedTool)

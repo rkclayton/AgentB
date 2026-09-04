@@ -16,6 +16,14 @@ func TestStatusReportsAbsentAccountWithoutMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	application := filepath.Join(t.TempDir(), "application")
+	data := filepath.Join(t.TempDir(), "data")
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	for _, path := range []string{application, data, workspace} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
 	manager := New(
 		filepath.Join(root, "scripts", "apply-acls.ps1"),
 		filepath.Join(root, "scripts", "apply-firewall-rule.ps1"),
@@ -23,7 +31,7 @@ func TestStatusReportsAbsentAccountWithoutMutation(t *testing.T) {
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	status, err := manager.Status(ctx, Request{AccountName: "agentb-test-account-that-does-not-exist", HarnessDirectory: root, WorkspaceDirectory: filepath.Join(root, "workspace"), ModelAddress: "127.0.0.1", ModelPort: 8080})
+	status, err := manager.Status(ctx, Request{AccountName: "agentb-test-account-that-does-not-exist", ApplicationDirectory: application, DataDirectory: data, WorkspaceDirectory: workspace, ModelAddress: "127.0.0.1", ModelPort: 8080})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -103,7 +103,7 @@ func operatorTestServer(t *testing.T) (*Server, *tools.Shell, string) {
 		t.Fatal(err)
 	}
 	bus := events.NewBus()
-	server := New(&cfg, path, root, bus)
+	server := New(&cfg, path, root, RuntimeRoots{Application: root, Data: root, Workspace: cfg.Workspace}, bus)
 	writers, err := events.NewWriters(filepath.Join(root, "logs"))
 	if err != nil {
 		t.Fatal(err)

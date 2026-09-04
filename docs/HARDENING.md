@@ -6,7 +6,7 @@ Because ACLs constrain shell reach rather than behavior, every shell call requir
 
 For a deliberate temporary capability override, the operator control beside Stop runs shell and file tools as the non-elevated Windows account that launched Agent_b and permits OS-authorized paths outside the workspace. It defeats the service-account ACL boundary by design while on. Enabling requires confirmation; selecting the active control turns it off immediately. Its image follows observed server state in both Console and Chat, including failed grants and idle expiry. The mode is off after every start and lapses after 20 minutes without agent tool activity by default. Each ordinary tool execution resets the idle deadline at start and completion; browser activity and one-shot ACL escapes do not. There is no absolute ceiling, but a single call running beyond the idle window is allowed to lapse so a wedge cannot leave the grant open indefinitely. Turn it off sooner to restore the service identity; this mode does not grant Administrator privileges or bypass Windows ACLs.
 
-The normal onboarding path is entirely in Settings → Security. Start Agent_b normally from Explorer so it receives the UAC-filtered token; local Administrators can use this path normally. Agent_b refuses to start from **Run as administrator** or an elevated terminal, before it reads configuration or opens its listener. Windows elevation is reserved for the narrowly scoped account and hardening helpers. Passwords are write-only, encrypted with user-scoped DPAPI, and never placed in process arguments, responses, or logs.
+The installer uses a same-user UAC prompt to write the application under Program Files and refuses over-the-shoulder elevation by another administrator. The installed Agent_b process itself must still start normally from Explorer with a UAC-filtered token. Agent_b refuses to run from **Run as administrator** or an elevated terminal, before it reads configuration or opens its listener. Later Windows elevation is reserved for the narrowly scoped account and hardening helpers. Passwords are write-only, encrypted with user-scoped DPAPI, and never placed in process arguments, responses, or logs.
 
 ## 1. Configure the model first
 
@@ -30,13 +30,14 @@ Stop active Agent_b tasks. In Settings → Security → **Host protections**, co
 
 The operation applies and immediately verifies both controls:
 
-- Parent directories receive traverse-only grants and the application root receives a read/traverse grant so the service account can reach the workspace even when Agent_b is installed beneath a private user profile. Every existing top-level file and directory except that workspace receives an explicit service-account write/delete/ownership deny, recursively for directories. This includes the binary, source, UI, prompts, configuration, scripts, `.git`, logs, memory, and local toolchains.
-- The selected workspace receives an explicit recursive `Modify` grant. If it is inside the Agent_b directory, it must be one direct child so it can be excluded cleanly from the recursive denies.
+- The Program Files application root receives a recursive service-account read/execute grant plus explicit write/delete/ownership denies. The installed binary, web assets, prompts, scripts, documentation, and config template are readable but immutable to the constrained identity.
+- The LocalAppData data root receives a recursive service-account `FullControl` deny. Configuration, the DPAPI credential, logs, and memory remain available only to the operator identity; the service account does not need config access.
+- Parent directories receive only the traverse grants needed to reach the Program Files application and ProgramData workspace. The workspace receives an explicit recursive `Modify` grant. The three trees must be disjoint; no access is granted through the operator's private profile for workspace reachability.
 - One outbound Block rule named `AgentB-Svc-Outbound-Block` is scoped to the service account with `-LocalUser`. Non-overlapping address ranges spare `127.0.0.0/8`, `100.64.0.0/10`, and `::1`. There is no competing Allow rule and no machine-wide `DefaultOutboundAction` change.
 
 Select **Verify** at any time to detect missing or replaced ACL entries and firewall drift. Reapply after updating, rebuilding, or adding files to Agent_b because a newly created or replaced application file may not retain its explicit deny.
 
-The per-user installer preserves settings and existing protected top-level program-directory ACLs during upgrades. After the first installed launch, use **Apply protection** for that installed location even if a source checkout was already hardened; continue to Verify after upgrades because a release that adds a new top-level artifact still needs a new explicit rule.
+The elevated installer preserves existing settings, state, workspace contents, and protected top-level ACLs during upgrades. After the first installed launch, use **Apply protection** for that installed layout even if a source checkout was already hardened; continue to Verify after upgrades because a release that adds a new application artifact still needs the recursive policy verified.
 
 The network rule permits every loopback and Tailscale destination, not only the model server. It prevents ordinary public/LAN egress by this Windows identity; it is not a domain allowlist, protocol inspection, or protection against a kernel-level exploit.
 
@@ -77,18 +78,18 @@ Recover an existing account whose password is unknown:
 .\scripts\setup-service-account.ps1 -ResetPassword
 ```
 
-After storing/testing that credential in Settings, preview, apply, and verify ACLs:
+After storing/testing that credential in Settings, preview, apply, and verify ACLs. Substitute the same three explicit roots for each invocation:
 
 ```powershell
-.\scripts\apply-acls.ps1 -WhatIf
+.\scripts\apply-acls.ps1 -ApplicationDirectory "$env:ProgramFiles\Agent_b" -DataDirectory "$env:LOCALAPPDATA\Agent_b" -WorkspaceDirectory "$env:ProgramData\Agent_b\workspace" -WhatIf
 ```
 
 ```powershell
-.\scripts\apply-acls.ps1
+.\scripts\apply-acls.ps1 -ApplicationDirectory "$env:ProgramFiles\Agent_b" -DataDirectory "$env:LOCALAPPDATA\Agent_b" -WorkspaceDirectory "$env:ProgramData\Agent_b\workspace"
 ```
 
 ```powershell
-.\scripts\apply-acls.ps1 -Verify
+.\scripts\apply-acls.ps1 -ApplicationDirectory "$env:ProgramFiles\Agent_b" -DataDirectory "$env:LOCALAPPDATA\Agent_b" -WorkspaceDirectory "$env:ProgramData\Agent_b\workspace" -Verify
 ```
 
 Preview, apply, and verify the firewall rule, substituting the numeric model address and port:
@@ -116,7 +117,7 @@ Manual rollback uses the scripts before deleting the account:
 ```
 
 ```powershell
-.\scripts\apply-acls.ps1 -Remove
+.\scripts\apply-acls.ps1 -ApplicationDirectory "$env:ProgramFiles\Agent_b" -DataDirectory "$env:LOCALAPPDATA\Agent_b" -WorkspaceDirectory "$env:ProgramData\Agent_b\workspace" -Remove
 ```
 
 ```powershell

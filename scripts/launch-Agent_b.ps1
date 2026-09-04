@@ -1,6 +1,9 @@
 [CmdletBinding()]
 param(
-    [string]$RootDirectory,
+    [Alias('RootDirectory')]
+    [string]$ApplicationDirectory,
+    [string]$DataDirectory,
+    [string]$ConfigPath,
     [ValidateRange(5, 300)]
     [int]$StartupTimeoutSeconds = 30,
     [switch]$NoBrowser,
@@ -10,13 +13,18 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-if ([string]::IsNullOrWhiteSpace($RootDirectory)) {
-    $RootDirectory = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($ApplicationDirectory)) {
+    $ApplicationDirectory = Split-Path -Parent $PSScriptRoot
 }
-$root = [IO.Path]::GetFullPath($RootDirectory).TrimEnd('\')
-$executable = Join-Path $root 'Agent_b.exe'
-$configPath = Join-Path $root 'harness.json'
-$launcherErrorLog = Join-Path $root 'logs\launcher-errors.log'
+$applicationRoot = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\')
+if ([string]::IsNullOrWhiteSpace($DataDirectory)) {
+    $DataDirectory = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Agent_b'
+}
+$dataRoot = [IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) { $ConfigPath = Join-Path $dataRoot 'harness.json' }
+$configPath = [IO.Path]::GetFullPath($ConfigPath)
+$executable = Join-Path $applicationRoot 'Agent_b.exe'
+$launcherErrorLog = Join-Path $dataRoot 'logs\launcher-errors.log'
 
 trap {
     $message = ($_.Exception.Message -replace '[\r\n]+', ' ').Trim()
@@ -129,6 +137,8 @@ $appUrl = [Uri]::new([Uri]$url, 'chat').AbsoluteUri
 if ($Check) {
     Write-Host 'Agent_b launcher check'
     Write-Host "Executable: $executable"
+    Write-Host "Application root: $applicationRoot"
+    Write-Host "Data root: $dataRoot"
     Write-Host "Configuration: $configPath"
     Write-Host "API base: $url"
     Write-Host "Application: $appUrl"
@@ -179,11 +189,11 @@ try {
     } else {
         Write-Host 'Starting Agent_b. Close this window or press Ctrl+C to stop it.'
     }
-    $configArgument = '-config "' + $configPath.Replace('"', '\"') + '"'
+    $configArgument = '-config "' + $configPath.Replace('"', '\"') + '" -app-root "' + $applicationRoot.Replace('"', '\"') + '" -data-root "' + $dataRoot.Replace('"', '\"') + '"'
     $start = @{
         FilePath = $executable
         ArgumentList = $configArgument
-        WorkingDirectory = $root
+        WorkingDirectory = $dataRoot
         PassThru = $true
     }
     if ($Detached) {

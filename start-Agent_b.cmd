@@ -29,7 +29,7 @@ if /i "%~1"=="--build-only" (
   exit /b 0
 )
 
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%AGENTB_ROOT%scripts\launch-Agent_b.ps1" -RootDirectory "%AGENTB_ROOT%" %*
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%AGENTB_ROOT%scripts\launch-Agent_b.ps1" -ApplicationDirectory "%AGENTB_ROOT%" -DataDirectory "%AGENTB_ROOT%" -ConfigPath "%AGENTB_ROOT%harness.json" %*
 set "AGENTB_EXIT=%ERRORLEVEL%"
 if not "%AGENTB_EXIT%"=="0" (
   echo.

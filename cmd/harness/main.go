@@ -32,23 +32,35 @@ func main() {
 	if err := startupElevationError(processIsElevated()); err != nil {
 		log.Fatal(err)
 	}
-	configPath := flag.String("config", "harness.json", "configuration file")
+	configOverride := flag.String("config", "", "configuration file (overrides AGENTB_CONFIG and installed/default locations)")
+	applicationOverride := flag.String("app-root", "", "application root containing web, prompts, scripts, and harness.example.json")
+	dataOverride := flag.String("data-root", "", "operator data root containing configuration, credentials, logs, and memory")
 	replayPaths := flag.String("replay", "", "comma-separated session JSONL files to replay")
 	flag.Parse()
-	cfg, migrated, created, err := config.Load(*configPath)
+	paths, err := resolveStartupPaths(*configOverride, *applicationOverride, *dataOverride)
 	if err != nil {
 		log.Fatal(err)
 	}
+	cfg, migrated, created, err := config.LoadWithTemplate(paths.Config, filepath.Join(paths.Application, "harness.example.json"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	workspaceRoot, err := filepath.Abs(cfg.Workspace)
+	if err != nil {
+		log.Fatal(err)
+	}
+	paths.Workspace = filepath.Clean(workspaceRoot)
+	roots := webserver.RuntimeRoots{Application: paths.Application, Data: paths.Data, Workspace: paths.Workspace}
 	if created {
-		log.Printf("created %s from harness.example.json - set servers[0].base_url and model", filepath.Base(*configPath))
+		log.Printf("created %s from %s - set servers[0].base_url and model", paths.Config, filepath.Join(paths.Application, "harness.example.json"))
 	}
 	if migrated {
-		log.Printf("migrated %s: server → servers[local]", filepath.Base(*configPath))
+		log.Printf("migrated %s: server → servers[local]", filepath.Base(paths.Config))
 	}
 	for _, notice := range cfg.LoadNotices {
 		log.Printf("config migration: %s", notice)
 	}
-	facts := readServingFacts("SERVING.md")
+	facts := readServingFacts(filepath.Join(paths.Application, "SERVING.md"))
 	if !facts.Complete {
 		log.Printf("debug: SERVING.md missing or partial; skipping /tokenize latency hint")
 	} else if facts.TokenizeBlocksOnSlot == "yes" {
@@ -59,25 +71,29 @@ func main() {
 		if loadErr != nil {
 			log.Fatal(loadErr)
 		}
-		web := webserver.New(cfg, *configPath, "web", events.NewBus())
+		web := webserver.New(cfg, paths.Config, filepath.Join(paths.Application, "web"), roots, events.NewBus())
 		web.SetReplay(replay)
 		if err := serve(cfg, web.Handler()); err != nil {
 			log.Fatal(err)
 		}
 		return
 	}
-	writers, err := events.NewWriters(cfg.LogDir)
+	logDir := cfg.LogDir
+	if !filepath.IsAbs(logDir) {
+		logDir = filepath.Join(paths.Data, logDir)
+	}
+	writers, err := events.NewWriters(logDir)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer writers.Close()
 	bus := events.NewBus()
 	bus.SetSink(writers.Write)
-	web := webserver.New(cfg, *configPath, "web", bus)
+	web := webserver.New(cfg, paths.Config, filepath.Join(paths.Application, "web"), roots, bus)
 	for _, notice := range cfg.LoadNotices {
 		bus.Publish(events.New(events.ConfigChanged, "", "", map[string]any{"config": cfg.Masked(), "notice": notice}))
 	}
-	memoryManager := memory.New(filepath.Dir(*configPath), web.ConfigSnapshot, func(ctx context.Context, serverID, text string) (int, error) {
+	memoryManager := memory.New(paths.Data, web.ConfigSnapshot, func(ctx context.Context, serverID, text string) (int, error) {
 		profile, ok := web.Profile(serverID)
 		if !ok || !profile.Capabilities.Tokenize {
 			return 0, fmt.Errorf("tokenizer unavailable")
@@ -87,13 +103,13 @@ func main() {
 	registry := session.NewRegistry(bus, writers, web.Profile, cfg.Run.MaxTurns, web.ConfigSnapshot)
 	registry.SetMemoryLoader(memoryManager.Load)
 	web.SetRegistry(registry)
-	renderer, err := agent.LoadTemplate(filepath.Join("prompts", "system.md"))
+	renderer, err := agent.LoadTemplate(filepath.Join(paths.Application, "prompts", "system.md"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	workspaces := session.NewWorkspaceRegistry()
 	coordinator := tools.NewFileCoordinator(workspaces, registry.Label, bus)
-	credentialStore := credential.New(*configPath)
+	credentialStore := credential.New(paths.Data)
 	fileIdentity := tools.NewFileIdentity(credentialStore)
 	fileIdentity.Configure(*cfg)
 	shellTool := tools.NewShell(cfg.Shell)
@@ -103,11 +119,11 @@ func main() {
 		bus.Publish(events.New(events.ShellIdentity, "", "", status))
 	})
 	web.SetShellSecurity(credentialStore, shellTool)
-	web.SetServiceAccountManager(serviceaccount.New(filepath.Join("scripts", "setup-service-account.ps1")))
+	web.SetServiceAccountManager(serviceaccount.New(filepath.Join(paths.Application, "scripts", "setup-service-account.ps1")))
 	web.SetHardeningManager(hardening.New(
-		filepath.Join("scripts", "apply-acls.ps1"),
-		filepath.Join("scripts", "apply-firewall-rule.ps1"),
-		filepath.Join("scripts", "apply-hardening.ps1"),
+		filepath.Join(paths.Application, "scripts", "apply-acls.ps1"),
+		filepath.Join(paths.Application, "scripts", "apply-firewall-rule.ps1"),
+		filepath.Join(paths.Application, "scripts", "apply-hardening.ps1"),
 	))
 	toolRegistry := tools.New(
 		fileIdentity.Wrap(tools.NewReadFile(cfg.Tools.ReadFile)),
@@ -138,6 +154,71 @@ func main() {
 	if err := serve(cfg, web.Handler()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+type startupPaths struct {
+	Application string
+	Data        string
+	Workspace   string
+	Config      string
+}
+
+func resolveStartupPaths(configOverride, applicationOverride, dataOverride string) (startupPaths, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return startupPaths{}, fmt.Errorf("resolve working directory: %w", err)
+	}
+	application := applicationOverride
+	if application == "" {
+		application = cwd
+	}
+	application, err = filepath.Abs(application)
+	if err != nil {
+		return startupPaths{}, fmt.Errorf("resolve application root: %w", err)
+	}
+
+	localData := ""
+	if base := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); base != "" {
+		localData = filepath.Join(base, "Agent_b")
+	}
+	configPath := strings.TrimSpace(configOverride)
+	data := strings.TrimSpace(dataOverride)
+	if configPath == "" {
+		configPath = strings.TrimSpace(os.Getenv("AGENTB_CONFIG"))
+	}
+	if configPath != "" && data == "" {
+		if localData != "" {
+			data = localData
+		} else {
+			data = cwd
+		}
+	}
+	if configPath == "" && localData != "" {
+		candidate := filepath.Join(localData, "harness.json")
+		if _, statErr := os.Stat(candidate); statErr == nil {
+			configPath = candidate
+			if data == "" {
+				data = localData
+			}
+		} else if !os.IsNotExist(statErr) {
+			return startupPaths{}, fmt.Errorf("inspect installed configuration: %w", statErr)
+		}
+	}
+	if configPath == "" {
+		configPath = filepath.Join(cwd, "harness.json")
+		if data == "" {
+			data = cwd
+		}
+	}
+	configPath, err = filepath.Abs(configPath)
+	if err != nil {
+		return startupPaths{}, fmt.Errorf("resolve configuration path: %w", err)
+	}
+	data, err = filepath.Abs(data)
+	if err != nil {
+		return startupPaths{}, fmt.Errorf("resolve data root: %w", err)
+	}
+	return startupPaths{Application: filepath.Clean(application), Data: filepath.Clean(data), Config: filepath.Clean(configPath)}, nil
 }
 
 func startupServerID(profiles []config.Profile, runnable func(string) (bool, string)) string {

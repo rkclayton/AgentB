@@ -5,6 +5,10 @@ param(
     [string]$ModelAddress = '127.0.0.1',
     [ValidateRange(1, 65535)]
     [int]$ModelPort = 8080,
+    [ValidatePattern('^[A-Za-z0-9._-]+$')]
+    [string]$RuleName = 'AgentB-Svc-Outbound-Block',
+    [ValidatePattern('^[A-Za-z0-9._-]+$')]
+    [string]$LegacyAllowRuleName = 'AgentB-Svc-Model-Allow',
     [switch]$Verify,
     [switch]$Remove,
 	[switch]$Inspect,
@@ -12,8 +16,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$ruleName = 'AgentB-Svc-Outbound-Block'
-$legacyAllowRuleName = 'AgentB-Svc-Model-Allow'
+$ruleName = $RuleName
+$legacyAllowRuleName = $LegacyAllowRuleName
 $statusMarker = 'AGENTB_FIREWALL_STATUS='
 $blockedRanges = @(
     '0.0.0.0-100.63.255.255',

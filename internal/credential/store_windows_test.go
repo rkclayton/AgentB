@@ -7,11 +7,16 @@ import (
 	"crypto/rand"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
 func TestStoreRoundTripAndClear(t *testing.T) {
-	store := New(t.TempDir() + `\harness.json`)
+	dataRoot := t.TempDir()
+	store := New(dataRoot)
+	if store.Path() != filepath.Join(dataRoot, FileName) {
+		t.Fatalf("credential path = %q, want data-root path", store.Path())
+	}
 	if _, err := store.Read(); !errors.Is(err, ErrNotStored) {
 		t.Fatalf("absent Read error = %v, want ErrNotStored", err)
 	}

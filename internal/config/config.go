@@ -199,13 +199,21 @@ func Defaults(workspace string) Config {
 }
 
 func Load(path string) (*Config, bool, bool, error) {
+	return LoadWithTemplate(path, filepath.Join(filepath.Dir(path), "harness.example.json"))
+}
+
+// LoadWithTemplate loads the live configuration from path and, on first run,
+// materializes it from the explicitly supplied application template.
+func LoadWithTemplate(path, examplePath string) (*Config, bool, bool, error) {
 	data, err := os.ReadFile(path)
 	created := false
 	if os.IsNotExist(err) {
-		examplePath := filepath.Join(filepath.Dir(path), "harness.example.json")
 		data, err = os.ReadFile(examplePath)
 		if err != nil {
 			return nil, false, false, fmt.Errorf("%s is missing; read %s: %w", filepath.Base(path), filepath.Base(examplePath), err)
+		}
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil, false, false, fmt.Errorf("create config directory: %w", err)
 		}
 		if err := os.WriteFile(path, data, 0o600); err != nil {
 			return nil, false, false, fmt.Errorf("create %s from %s: %w", filepath.Base(path), filepath.Base(examplePath), err)

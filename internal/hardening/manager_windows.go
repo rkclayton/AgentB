@@ -38,7 +38,8 @@ func New(aclScript, firewallScript, orchestrationScript string) Manager {
 func (m *windowsManager) Status(ctx context.Context, request Request) (Status, error) {
 	acl, err := inspectComponent(ctx, m.powershell, m.aclScript, aclStatusMarker, []string{
 		"-AccountName", request.AccountName,
-		"-HarnessDirectory", request.HarnessDirectory,
+		"-ApplicationDirectory", request.ApplicationDirectory,
+		"-DataDirectory", request.DataDirectory,
 		"-WorkspaceDirectory", request.WorkspaceDirectory,
 		"-Inspect",
 	})
@@ -110,7 +111,8 @@ func (m *windowsManager) Run(ctx context.Context, action string, request Request
 		"-File", script,
 		"-Mode", mode,
 		"-AccountName", request.AccountName,
-		"-HarnessDirectory", request.HarnessDirectory,
+		"-ApplicationDirectory", request.ApplicationDirectory,
+		"-DataDirectory", request.DataDirectory,
 		"-WorkspaceDirectory", request.WorkspaceDirectory,
 		"-ModelAddress", request.ModelAddress,
 		"-ModelPort", fmt.Sprint(request.ModelPort),
