@@ -414,6 +414,9 @@ function shell(active) {
 								: "";
 	const canApply = !hardeningBusy && !applyBlocker;
 	const canInspect = !hardeningBusy && hardeningStatus.loaded && hardeningStatus.supported && serviceAccountStatus.exists;
+	const protectionFeedback = applyBlocker
+		? `Apply unavailable: ${applyBlocker}${hardeningMessage ? ` Last result: ${hardeningMessage}` : ""}`
+		: hardeningMessage;
   return `<div class="settings-subhead">Service identity</div>
     ${row("status", `<span class="account-status"><span class="lamp ${serviceAccountStatus.administrator ? "alarm" : serviceAccountStatus.exists ? "live" : ""}"></span>${html(accountState)}</span>`)}
     ${row("credential", `<span class="account-status">${html(stored)}</span>`)}
@@ -430,12 +433,12 @@ function shell(active) {
 	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
 	${row("model route", `<select id="hardening-server" aria-label="Model route for host protections">${hardeningProfiles()}</select>`)}
 	<div class="settings-actions">
-	  <button type="button" data-action="apply-hardening" title="${attr(applyBlocker)}" aria-busy="${hardeningBusy}" ${canApply ? "" : "disabled"}>${hardeningBusy ? "Working…" : "Apply + verify"}</button>
+	  <button type="button" data-action="apply-hardening" title="${attr(applyBlocker)}" aria-busy="${hardeningBusy}" ${canApply ? "" : "disabled"}>${hardeningBusy ? "Working…" : drafts.size ? "Save first" : "Apply + verify"}</button>
 	  <button type="button" data-action="verify-hardening" ${canInspect ? "" : "disabled"}>Verify</button>
 	  <button type="button" data-action="refresh-hardening">Refresh</button>
 	  <button type="button" class="${armed.has("hardening:remove") ? "confirm" : ""}" data-action="remove-hardening" ${canInspect ? "" : "disabled"}>${armed.has("hardening:remove") ? "Confirm remove" : "Remove"}</button>
 	</div>
-	${feedback(hardeningMessage, hardeningAlarm, applyBlocker || "Apply requests Windows approval, protects the application tree, and leaves the workspace writable.")}
+	${feedback(protectionFeedback, hardeningAlarm || !!applyBlocker, "Apply requests Windows approval, protects the application tree, and leaves the workspace writable.")}
     <details class="settings-advanced">
       <summary>Advanced</summary>
       ${toggle("shell.service_account.enabled", "service identity", service.enabled)}
