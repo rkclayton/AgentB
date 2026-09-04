@@ -25,6 +25,8 @@ go build -o Agent_b ./cmd/harness
 
 The first start copies the legacy-compatible `harness.example.json` filename to the ignored local `harness.json`; existing connection settings continue to work unchanged. Under **Connections**, set `base_url` and `model` (and `api_key` when needed), select **Save**, then select **Test**. Startup never waits on a model probe; a successful explicit test stays labeled `ready`, and the first ready profile becomes the initial session route. Settings → Security can create the local service account, verify the identity split, and apply/verify the application ACL and outbound firewall policies through Windows UAC without running Agent_b itself as Administrator; progress and errors remain visible after refresh. Follow the [Windows host hardening](docs/HARDENING.md) sequence. If the endpoint does not report its context size, enter its documented limit in `n_ctx_override`; Agent_b refuses to guess a context ceiling.
 
+The system prompt includes the current date, OS timezone, and (when Windows provides it) a coarse region code. It does not request precise device location or invent a city; location-specific tasks should name their location when the OS does not provide one.
+
 Without llama.cpp's accounting endpoints, the budget meter uses calibrated estimation instead of exact categories, the cached-token readout is hidden, and the prefill and tok/s readouts stay dark. The agent loop, tools, approvals, sessions, memory, compaction, chat, and replay remain available once the endpoint passes the baseline profile checks. See [Capability degradation](#capability-degradation) for the complete behavior.
 
 ## Path B — local llama.cpp with full instrumentation (~1 hour)
