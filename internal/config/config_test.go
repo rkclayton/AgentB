@@ -67,6 +67,9 @@ func TestServiceAccountSplitDefaultsOffWithLocalAccountDefaults(t *testing.T) {
 	if cfg.Shell.ServiceAccount.Enabled {
 		t.Fatal("service-account split defaulted on")
 	}
+	if cfg.Shell.OperatorContext {
+		t.Fatal("operator context defaulted on")
+	}
 	if cfg.Shell.ServiceAccount.Account != "agentb-svc" || cfg.Shell.ServiceAccount.Domain != "." {
 		t.Fatalf("service-account defaults = %+v", cfg.Shell.ServiceAccount)
 	}

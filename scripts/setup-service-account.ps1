@@ -253,7 +253,10 @@ if ($Inspect) {
     $isAdministrator = $false
     if ($inspected) {
         $administrators = Get-BuiltinGroupName -SidType BuiltinAdministratorsSid
+        $users = Get-BuiltinGroupName -SidType BuiltinUsersSid
         $isAdministrator = [bool](Get-LocalGroupMember -Group $administrators -ErrorAction SilentlyContinue |
+            Where-Object { $_.SID -eq $inspected.SID })
+        $isUser = [bool](Get-LocalGroupMember -Group $users -ErrorAction SilentlyContinue |
             Where-Object { $_.SID -eq $inspected.SID })
     }
     $status = [ordered]@{
@@ -262,6 +265,7 @@ if ($Inspect) {
         exists = [bool]$inspected
         enabled = [bool]($inspected -and $inspected.Enabled)
         administrator = $isAdministrator
+        users_member = $isUser
         harness_elevated = (Test-IsAdministrator)
     }
     Write-Output "AGENTB_ACCOUNT_STATUS=$($status | ConvertTo-Json -Compress)"
@@ -356,11 +360,19 @@ try {
         $administrators = Get-BuiltinGroupName -SidType BuiltinAdministratorsSid
         $adminMembership = Get-LocalGroupMember -Group $administrators -ErrorAction SilentlyContinue | Where-Object { $_.SID -eq $created.SID }
         if ($adminMembership) { Remove-LocalGroupMember -Group $administrators -Member $created -Confirm:$false }
-        $script:changeState = 'local account was created and Administrators membership was checked'
+        $script:changeState = 'local account was created and group policy was checked'
     } else {
         $script:changeState = 'password reset was attempted; inspect the account because the operation failed before post-condition verification'
         Set-LocalUser -Name $AccountName -Password $securePassword
         $script:changeState = 'existing account password was reset'
+    }
+
+    $managed = Get-LocalUser -Name $AccountName
+    $users = Get-BuiltinGroupName -SidType BuiltinUsersSid
+    $usersMembership = Get-LocalGroupMember -Group $users -ErrorAction SilentlyContinue | Where-Object { $_.SID -eq $managed.SID }
+    if (-not $usersMembership) {
+        Add-LocalGroupMember -Group $users -Member $managed
+        $script:changeState += ' and ordinary Users membership was added'
     }
 
     $validation = Test-LocalCredential -Name $AccountName -Password $securePassword
@@ -373,9 +385,8 @@ try {
     }
 
     Write-Host 'VALIDATED: the supplied credential successfully authenticated with LogonUser.'
-    $changed = if ($operation -eq 'create') { 'created the non-administrator local account and set a verified password' } else { 'reset and verified the existing account password' }
-    $untouched = if ($operation -eq 'create') { 'ordinary Users membership was retained' } else { 'account and group memberships' }
-    Write-SetupSummary -Changed @($changed) -NotChanged @('interactive or task-scheduler logon rights', $untouched) -Next @('store the password in Agent_b Settings', 'enable and test the service identity', 'verify whoami before applying ACLs or firewall policy')
+    $changed = if ($operation -eq 'create') { 'created the non-administrator local account, ensured ordinary Users membership, and set a verified password' } else { 'reset and verified the existing account password and ensured ordinary Users membership' }
+    Write-SetupSummary -Changed @($changed) -NotChanged @('interactive or task-scheduler logon rights') -Next @('store the password in Agent_b Settings', 'enable and test the service identity', 'verify whoami before applying ACLs or firewall policy')
 } finally {
     $securePassword.Dispose()
 }

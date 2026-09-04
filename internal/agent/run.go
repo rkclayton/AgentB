@@ -301,7 +301,13 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	}
 	log.Printf("SECURITY: %s operator-identity override approved: session=%s call=%s command=%q path=%q", name, s.ID, callID, command, path)
 	overrideContent, overrideOK := r.tools.CallAsOperator(ctx, s, name, args)
-	return outcome.Content + "\n\noperator-identity override approved; exact " + subject + " rerun once:\n" + overrideContent, overrideOK
+	if overrideOK {
+		if strings.TrimSpace(overrideContent) == "" {
+			overrideContent = "the tool completed with no output"
+		}
+		return "operator-identity override succeeded; exact " + subject + " rerun once:\n" + overrideContent, true
+	}
+	return outcome.Content + "\n\noperator-identity override was attempted but failed:\n" + overrideContent, false
 }
 
 func (r *Runner) stage(s *session.Session, runID string, turn int, name string, fn func()) {

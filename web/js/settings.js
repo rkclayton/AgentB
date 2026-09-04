@@ -379,6 +379,7 @@ function run() {
 
 function shell(active) {
 	const service = store.config.shell?.service_account || {};
+	const operatorContext = !!store.config.shell?.operator_context;
 	const credential = store.shell_credential || {};
 	const stored = credential.stored
 		? `stored ${credential.stored_at || "(time unavailable)"}`
@@ -388,7 +389,7 @@ function shell(active) {
 		: !serviceAccountStatus.supported
 			? "local account setup is available only on Windows"
 			: serviceAccountStatus.exists
-				? `${service.account || "agentb-svc"} · ${serviceAccountStatus.enabled ? "enabled" : "disabled"}${serviceAccountStatus.administrator ? " · ADMINISTRATOR — refused" : " · non-admin"}`
+				? `${service.account || "agentb-svc"} · ${serviceAccountStatus.enabled ? "enabled" : "disabled"}${serviceAccountStatus.administrator ? " · ADMINISTRATOR — refused" : !serviceAccountStatus.users_member ? " · Users membership missing" : " · non-admin"}`
 				: "not created";
 	const setupAction = serviceAccountStatus.exists ? "reset" : "create";
 	const setupLabel = serviceAccountBusy
@@ -433,6 +434,8 @@ function shell(active) {
 		? `Apply unavailable: ${applyBlocker}${hardeningMessage ? ` Last result: ${hardeningMessage}` : ""}`
 		: hardeningMessage;
   return `<div class="settings-subhead">Service identity</div>
+	${toggle("shell.operator_context", "run tools as me", operatorContext)}
+	${operatorContext ? feedback("Operator context bypasses service-account isolation. Windows still enforces your normal, non-elevated permissions.", true, "") : ""}
     ${row("status", `<span class="account-status"><span class="lamp ${serviceAccountStatus.administrator ? "alarm" : serviceAccountStatus.exists ? "live" : ""}"></span>${html(accountState)}</span>`)}
     ${row("credential", `<span class="account-status">${html(stored)}</span>`)}
     ${row("new password", `<input id="service-account-setup-password" type="password" autocomplete="new-password" aria-label="New service-account password" ${setupDisabled ? "disabled" : ""}>`)}

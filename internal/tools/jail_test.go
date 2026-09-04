@@ -38,4 +38,12 @@ func TestJail(t *testing.T) {
 			t.Fatalf("got %q, %v", got, err)
 		}
 	})
+	t.Run("os_authorized_path_does_not_probe_workspace_ancestors", func(t *testing.T) {
+		root := filepath.Join(t.TempDir(), "workspace-that-does-not-exist")
+		target := filepath.Join(t.TempDir(), "allowed.txt")
+		got, err := resolvePath(root, target, false)
+		if err != nil || got != filepath.Clean(target) {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
 }

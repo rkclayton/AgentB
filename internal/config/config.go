@@ -142,6 +142,7 @@ type Shell struct {
 	MaxOutputLinesHead int                 `json:"max_output_lines_head"`
 	MaxOutputLinesTail int                 `json:"max_output_lines_tail"`
 	FileRoutingGuard   *bool               `json:"file_routing_guard"`
+	OperatorContext    bool                `json:"operator_context"`
 	ServiceAccount     ShellServiceAccount `json:"service_account"`
 	Deny               []string            `json:"deny"`
 }

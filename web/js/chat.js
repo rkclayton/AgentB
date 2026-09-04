@@ -69,11 +69,14 @@ function render() {
 }
 
 function renderIdentityAlarm() {
+  const operatorContext = store.shell_identity?.operator_context;
   const unavailable = store.shell_identity?.operator_approval_required || store.shell_identity?.fallback;
-  identityAlarm.hidden = !unavailable;
-  identityAlarm.textContent = unavailable
-    ? `SERVICE IDENTITY UNAVAILABLE — tools require explicit operator approval: ${store.shell_identity.reason}`
-    : "";
+  identityAlarm.hidden = !operatorContext && !unavailable;
+  identityAlarm.textContent = operatorContext
+    ? "OPERATOR CONTEXT — tools are running with your Windows permissions"
+    : unavailable
+      ? `SERVICE IDENTITY UNAVAILABLE — tools require explicit operator approval: ${store.shell_identity.reason}`
+      : "";
 }
 
 function renderBinding(session) {

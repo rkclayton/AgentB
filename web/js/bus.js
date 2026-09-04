@@ -8,7 +8,7 @@ export const store = {
   serving_facts: {},
 	mutation_token: "",
 	shell_credential: { stored: false, stored_at: "" },
-	shell_identity: { fallback: false, operator_approval_required: false, reason: "", since: "" },
+  shell_identity: { fallback: false, operator_approval_required: false, operator_context: false, reason: "", since: "" },
   replay: false,
 };
 const listeners = new Set();

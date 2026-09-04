@@ -15,10 +15,11 @@ import (
 // file tools that Shell uses. When enabled, absolute paths are authorized by
 // that identity's OS token instead of by the harness operator's token.
 type FileIdentity struct {
-	mu         sync.RWMutex
-	service    config.ShellServiceAccount
-	credential shellCredentialReader
-	run        serviceFileRunner
+	mu              sync.RWMutex
+	service         config.ShellServiceAccount
+	operatorContext bool
+	credential      shellCredentialReader
+	run             serviceFileRunner
 }
 
 type serviceFileRunner func(config.ShellServiceAccount, []byte, func() (string, error)) (string, error)
@@ -35,6 +36,7 @@ func NewFileIdentity(credential shellCredentialReader) *FileIdentity {
 func (p *FileIdentity) Configure(cfg config.Config) {
 	p.mu.Lock()
 	p.service = cfg.Shell.ServiceAccount
+	p.operatorContext = cfg.Shell.OperatorContext
 	p.mu.Unlock()
 }
 
@@ -42,10 +44,10 @@ func (p *FileIdentity) Wrap(tool Tool) Tool {
 	return &identityFileTool{tool: tool, identity: p}
 }
 
-func (p *FileIdentity) snapshot() (config.ShellServiceAccount, shellCredentialReader, serviceFileRunner) {
+func (p *FileIdentity) snapshot() (config.ShellServiceAccount, bool, shellCredentialReader, serviceFileRunner) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-	return p.service, p.credential, p.run
+	return p.service, p.operatorContext, p.credential, p.run
 }
 
 type identityFileTool struct {
@@ -70,7 +72,11 @@ func (t *identityFileTool) Call(ctx context.Context, s *session.Session, args ma
 }
 
 func (t *identityFileTool) CallDetailed(ctx context.Context, s *session.Session, args map[string]any) CallDetail {
-	service, credential, runner := t.identity.snapshot()
+	service, operatorContext, credential, runner := t.identity.snapshot()
+	if operatorContext {
+		result, err := t.tool.Call(withOSPathPolicy(ctx), s, args)
+		return CallDetail{Content: result, Err: err}
+	}
 	if !service.Enabled {
 		result, err := t.tool.Call(ctx, s, args)
 		return CallDetail{Content: result, Err: err}

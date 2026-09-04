@@ -118,6 +118,33 @@ func TestShellServiceAccountDisabledDoesNotRaiseIdentityAlarm(t *testing.T) {
 	}
 }
 
+func TestShellOperatorContextBypassesServiceIdentityAndRaisesPersistentWarning(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root).Shell
+	cfg.OperatorContext = true
+	cfg.ServiceAccount.Enabled = true
+	shell := NewShell(cfg)
+	serviceStarted := false
+	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
+		serviceStarted = true
+		return completedShellProcess{}, nil
+	}
+	var reported ShellIdentityStatus
+	shell.SetIdentityReporter(func(status ShellIdentityStatus) { reported = status })
+	shell.Configure(config.Config{Workspace: root, Shell: cfg})
+	command := "printf operator-ok"
+	if runtime.GOOS == "windows" {
+		command = "Write-Output operator-ok"
+	}
+	result, err := shell.Call(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
+	if err != nil || !strings.Contains(result, "operator-ok") {
+		t.Fatalf("result=%q err=%v", result, err)
+	}
+	if serviceStarted || !reported.OperatorContext || reported.OperatorApprovalRequired || reported.Since == "" {
+		t.Fatalf("serviceStarted=%v identity=%+v", serviceStarted, reported)
+	}
+}
+
 func TestShellServiceAccountSuccessClearsPersistentIdentityAlarm(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root).Shell

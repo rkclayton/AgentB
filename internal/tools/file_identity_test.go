@@ -93,6 +93,32 @@ func TestFileIdentityDisabledKeepsWorkspaceBoundary(t *testing.T) {
 	}
 }
 
+func TestFileIdentityOperatorContextUsesOperatorOSAccessOutsideWorkspace(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	external := filepath.Join(root, "external")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(external, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(external, "operator-visible.txt"), []byte("ok"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	identity := NewFileIdentity(nil)
+	cfg := config.Defaults(workspace)
+	cfg.Shell.OperatorContext = true
+	cfg.Shell.ServiceAccount.Enabled = true
+	identity.Configure(cfg)
+	result, err := identity.Wrap(NewListDir(cfg.Tools.ListDir)).Call(
+		context.Background(), &session.Session{Workspace: workspace, LastSeen: map[string]time.Time{}}, map[string]any{"path": external},
+	)
+	if err != nil || !strings.Contains(result, "operator-visible.txt") {
+		t.Fatalf("result=%q err=%v", result, err)
+	}
+}
+
 func TestFileIdentityPermissionDenialOffersOperatorOverride(t *testing.T) {
 	identity := enabledFileIdentity(t, &fileIdentityTestCredential{password: []byte{1, 2, 3}})
 	detail := identity.Wrap(&permissionDeniedFileTool{}).(DetailedTool).CallDetailed(

@@ -42,11 +42,14 @@ function renderConsole() {
   renderState();
   renderTimeline();
 	const identityAlarm = document.getElementById("shell-identity-alarm");
+	const operatorContext = store.shell_identity?.operator_context;
 	const identityUnavailable = store.shell_identity?.operator_approval_required || store.shell_identity?.fallback;
-	identityAlarm.hidden = !identityUnavailable;
-	identityAlarm.textContent = identityUnavailable
-		? `SERVICE IDENTITY UNAVAILABLE — shell requires explicit operator approval: ${store.shell_identity.reason}`
-		: "";
+	identityAlarm.hidden = !operatorContext && !identityUnavailable;
+	identityAlarm.textContent = operatorContext
+		? "OPERATOR CONTEXT — tools are running with your Windows permissions"
+		: identityUnavailable
+			? `SERVICE IDENTITY UNAVAILABLE — shell requires explicit operator approval: ${store.shell_identity.reason}`
+			: "";
   const s = store.sessions[store.active],
     busy = s && s.run.status !== "idle";
   const query = new URLSearchParams();

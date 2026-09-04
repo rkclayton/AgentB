@@ -83,8 +83,11 @@ func TestOperatorOverrideRequiresApprovalEvenWhenApprovalModeOff(t *testing.T) {
 	}
 	select {
 	case got := <-done:
-		if !got.ok || got.content != "exit=1\nAccess to the path is denied.\n\noperator-identity override approved; exact command rerun once:\nexit=0\noperator-ok" {
+		if !got.ok || got.content != "operator-identity override succeeded; exact command rerun once:\nexit=0\noperator-ok" {
 			t.Fatalf("result=%#v", got)
+		}
+		if strings.Contains(got.content, "Access to the path is denied") {
+			t.Fatalf("successful override retained the superseded denial: %q", got.content)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for approved retry")
@@ -156,7 +159,38 @@ func TestFileToolOperatorOverrideUsesPathAndExactCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := <-done
-	if !got.ok || !strings.Contains(got.content, "exact tool call rerun once") || tool.overrideCalls != 1 {
+	if !got.ok || !strings.Contains(got.content, "override succeeded; exact tool call rerun once") || tool.overrideCalls != 1 {
 		t.Fatalf("result=%#v override calls=%d", got, tool.overrideCalls)
+	}
+}
+
+type emptyOverrideTool struct{ overrideTestTool }
+
+func (t *emptyOverrideTool) CallAsOperator(context.Context, *session.Session, map[string]any) (string, error) {
+	t.overrideCalls++
+	return "", nil
+}
+
+func TestSuccessfulEmptyOperatorOverrideIsUnambiguous(t *testing.T) {
+	bus := events.NewBus()
+	eventCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	cfg := config.Defaults(t.TempDir())
+	tool := &emptyOverrideTool{overrideTestTool{name: "list_dir"}}
+	runner := &Runner{bus: bus, tools: tools.New(tool), cfg: func() config.Config { return cfg }}
+	runner.gate = NewGate(bus, runner.cfg)
+	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"list_dir": true}}
+	done := make(chan string, 1)
+	go func() {
+		content, _ := runner.executeTool(context.Background(), s, "run", "call", "list_dir", map[string]any{})
+		done <- content
+	}()
+	<-eventCh
+	if err := runner.gate.Decide(s.ID, "call:operator", "approve"); err != nil {
+		t.Fatal(err)
+	}
+	got := <-done
+	if !strings.Contains(got, "override succeeded") || !strings.Contains(got, "completed with no output") || strings.Contains(got, "Access to the path is denied") {
+		t.Fatalf("ambiguous empty override result: %q", got)
 	}
 }

@@ -128,8 +128,16 @@ function Set-ManagedRule {
     }
     if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
     if ($PSCmdlet.ShouldProcess($Target.Path, $Target.Intent)) {
-        $null = $acl.AddAccessRule((New-ManagedRule -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type))
-        Set-Acl -LiteralPath $Target.Path -AclObject $acl
+        if ($Target.NativeTraverse) {
+            # Set-Acl can trigger a costly inheritance recalculation across a
+            # large user-profile tree. icacls adds this non-inheriting ACE to
+            # the directory itself without walking its descendants.
+            & icacls.exe $Target.Path /grant ("*$($Identity.Value):(X,S)") | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "icacls failed for parent traverse path: $($Target.Path)" }
+        } else {
+            $null = $acl.AddAccessRule((New-ManagedRule -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type))
+            Set-Acl -LiteralPath $Target.Path -AclObject $acl
+        }
         Write-Host "APPLIED: $($Target.Intent) :: $($Target.Path)"
         $script:changed++
     }
@@ -191,12 +199,23 @@ $denyRights = [Security.AccessControl.FileSystemRights]::WriteData `
     -bor [Security.AccessControl.FileSystemRights]::ChangePermissions `
     -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
 $allowRights = [Security.AccessControl.FileSystemRights]::Modify
+$traverseRights = [Security.AccessControl.FileSystemRights]::ReadAndExecute
+$parentTraverseRights = [Security.AccessControl.FileSystemRights]::Traverse
 $none = [Security.AccessControl.InheritanceFlags]::None
 $recursive = [Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit
 $deny = [Security.AccessControl.AccessControlType]::Deny
 $allow = [Security.AccessControl.AccessControlType]::Allow
 
-$targets = @([pscustomobject]@{ Path = $root; Rights = $denyRights; Inheritance = $none; Type = $deny; Intent = 'deny control-tree entry mutation' })
+$targets = @()
+$parent = [IO.DirectoryInfo]$root
+while ($parent.Parent -and $parent.Parent.Parent) {
+    $parent = $parent.Parent
+    $targets += [pscustomobject]@{ Path = $parent.FullName.TrimEnd('\'); Rights = $parentTraverseRights; Inheritance = $none; Type = $allow; Intent = 'grant parent-directory traverse'; NativeTraverse = $true }
+}
+$targets += @(
+    [pscustomobject]@{ Path = $root; Rights = $denyRights; Inheritance = $none; Type = $deny; Intent = 'deny control-tree entry mutation' },
+    [pscustomobject]@{ Path = $root; Rights = $traverseRights; Inheritance = $none; Type = $allow; Intent = 'grant application-root read and traverse' }
+)
 foreach ($item in Get-ChildItem -LiteralPath $root -Force | Sort-Object FullName) {
     if ($workspaceInsideRoot -and $item.FullName.TrimEnd('\').Equals($workspace, [StringComparison]::OrdinalIgnoreCase)) { continue }
     $inheritance = if ($item.PSIsContainer) { $recursive } else { $none }
@@ -218,7 +237,7 @@ Write-Host 'Agent_b complete control-tree ACL policy'
 Write-Host "Identity: $env:COMPUTERNAME\$AccountName"
 Write-Host "Agent_b application directory: $root"
 Write-Host "Only shell-writable tree: $workspace"
-Write-Host 'All existing top-level application files and directories except the workspace receive explicit write/delete/ownership denies. Read and execute are retained.'
+Write-Host 'Parent directories grant traverse-only and the application root grants read/traverse so the service identity can reach the workspace. Every other existing top-level item receives an explicit write/delete/ownership deny.'
 Write-Host 'Reapply and verify after an application update creates or replaces files.'
 
 if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $Verify -and -not $Inspect) {

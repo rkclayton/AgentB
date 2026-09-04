@@ -39,6 +39,7 @@ type shellCredentialReader interface {
 type ShellIdentityStatus struct {
 	Fallback                 bool   `json:"fallback"`
 	OperatorApprovalRequired bool   `json:"operator_approval_required"`
+	OperatorContext          bool   `json:"operator_context"`
 	Reason                   string `json:"reason"`
 	Since                    string `json:"since"`
 }
@@ -165,7 +166,7 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 
 func (s *Shell) start(cfg config.Shell, workspace string, argv []string, output *lockedBuffer) (runningShellProcess, bool, error) {
 	service := cfg.ServiceAccount
-	if !service.Enabled {
+	if cfg.OperatorContext || !service.Enabled {
 		process, err := startHarnessProcess(cfg.Command[0], argv, workspace, output)
 		return process, false, err
 	}
@@ -178,7 +179,7 @@ func (s *Shell) start(cfg config.Shell, workspace string, argv []string, output 
 			defer clearBytes(password)
 			process, spawnErr := s.startService(cfg.Command[0], argv, workspace, minimalShellEnvironment(service, workspace), service, password, output)
 			if spawnErr == nil {
-				s.setIdentity(ShellIdentityStatus{})
+				s.setIdentity(s.configuredIdentityStatus())
 				return process, true, nil
 			}
 			reason = serviceSpawnReason(spawnErr)
@@ -257,13 +258,17 @@ func (s *Shell) TestServiceAccount(ctx context.Context) (string, error) {
 		if result.code != 0 {
 			return s.failedServiceTest(fmt.Sprintf("service-account test process exited %d", result.code), errors.New("test process returned nonzero exit"))
 		}
-		s.setIdentity(ShellIdentityStatus{})
+		s.setIdentity(s.configuredIdentityStatus())
 		return "service-account shell spawn succeeded", nil
 	}
 }
 
 func (s *Shell) failedServiceTest(reason string, err error) (string, error) {
-	s.setIdentity(ShellIdentityStatus{OperatorApprovalRequired: true, Reason: reason, Since: time.Now().UTC().Format(time.RFC3339)})
+	status := ShellIdentityStatus{OperatorApprovalRequired: true, Reason: reason, Since: time.Now().UTC().Format(time.RFC3339)}
+	if s.config().OperatorContext {
+		status = s.configuredIdentityStatus()
+	}
+	s.setIdentity(status)
 	log.Printf("ALARM: service-account test failed; operator approval required: %s", reason)
 	return reason, err
 }
@@ -310,8 +315,21 @@ func (s *Shell) Configure(value config.Config) {
 	s.cfg = value.Shell
 	s.workspace = workspace
 	s.mu.Unlock()
-	if !value.Shell.ServiceAccount.Enabled {
+	if value.Shell.OperatorContext {
+		s.setIdentity(s.configuredIdentityStatus())
+	} else if !value.Shell.ServiceAccount.Enabled || s.IdentityStatus().OperatorContext {
 		s.setIdentity(ShellIdentityStatus{})
+	}
+}
+
+func (s *Shell) configuredIdentityStatus() ShellIdentityStatus {
+	if !s.config().OperatorContext {
+		return ShellIdentityStatus{}
+	}
+	return ShellIdentityStatus{
+		OperatorContext: true,
+		Reason:          "operator context is enabled; tools are running as the Windows account that launched Agent_b",
+		Since:           time.Now().UTC().Format(time.RFC3339),
 	}
 }
 

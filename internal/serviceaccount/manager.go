@@ -13,6 +13,7 @@ type Status struct {
 	Exists          bool   `json:"exists"`
 	Enabled         bool   `json:"enabled"`
 	Administrator   bool   `json:"administrator"`
+	UsersMember     bool   `json:"users_member"`
 	HarnessElevated bool   `json:"harness_elevated"`
 }
 

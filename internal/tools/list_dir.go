@@ -93,6 +93,9 @@ func (t *ListDir) Call(ctx context.Context, s *session.Session, args map[string]
 		all = append(all[:cfg.MaxEntries], fmt.Sprintf("[… %d more entries]", left))
 	}
 	s.Touch(path)
+	if len(all) == 0 {
+		return "directory is empty", nil
+	}
 	return strings.Join(all, "\n"), nil
 }
 func (t *ListDir) Configure(value config.Config) {

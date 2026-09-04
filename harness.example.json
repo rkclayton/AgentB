@@ -55,6 +55,7 @@
     "max_output_lines_head": 60,
     "max_output_lines_tail": 40,
     "file_routing_guard": true,
+    "operator_context": false,
     "service_account": { "enabled": false, "account": "agentb-svc", "domain": "." },
     "deny": ["rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"]
   }

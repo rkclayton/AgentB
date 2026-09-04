@@ -34,15 +34,22 @@ func resolvePath(workspace, path string, enforceWorkspace bool) (string, error) 
 	if err != nil {
 		return "", err
 	}
-	root, err = filepath.EvalSymlinks(root)
-	if err != nil {
-		return "", err
-	}
 	candidate := filepath.FromSlash(path)
 	if !filepath.IsAbs(candidate) {
 		candidate = filepath.Join(root, candidate)
 	}
 	candidate = filepath.Clean(candidate)
+	// In OS-authorized modes Windows, rather than the workspace jail, is the
+	// boundary. Avoid resolving every ancestor here: EvalSymlinks opens parent
+	// directories for metadata access and can reject an otherwise traversable,
+	// ACL-authorized target under a private user profile.
+	if !enforceWorkspace {
+		return candidate, nil
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
 	existing := candidate
 	for {
 		if _, err := os.Lstat(existing); err == nil {
@@ -65,9 +72,6 @@ func resolvePath(workspace, path string, enforceWorkspace bool) (string, error) 
 		return "", err
 	}
 	candidate = filepath.Join(resolved, rest)
-	if !enforceWorkspace {
-		return candidate, nil
-	}
 	rel, err := filepath.Rel(root, candidate)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return "", fmt.Errorf("path is outside the workspace")

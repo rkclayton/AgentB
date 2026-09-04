@@ -2,6 +2,8 @@
 
 These controls reduce the reach of Agent_b's model-selected OS operations. Shell children and built-in file tools use a dedicated local account; relative file paths start in the workspace, while absolute paths succeed only where Windows ACLs grant that account access. The managed Agent_b tree grants writes only to its workspace, and service-account outbound traffic is limited to IPv4 loopback, Tailscale's `100.64.0.0/10`, and IPv6 loopback. This is blast-radius reduction on a dedicated Windows host, not a sandbox or exploit boundary.
 
+For a deliberate temporary capability override, Settings → Security → **run tools as me** runs shell and file tools as the non-elevated Windows account that launched Agent_b and permits OS-authorized paths outside the workspace. The persistent red banner is intentional. Turn the switch off to restore the service identity; this mode does not grant Administrator privileges or bypass Windows ACLs.
+
 The normal onboarding path is entirely in Settings → Security. Start Agent_b normally from Explorer so it receives the UAC-filtered token; local Administrators can use this path normally. Agent_b refuses to start from **Run as administrator** or an elevated terminal, before it reads configuration or opens its listener. Windows elevation is reserved for the narrowly scoped account and hardening helpers. Passwords are write-only, encrypted with user-scoped DPAPI, and never placed in process arguments, responses, or logs.
 
 ## 1. Configure the model first
@@ -26,7 +28,7 @@ Stop active Agent_b tasks. In Settings → Security → **Host protections**, co
 
 The operation applies and immediately verifies both controls:
 
-- Every existing top-level file and directory in the Agent_b application tree receives an explicit service-account write/delete/ownership deny, recursively for directories. This includes the binary, source, UI, prompts, configuration, scripts, `.git`, logs, memory, and local toolchains. Read and execute remain available.
+- Parent directories receive traverse-only grants and the application root receives a read/traverse grant so the service account can reach the workspace even when Agent_b is installed beneath a private user profile. Every existing top-level file and directory except that workspace receives an explicit service-account write/delete/ownership deny, recursively for directories. This includes the binary, source, UI, prompts, configuration, scripts, `.git`, logs, memory, and local toolchains.
 - The selected workspace receives an explicit recursive `Modify` grant. If it is inside the Agent_b directory, it must be one direct child so it can be excluded cleanly from the recursive denies.
 - One outbound Block rule named `AgentB-Svc-Outbound-Block` is scoped to the service account with `-LocalUser`. Non-overlapping address ranges spare `127.0.0.0/8`, `100.64.0.0/10`, and `::1`. There is no competing Allow rule and no machine-wide `DefaultOutboundAction` change.
 
