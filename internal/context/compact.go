@@ -18,7 +18,7 @@ type Compactor struct{ bus *events.Bus }
 
 func New(bus *events.Bus) *Compactor { return &Compactor{bus: bus} }
 
-func (c *Compactor) Supersede(s *session.Session, runID string, turn int, count Counter) bool {
+func (c *Compactor) Supersede(s *session.Session, runID string, turn, readDefaultLimit int, count Counter) bool {
 	messages := s.MessagesCopy()
 	changed := false
 	for current := range messages {
@@ -36,10 +36,10 @@ func (c *Compactor) Supersede(s *session.Session, runID string, turn int, count 
 				continue
 			}
 			olderCall, ok := callFor(messages, older.ToolCallID)
-			if !ok || !supersedes(item.Name, olderCall.Arguments, currentCall.Arguments) {
+			if !ok || !supersedes(item.Name, olderCall.Arguments, currentCall.Arguments, readDefaultLimit) {
 				continue
 			}
-			messages[prior] = elide(older, olderCall.Arguments, count)
+			messages[prior] = elide(older, olderCall.Arguments, readDefaultLimit, count)
 			c.updated(s, runID, messages[prior])
 			changed = true
 		}
@@ -50,7 +50,7 @@ func (c *Compactor) Supersede(s *session.Session, runID string, turn int, count 
 	return changed
 }
 
-func (c *Compactor) ElideOld(s *session.Session, runID string, used, target int, count Counter) (bool, int) {
+func (c *Compactor) ElideOld(s *session.Session, runID string, used, target, readDefaultLimit int, count Counter) (bool, int) {
 	messages := s.MessagesCopy()
 	toolIndexes := []int{}
 	for index, item := range messages {
@@ -72,7 +72,7 @@ func (c *Compactor) ElideOld(s *session.Session, runID string, used, target int,
 			continue
 		}
 		call, _ := callFor(messages, item.ToolCallID)
-		updated := elide(item, call.Arguments, count)
+		updated := elide(item, call.Arguments, readDefaultLimit, count)
 		used -= max(0, item.Tokens-updated.Tokens)
 		messages[index] = updated
 		affected = append(affected, item.ID)
@@ -113,8 +113,8 @@ func (c *Compactor) Summarize(s *session.Session, runID string, summary events.M
 func (c *Compactor) updated(s *session.Session, runID string, message events.Message) {
 	c.bus.Publish(events.New(events.MessageUpdated, s.ID, runID, map[string]any{"id": message.ID, "patch": map[string]any{"content": message.Content, "tokens": message.Tokens, "elided": true}}))
 }
-func elide(message events.Message, rawArgs string, count Counter) events.Message {
-	label := keyArgs(message.Name, rawArgs)
+func elide(message events.Message, rawArgs string, readDefaultLimit int, count Counter) events.Message {
+	label := keyArgs(message.Name, rawArgs, readDefaultLimit)
 	stub := fmt.Sprintf("[elided: %s %s, %d tokens]", message.Name, label, message.Tokens)
 	message.Content = stub
 	message.Elided = true
@@ -131,7 +131,7 @@ func callFor(messages []events.Message, id string) (events.ToolCall, bool) {
 	}
 	return events.ToolCall{}, false
 }
-func supersedes(name, older, current string) bool {
+func supersedes(name, older, current string, readDefaultLimit int) bool {
 	if name == "search_text" {
 		return canonical(older) == canonical(current)
 	}
@@ -143,33 +143,58 @@ func supersedes(name, older, current string) bool {
 	if json.Unmarshal([]byte(older), &a) != nil || json.Unmarshal([]byte(current), &b) != nil || a.Path != b.Path {
 		return false
 	}
-	if a.Offset == 0 { a.Offset = 1 }
-	if b.Offset == 0 { b.Offset = 1 }
-	if a.Limit == 0 { a.Limit = 200 }
-	if b.Limit == 0 { b.Limit = 200 }
+	if a.Offset == 0 {
+		a.Offset = 1
+	}
+	if b.Offset == 0 {
+		b.Offset = 1
+	}
+	if a.Limit == 0 {
+		a.Limit = readDefaultLimit
+	}
+	if b.Limit == 0 {
+		b.Limit = readDefaultLimit
+	}
 	return a.Offset <= b.Offset+b.Limit-1 && b.Offset <= a.Offset+a.Limit-1
 }
 func canonical(raw string) string {
 	var value any
-	if json.Unmarshal([]byte(raw), &value) != nil { return raw }
+	if json.Unmarshal([]byte(raw), &value) != nil {
+		return raw
+	}
 	data, _ := json.Marshal(value)
 	return string(data)
 }
-func keyArgs(name, raw string) string {
+func keyArgs(name, raw string, readDefaultLimit int) string {
 	var args map[string]any
 	_ = json.Unmarshal([]byte(raw), &args)
 	keys := make([]string, 0, len(args))
-	for key := range args { keys = append(keys, key) }
+	for key := range args {
+		keys = append(keys, key)
+	}
 	sort.Strings(keys)
 	parts := []string{}
-	for _, key := range keys { parts = append(parts, fmt.Sprintf("%s %v", key, args[key])) }
+	for _, key := range keys {
+		parts = append(parts, fmt.Sprintf("%s %v", key, args[key]))
+	}
 	if name == "read_file" {
 		path, _ := args["path"].(string)
 		offset := number(args["offset"], 1)
-		limit := number(args["limit"], 200)
-		return fmt.Sprintf("%s lines %d–%d", path, offset, offset+limit-1)
+		limit := number(args["limit"], readDefaultLimit)
+		return fmt.Sprintf("%s bytes %d–%d", path, offset, offset+limit-1)
 	}
 	return strings.Join(parts, " ")
 }
-func number(value any, fallback int) int { if n, ok := value.(float64); ok { return int(n) }; return fallback }
-func tokenSum(messages []events.Message) int { total := 0; for _, message := range messages { total += message.Tokens }; return total }
+func number(value any, fallback int) int {
+	if n, ok := value.(float64); ok {
+		return int(n)
+	}
+	return fallback
+}
+func tokenSum(messages []events.Message) int {
+	total := 0
+	for _, message := range messages {
+		total += message.Tokens
+	}
+	return total
+}

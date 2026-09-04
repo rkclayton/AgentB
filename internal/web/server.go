@@ -270,7 +270,7 @@ func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any 
 		"serving_facts": servingFacts("SERVING.md"),
 		"flow":          map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}},
 		"tools": []map[string]string{
-			{"name": "read_file", "description": "Read local UTF-8 text by byte offset and limit. Unlike fetch_url, it reads the filesystem."},
+			{"name": "read_file", "description": "Read numbered local UTF-8 text by byte offset and limit. When more is true, pass returned next_offset as offset to advance. Unlike fetch_url, it reads the filesystem."},
 			{"name": "list_dir", "description": "List entries under local directory path to depth. Unlike find_files, it enumerates contents without a filename pattern."},
 			{"name": "write_file", "description": "Create or fully replace the file at path with content, creating parent directories. Unlike edit_file, it writes the whole file."},
 			{"name": "edit_file", "description": "Replace one exact, unique old_string in path with new_string. Unlike write_file, it avoids reproducing the whole file."},
@@ -278,7 +278,7 @@ func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any 
 			{"name": "shell", "description": "Run an unconfined command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation."},
 			{"name": "remember", "description": "Save note as durable workspace memory for future sessions. Call recall first to avoid duplicates; unlike recall, remember writes."},
 			{"name": "recall", "description": "Read all durable workspace notes; takes no arguments. Use before remember to avoid duplicates; unlike recall, remember never writes."},
-			{"name": "fetch_url", "description": "Fetch untrusted public HTTP(S) text by byte offset and limit. Unlike read_file, it uses the network."},
+			{"name": "fetch_url", "description": "Fetch untrusted public HTTP(S) text by byte offset and limit. When more is true, pass returned next_offset as offset to advance. Unlike read_file, it uses the network."},
 			{"name": "find_files", "description": "Find local files under path whose names or relative paths match pattern. Unlike search_text, it does not inspect file contents."},
 		},
 	}

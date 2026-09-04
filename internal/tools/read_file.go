@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"harness/internal/config"
@@ -19,7 +20,7 @@ type ReadFile struct {
 func NewReadFile(cfg config.ReadFileTool) *ReadFile { return &ReadFile{cfg: cfg} }
 func (*ReadFile) Name() string                      { return "read_file" }
 func (*ReadFile) Description() string {
-	return "Read local UTF-8 text by byte offset and limit. Unlike fetch_url, it reads the filesystem."
+	return "Read numbered local UTF-8 text by byte offset and limit. When more is true, pass returned next_offset as offset to advance. Unlike fetch_url, it reads the filesystem."
 }
 func (r *ReadFile) Schema() map[string]any {
 	cfg := r.config()
@@ -54,9 +55,38 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 	if err != nil {
 		return "", err
 	}
-	result := byteWindowHeader(window) + "\n" + window.Content
+	result := numberedReadFileWindow(string(data), window)
 	s.Touch(workspaceRel(s.Workspace, resolved))
 	return result, nil
+}
+
+func numberedReadFileWindow(text string, window byteWindow) string {
+	data := []byte(text)
+	start := window.Offset - 1
+	end := start + window.Bytes
+	startLine := 1 + bytes.Count(data[:start], []byte{'\n'})
+	startMidLine := start > 0 && data[start-1] != '\n'
+	endMidLine := end < len(data) && (end == 0 || data[end-1] != '\n')
+	header := byteWindowHeader(window)
+	header = header[:len(header)-1] + fmt.Sprintf(" start_line=%d start_mid_line=%t end_mid_line=%t]", startLine, startMidLine, endMidLine)
+	if window.Content == "" {
+		return header
+	}
+
+	lines := strings.Split(window.Content, "\n")
+	trailingNewline := strings.HasSuffix(window.Content, "\n")
+	if trailingNewline {
+		lines = lines[:len(lines)-1]
+	}
+	numbered := make([]string, 0, len(lines))
+	for index, line := range lines {
+		numbered = append(numbered, fmt.Sprintf("%d: %s", startLine+index, strings.TrimSuffix(line, "\r")))
+	}
+	body := strings.Join(numbered, "\n")
+	if trailingNewline {
+		body += "\n"
+	}
+	return header + "\n" + body
 }
 func (r *ReadFile) Configure(value config.Config) {
 	r.mu.Lock()

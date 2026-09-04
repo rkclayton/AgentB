@@ -39,7 +39,7 @@ func NewFetch(cfg config.FetchTool) *Fetch {
 
 func (*Fetch) Name() string { return "fetch_url" }
 func (*Fetch) Description() string {
-	return "Fetch untrusted public HTTP(S) text by byte offset and limit. Unlike read_file, it uses the network."
+	return "Fetch untrusted public HTTP(S) text by byte offset and limit. When more is true, pass returned next_offset as offset to advance. Unlike read_file, it uses the network."
 }
 func (*Fetch) ResultCategory() string { return "fetched" }
 func (*Fetch) ResultUntrusted() bool  { return true }

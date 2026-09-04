@@ -408,19 +408,21 @@ func (r *Runner) measureSession(ctx context.Context, p *config.Profile, s *sessi
 }
 
 func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID string, turn int, p *config.Profile, current map[string]bool) {
-	changed := r.compact.Supersede(s, runID, turn, func(text string) (int, bool) { return r.count(ctx, p, text) })
+	cfg := r.cfg()
+	readDefaultLimit := min(cfg.Tools.ReadFile.DefaultLimit, cfg.Tools.ReadFile.MaxLimit)
+	changed := r.compact.Supersede(s, runID, turn, readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
 	budget, err := r.measureSession(ctx, p, s, current, false)
 	if err != nil {
 		return
 	}
-	if budget.Ceiling > 0 && budget.UsedEst >= int(float64(budget.Ceiling)*r.cfg().Context.SoftPct) {
-		did, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), func(text string) (int, bool) { return r.count(ctx, p, text) })
+	if budget.Ceiling > 0 && budget.UsedEst >= int(float64(budget.Ceiling)*cfg.Context.SoftPct) {
+		did, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
 		changed = changed || did
 		if did {
 			budget, _ = r.measureSession(ctx, p, s, current, false)
 		}
 	}
-	if budget.Ceiling > 0 && budget.UsedEst >= int(float64(budget.Ceiling)*r.cfg().Context.SummaryPct) {
+	if budget.Ceiling > 0 && budget.UsedEst >= int(float64(budget.Ceiling)*cfg.Context.SummaryPct) {
 		changed = r.summarize(ctx, s, runID, p) || changed
 	}
 	if changed {
@@ -432,7 +434,9 @@ func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID
 	}
 }
 func (r *Runner) compactToFit(ctx context.Context, s *session.Session, runID string, p *config.Profile, current map[string]bool, budget events.Budget) bool {
-	changed, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), func(text string) (int, bool) { return r.count(ctx, p, text) })
+	cfg := r.cfg()
+	readDefaultLimit := min(cfg.Tools.ReadFile.DefaultLimit, cfg.Tools.ReadFile.MaxLimit)
+	changed, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
 	next, err := r.measureSession(ctx, p, s, current, false)
 	if err == nil {
 		guard := next.UsedEst
