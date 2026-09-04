@@ -24,16 +24,11 @@ if /i "%~1"=="--build-only" (
   exit /b 0
 )
 
-if not defined AGENTB_NO_BROWSER (
-  start "" /b powershell.exe -NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -Command "$uri='http://127.0.0.1:8790/'; for($attempt=0; $attempt -lt 100; $attempt++){ try { $null=Invoke-WebRequest -UseBasicParsing -Uri $uri -TimeoutSec 1; Start-Process $uri; exit 0 } catch { Start-Sleep -Milliseconds 200 } }"
-)
-
-echo Starting Agent_b. Close this window or press Ctrl+C to stop it.
-"%AGENTB_ROOT%Agent_b.exe"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%AGENTB_ROOT%scripts\launch-Agent_b.ps1" -RootDirectory "%AGENTB_ROOT%"
 set "AGENTB_EXIT=%ERRORLEVEL%"
 if not "%AGENTB_EXIT%"=="0" (
   echo.
-  echo Agent_b stopped with exit code %AGENTB_EXIT%.
+  echo Agent_b could not be opened. Review the specific error above.
   pause
 )
 exit /b %AGENTB_EXIT%

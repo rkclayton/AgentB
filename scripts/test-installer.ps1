@@ -25,11 +25,14 @@ try {
     foreach ($path in @(
         (Join-Path $testInstall 'Agent_b.exe'),
         (Join-Path $testInstall 'Agent_b.cmd'),
+        (Join-Path $testInstall 'scripts\launch-Agent_b.ps1'),
         (Join-Path $testInstall 'web\assets\Agent_b.ico'),
         (Join-Path $testStart 'Agent_b.lnk')
     )) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing installed file: $path" }
     }
+    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $testInstall 'scripts\launch-Agent_b.ps1') -Check
+    if ($LASTEXITCODE -ne 0) { throw "Installed launcher check exited $LASTEXITCODE." }
 
     $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $testStart 'Agent_b.lnk'))
     if (-not $shortcut.TargetPath.Equals((Join-Path $testInstall 'Agent_b.cmd'), [StringComparison]::OrdinalIgnoreCase)) {
