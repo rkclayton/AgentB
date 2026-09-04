@@ -20,6 +20,9 @@ let page = 0;
 let localNotice = "";
 let localAlarm = false;
 let frame = 0;
+let renderTimer = 0;
+let lastRender = 0;
+const renderIntervalMS = 50;
 
 function consoleURL() {
   const query = new URLSearchParams();
@@ -31,15 +34,21 @@ subscribe((_state, event) => {
   if (event.type === "snapshot") {
     if (!store.sessions[bound]) bound = requested && store.sessions[requested] ? requested : Object.keys(store.sessions)[0] || "";
   }
+  if (event.session_id && bound && event.session_id !== bound) return;
   schedule();
 });
 
 function schedule() {
-  if (frame) return;
-  frame = requestAnimationFrame(() => {
-    frame = 0;
-    render();
-  });
+  if (frame || renderTimer) return;
+  const delay = Math.max(0, renderIntervalMS - (performance.now() - lastRender));
+  renderTimer = setTimeout(() => {
+    renderTimer = 0;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      lastRender = performance.now();
+      render();
+    });
+  }, delay);
 }
 
 function render() {

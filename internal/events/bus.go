@@ -22,10 +22,16 @@ func (b *Bus) Publish(event Event) Event {
 		event = New(event.Type, event.SessionID, event.RunID, event.Data)
 		event.Seq = b.seq
 	}
+	// Body and Raw are diagnostic log payloads. Live SSE already strips them,
+	// and retaining them in the recent-event ring makes every new UI snapshot carry
+	// a duplicate model request or complete raw token stream.
+	recentEvent := event
+	recentEvent.Body = nil
+	recentEvent.Raw = nil
 	if event.SessionID == "" {
-		b.global = appendBounded(b.global, event, 200)
+		b.global = appendBounded(b.global, recentEvent, 200)
 	} else {
-		b.sessionRing[event.SessionID] = appendBounded(b.sessionRing[event.SessionID], event, 500)
+		b.sessionRing[event.SessionID] = appendBounded(b.sessionRing[event.SessionID], recentEvent, 500)
 	}
 	subscribers := make([]chan Event, 0, len(b.subscribers))
 	for _, ch := range b.subscribers {

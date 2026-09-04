@@ -13,6 +13,7 @@ const form = document.getElementById("composer"),
   stop = document.getElementById("stop");
 const requestedSession = new URLSearchParams(location.search).get("session");
 let initialSession = requestedSession;
+let renderFrame = 0;
 initSettings();
 subscribe((_state, event) => {
   if (event.type === "snapshot" && initialSession && store.sessions[initialSession]) {
@@ -21,6 +22,19 @@ subscribe((_state, event) => {
     setActive(id);
     return;
   }
+  // Streaming deltas are not displayed on Console. Rebuilding every panel for
+  // each token can starve navigation while a model is responding.
+  if (event.type === "model.delta") return;
+  scheduleRender();
+});
+
+function scheduleRender() {
+  if (renderFrame) return;
+  renderFrame = requestAnimationFrame(renderConsole);
+}
+
+function renderConsole() {
+  renderFrame = 0;
   renderTabs();
   renderRail();
   renderFlow();
@@ -51,7 +65,7 @@ subscribe((_state, event) => {
       : busy
         ? "Run in progress"
         : "Send a task";
-});
+}
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const s = store.sessions[store.active],
