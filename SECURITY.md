@@ -16,6 +16,8 @@ Agent_b refuses to start when its effective Windows token is elevated, before lo
 
 Settings can also apply and verify complete-tree service-account ACLs and a single account-scoped outbound Block rule through UAC. The ACL policy excludes only the configured workspace and must be reapplied after application updates create or replace files. The firewall policy permits loopback and the complete Tailscale carrier range; it does not change machine-wide firewall defaults or inspect destinations above the IP layer.
 
+The Windows installer is per-user and does not elevate. On first install it can copy the current checkout's local configuration and user-scoped DPAPI credential into the installation directory without displaying their contents; upgrades leave installed data in place. The uninstaller can remove or preserve that local data, but it does not silently delete the service account, ACL policy, or firewall rule because those machine-level controls may be shared.
+
 ## Approval and unattended runs
 
 With `approval.mode: "off"`, including during run-until-done operation, writes and shell commands execute without confirmation. The shipped default is `mutating`, which pauses `write_file`, `edit_file`, and `shell` for approval. Approval reduces accidental actions; it does not turn the shell wrapper into a sandbox.

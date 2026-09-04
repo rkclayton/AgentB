@@ -4,9 +4,13 @@ Agent_b is a small, standard-library Go coding agent for OpenAI-compatible model
 
 Choose one serving path before you start.
 
-On Windows, double-click **`start-Agent_b.cmd`** for the normal one-step launch. It finds Go on `PATH` or in the ignored local `.tools\go` directory, rebuilds `Agent_b.exe`, starts Agent_b, waits for the local UI, and opens it in the default browser. No PowerShell command is required.
+On Windows, double-click **`install-Agent_b.cmd`** once for the normal per-user installation. It builds Agent_b, creates a branded Start Menu shortcut, and registers **Agent_b** in Windows Installed apps without requiring administrator elevation. A first install imports this checkout's local connection settings and user-scoped service credential when present; upgrades preserve the installed settings. Open **Agent_b** from Start afterward.
+
+Developers can instead double-click **`start-Agent_b.cmd`** to build and run directly from the checkout. Both paths find Go on `PATH` or in the ignored local `.tools\go` directory. No PowerShell command is required.
 
 Agent_b refuses to start with an elevated Administrator token. Membership in the local Administrators group is fine: double-click the launcher normally, without **Run as administrator** and outside an elevated terminal.
+
+To remove the installed application, use **Settings → Apps → Installed apps → Agent_b → Uninstall**. The uninstaller asks whether to remove local connection settings, credential, logs, memory, and workspace; choosing **No** keeps them for a later reinstall. The service account and host firewall policy may be shared, so remove Host protections in Agent_b Settings before uninstalling if they are no longer needed.
 
 ## Path A — an endpoint you already run (~5 minutes)
 

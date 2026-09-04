@@ -6,7 +6,7 @@ The normal onboarding path is entirely in Settings → Security. Start Agent_b n
 
 ## 1. Configure the model first
 
-Double-click `start-Agent_b.cmd`. In Settings → Connections, configure and test the model endpoint, then select the ready profile for the session. Host protection accepts only a numeric address inside `127.0.0.0/8`, `100.64.0.0/10`, or IPv6 loopback because every other destination will be blocked for the service identity.
+For an installed copy, open **Agent_b** from Start. For a source checkout, double-click `start-Agent_b.cmd`. In Settings → Connections, configure and test the model endpoint, then select the ready profile for the session. Host protection accepts only a numeric address inside `127.0.0.0/8`, `100.64.0.0/10`, or IPv6 loopback because every other destination will be blocked for the service identity.
 
 Agent_b gives alternate-identity shell children only Windows system paths, a workspace-backed temporary directory, account identity names, and optional locale/`NO_COLOR` values. Git, compilers, and other non-system programs therefore need absolute executable paths unless the environment allowlist is deliberately extended.
 
@@ -31,6 +31,8 @@ The operation applies and immediately verifies both controls:
 - One outbound Block rule named `AgentB-Svc-Outbound-Block` is scoped to the service account with `-LocalUser`. Non-overlapping address ranges spare `127.0.0.0/8`, `100.64.0.0/10`, and `::1`. There is no competing Allow rule and no machine-wide `DefaultOutboundAction` change.
 
 Select **Verify** at any time to detect missing or replaced ACL entries and firewall drift. Reapply after updating, rebuilding, or adding files to Agent_b because a newly created or replaced application file may not retain its explicit deny.
+
+The per-user installer preserves settings during upgrades but installs program files into a new control tree. After the first installed launch, use **Apply + verify** for that installed location even if a source checkout was already hardened.
 
 The network rule permits every loopback and Tailscale destination, not only the model server. It prevents ordinary public/LAN egress by this Windows identity; it is not a domain allowlist, protocol inspection, or protection against a kernel-level exploit.
 
@@ -100,7 +102,7 @@ Preview, apply, and verify the firewall rule, substituting the numeric model add
 
 ## Rollback
 
-Stop active tasks, disable `shell.service_account.enabled`, then select **Remove** twice under Host protections and approve UAC. Clear the stored credential afterward. Remove the local account only after the ACL and firewall removal verifies successfully and any service-owned workspace data has been copied out.
+Stop active tasks, disable `shell.service_account.enabled`, then select **Remove** twice under Host protections and approve UAC. Clear the stored credential afterward. Remove the local account only after the ACL and firewall removal verifies successfully and any service-owned workspace data has been copied out. Windows Installed apps removes the application, shortcut, and registration but deliberately leaves these machine-level controls because another checkout or installation may share them.
 
 Manual rollback uses the scripts before deleting the account:
 
