@@ -11,10 +11,22 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ModelAddress,
     [ValidateRange(1, 65535)]
-	[int]$ModelPort
+	[int]$ModelPort,
+	# Internal result channel used by the non-elevated web process. The elevated
+	# process cannot return its PowerShell streams through Start-Process reliably.
+	[string]$ResultPath
 )
 
 $ErrorActionPreference = 'Stop'
+
+trap {
+    $message = $_.Exception.Message
+    if (-not [string]::IsNullOrWhiteSpace($ResultPath)) {
+        try { [IO.File]::WriteAllText($ResultPath, $message, [Text.UTF8Encoding]::new($false)) } catch { }
+    }
+    [Console]::Error.WriteLine($message)
+    exit 1
+}
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -22,19 +34,17 @@ function Test-IsAdministrator {
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
-function Quote-Argument {
-    param([string]$Value)
-    return '"' + $Value.Replace('"', '\"') + '"'
-}
-
 function Invoke-HardeningScript {
     param([string]$Path, [string[]]$Arguments)
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     $all = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Path) + $Arguments
-    $line = ($all | ForEach-Object { Quote-Argument $_ }) -join ' '
-    $process = Start-Process -FilePath $powershell -ArgumentList $line -WindowStyle Hidden -Wait -PassThru
-    if ($process.ExitCode -ne 0) {
-        throw "$(Split-Path -Leaf $Path) exited $($process.ExitCode)"
+    $output = @(& $powershell @all 2>&1 | ForEach-Object { [string]$_ })
+    $exitCode = $LASTEXITCODE
+    foreach ($line in $output) { Write-Host $line }
+    if ($exitCode -ne 0) {
+        $detail = ($output | Select-Object -Last 20) -join [Environment]::NewLine
+        if ([string]::IsNullOrWhiteSpace($detail)) { $detail = 'no diagnostic output was returned' }
+        throw "$(Split-Path -Leaf $Path) exited $exitCode`n$detail"
     }
 }
 

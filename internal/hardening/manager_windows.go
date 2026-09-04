@@ -96,6 +96,11 @@ func (m *windowsManager) Run(ctx context.Context, action string, request Request
 	if mode == "" {
 		return RunResult{}, fmt.Errorf("hardening action must be apply, verify, or remove")
 	}
+	// Status performs the same read-only policy inspection and returns structured
+	// component summaries. Avoid wrapping expected drift in PowerShell stack text.
+	if action == "verify" {
+		return RunResult{Attempted: true}, nil
+	}
 	script, err := filepath.Abs(m.orchestrationScript)
 	if err != nil {
 		return RunResult{}, fmt.Errorf("resolve hardening script: %w", err)
@@ -110,15 +115,17 @@ func (m *windowsManager) Run(ctx context.Context, action string, request Request
 		"-ModelAddress", request.ModelAddress,
 		"-ModelPort", fmt.Sprint(request.ModelPort),
 	}
-	if action == "verify" {
-		command := exec.CommandContext(ctx, m.powershell, arguments...)
-		command.Env = systemPowerShellEnvironment(os.Environ(), m.powershell)
-		output, runErr := command.CombinedOutput()
-		if runErr != nil {
-			return RunResult{Attempted: true}, fmt.Errorf("hardening verification failed: %s", safeError(output, runErr))
-		}
-		return RunResult{Attempted: true}, nil
+	resultFile, err := os.CreateTemp("", "agentb-hardening-result-*.txt")
+	if err != nil {
+		return RunResult{}, fmt.Errorf("create hardening result channel: %w", err)
 	}
+	resultPath := resultFile.Name()
+	if err := resultFile.Close(); err != nil {
+		os.Remove(resultPath)
+		return RunResult{}, fmt.Errorf("prepare hardening result channel: %w", err)
+	}
+	defer os.Remove(resultPath)
+	arguments = append(arguments, "-ResultPath", resultPath)
 	command := elevatedCommand(m.powershell, arguments)
 	launcher := exec.CommandContext(ctx, m.powershell,
 		"-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", encode(command),
@@ -130,12 +137,27 @@ func (m *windowsManager) Run(ctx context.Context, action string, request Request
 		if strings.Contains(string(output), "AGENTB_ELEVATION_NOT_STARTED") {
 			return RunResult{}, fmt.Errorf("Windows elevation was canceled or could not be started")
 		}
+		if detail := hardeningResult(resultPath); detail != "" {
+			return RunResult{Attempted: attempted}, fmt.Errorf("elevated hardening failed: %s", detail)
+		}
 		return RunResult{Attempted: attempted}, fmt.Errorf("elevated hardening failed: %s", safeError(output, runErr))
 	}
 	if !attempted {
 		return RunResult{}, fmt.Errorf("elevated hardening did not start")
 	}
 	return RunResult{Attempted: true}, nil
+}
+
+func hardeningResult(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil || len(data) == 0 {
+		return ""
+	}
+	const limit = 8 << 10
+	if len(data) > limit {
+		data = data[len(data)-limit:]
+	}
+	return strings.TrimSpace(strings.ReplaceAll(string(data), "\r\n", "\n"))
 }
 
 // Windows PowerShell can inherit a PSModulePath headed by PowerShell 7's

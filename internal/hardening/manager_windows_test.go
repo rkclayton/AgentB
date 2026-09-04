@@ -81,3 +81,21 @@ func TestSafeErrorDoesNotExposePowerShellProgressCLIXML(t *testing.T) {
 		t.Fatalf("safeError = %q", message)
 	}
 }
+
+func TestHardeningResultReturnsElevatedHelperDetail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "result.txt")
+	if err := os.WriteFile(path, []byte("apply-acls.ps1 failed: access denied\r\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := hardeningResult(path); got != "apply-acls.ps1 failed: access denied" {
+		t.Fatalf("hardeningResult = %q", got)
+	}
+}
+
+func TestVerifyDefersToStructuredStatusInspection(t *testing.T) {
+	manager := &windowsManager{orchestrationScript: `Z:\missing\apply-hardening.ps1`}
+	result, err := manager.Run(context.Background(), "verify", Request{})
+	if err != nil || !result.Attempted {
+		t.Fatalf("Run(verify) = (%+v, %v)", result, err)
+	}
+}
