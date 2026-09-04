@@ -475,7 +475,7 @@ function sessionControls(active) {
   const resetKey = `reset:${active.id}`;
   return `<div class="settings-actions vertical">
       <button type="button" class="${armed.has(resetKey) ? "confirm" : ""}" data-action="reset-session" data-id="${attr(active.id)}">${armed.has(resetKey) ? "Confirm reset" : "Reset session"}</button>
-      <a class="text-button" href="/chat?session=${encodeURIComponent(active.id)}" target="_blank" rel="noopener">Open chat window</a>
+      <a class="text-button" href="/chat?session=${encodeURIComponent(active.id)}" target="agent_b_chat">Open chat window</a>
     </div>
     ${copyRow("JSONL", active.log_path || "")}`;
 }

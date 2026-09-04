@@ -30,6 +30,19 @@
 .header #connection.alarm {
   color: var(--alarm);
 }
+.header-action {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 12px;
+  color: var(--ink);
+  background: rgba(216, 221, 227, 0.08);
+  border-radius: 2px;
+  text-decoration: none;
+}
+.header-action:hover {
+  background: rgba(216, 221, 227, 0.12);
+}
 .identity-alarm {
   padding: 8px 16px;
   color: var(--well);
