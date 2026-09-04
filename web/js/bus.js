@@ -1,4 +1,5 @@
 import { createOperatorReconciler } from "./operator-reconcile.js";
+import { modelTurnKey, trimTimeline } from "./reasoning.js";
 
 export const store = {
   sessions: {},
@@ -143,10 +144,14 @@ export function reduce(event) {
     case "run.stopped":
       if (target) {
 		mergeRun(target, { status: store.replay ? "replay" : "idle", partial: "" });
+        target._streamTurnKey = "";
         target._lastStop = data.reason;
         target._stage = "wait_user";
         if (data.reason === "tool_errors") target._dispatchAlarm = true;
       }
+      break;
+    case "model.request":
+      if (target) target._streamTurnKey = modelTurnKey(event);
       break;
     case "stage":
       if (target) {
@@ -196,6 +201,8 @@ export function reduce(event) {
         if (data.message?.category === "summary")
           target.messages.splice(1, 0, data.message);
         else target.messages.push(data.message);
+        if (data.message?.role === "assistant" && modelTurnKey(event) === target._streamTurnKey)
+          target._streamTurnKey = "";
       }
       break;
     case "message.updated":
@@ -261,8 +268,7 @@ export function reduce(event) {
   if (target) {
     target.timeline = target.timeline || [];
     target.timeline.push(event);
-    if (!store.replay && target.timeline.length > 500)
-      target.timeline = target.timeline.slice(-500);
+    if (!store.replay) target.timeline = trimTimeline(target.timeline, target._streamTurnKey);
   }
   if (event.type === "workspace.conflict" && data.other_session_id) {
     const other = store.sessions[data.other_session_id];
@@ -282,6 +288,7 @@ function hydrate(value) {
 	value._stage = "";
 	value._completedStages = [];
 	value._activeTool = "";
+	value._streamTurnKey = "";
 	for (const event of value.timeline) {
 	  const data = event.data || {};
 	  if (event.type === "stage") {
@@ -289,16 +296,20 @@ function hydrate(value) {
 		  value._stage = data.stage;
 		  if (data.stage === "assemble") value._completedStages = [];
 		} else if (!value._completedStages.includes(data.stage)) value._completedStages.push(data.stage);
-	  } else if (event.type === "model.progress") value._progress = data;
+	  } else if (event.type === "model.request") value._streamTurnKey = modelTurnKey(event);
+	  else if (event.type === "model.progress") value._progress = data;
 	  else if (event.type === "model.response") value._timings = data.timings;
 	  else if (event.type === "tool.call") value._activeTool = data.name;
 	  else if (event.type === "tool.result") value._activeTool = "";
+	  else if (event.type === "message.appended" && data.message?.role === "assistant" && modelTurnKey(event) === value._streamTurnKey) value._streamTurnKey = "";
 	  else if (event.type === "run.stopped") {
+		value._streamTurnKey = "";
 		value._lastStop = data.reason;
 		value._stage = "wait_user";
 		value._stageState = "enter";
 	  }
 	}
+	if (value.run.status === "idle" || value.run.status === "replay") value._streamTurnKey = "";
 }
 export function setActive(id) {
   if (store.sessions[id]) {

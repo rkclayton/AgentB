@@ -1,5 +1,6 @@
 import { api, store, subscribe } from "./bus.js";
 import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
+import { createThinkingRenderer, hydrateAgentEntries, modelTurnKey } from "./reasoning.js";
 
 const binding = document.getElementById("chat-binding");
 const status = document.getElementById("chat-status");
@@ -25,6 +26,32 @@ let frame = 0;
 let renderTimer = 0;
 let lastRender = 0;
 const renderIntervalMS = 50;
+const thinkingRenderer = createThinkingRenderer({
+  document,
+  expanded,
+  rerender: () => render(),
+  format,
+  formatDuration: formatThoughtSeconds,
+});
+const entryViews = new Map();
+let usedEntryViews = new Set();
+const earlierButton = document.createElement("button");
+earlierButton.type = "button";
+earlierButton.className = "chat-earlier";
+earlierButton.onclick = () => {
+  page++;
+  follow = false;
+  renderLog(store.sessions[bound]);
+};
+const jumpButton = document.createElement("button");
+jumpButton.type = "button";
+jumpButton.className = "chat-jump";
+jumpButton.textContent = "Jump to latest";
+jumpButton.onclick = () => {
+  follow = true;
+  page = 0;
+  renderLog(store.sessions[bound]);
+};
 const operatorControl = createOperatorStatusController(operatorStatus, {
   identity: () => store.shell_identity,
   interactive: () => !store.replay,
@@ -133,12 +160,13 @@ function renderBudget(session) {
 
 function renderLog(session) {
   const wasBottom = follow;
-  log.replaceChildren();
+  thinkingRenderer.begin();
+  usedEntryViews = new Set();
   if (!session) {
     const empty = document.createElement("div");
     empty.className = "chat-empty";
     empty.textContent = "Choose a session to start.";
-    log.append(empty);
+    finishLogRender([empty]);
     return;
   }
   const entries = buildEntries(session);
@@ -146,39 +174,38 @@ function renderLog(session) {
     const empty = document.createElement("div");
     empty.className = "chat-empty";
     empty.textContent = session.runnable ? "Send a task to start the loop." : session.not_runnable_reason;
-    log.append(empty);
+    finishLogRender([empty]);
     return;
   }
+  const nodes = [];
   const end = Math.max(0, entries.length - page * 100);
   const start = Math.max(0, end - 300);
   if (start > 0) {
-    const earlier = document.createElement("button");
-    earlier.type = "button";
-    earlier.className = "chat-earlier";
-    earlier.textContent = `earlier: ${start} entries`;
-    earlier.onclick = () => {
-      page++;
-      follow = false;
-      renderLog(session);
-    };
-    log.append(earlier);
+    earlierButton.textContent = `earlier: ${start} entries`;
+    nodes.push(earlierButton);
   }
-  for (const entry of entries.slice(start, end)) log.append(renderEntry(session, entry));
-  const jump = document.createElement("button");
-  jump.type = "button";
-  jump.className = "chat-jump";
-  jump.textContent = "Jump to latest";
-  jump.hidden = follow && page === 0;
-  jump.onclick = () => {
-    follow = true;
-    page = 0;
-    renderLog(session);
-  };
-  log.append(jump);
+  for (const entry of entries.slice(start, end)) nodes.push(renderEntry(session, entry));
+  jumpButton.hidden = follow && page === 0;
+  nodes.push(jumpButton);
+  finishLogRender(nodes);
   requestAnimationFrame(() => {
     if (wasBottom && page === 0) log.scrollTop = log.scrollHeight;
-    jump.hidden = follow && page === 0;
+    jumpButton.hidden = follow && page === 0;
   });
+}
+
+function finishLogRender(nodes) {
+  reconcileChildren(log, nodes);
+  thinkingRenderer.end();
+  for (const key of entryViews.keys()) if (!usedEntryViews.has(key)) entryViews.delete(key);
+}
+
+function reconcileChildren(parent, nodes) {
+  for (let index = 0; index < nodes.length; index++) {
+    if (parent.children[index] !== nodes[index])
+      parent.insertBefore(nodes[index], parent.children[index] || null);
+  }
+  while (parent.children.length > nodes.length) parent.lastElementChild.remove();
 }
 
 function buildEntries(session) {
@@ -186,21 +213,24 @@ function buildEntries(session) {
   const turns = new Map();
   const calls = new Map();
   const decisions = new Map();
-  const messageIDs = new Set();
+  const userMessageIDs = new Set();
   for (const event of session.timeline || []) {
     const data = event.data || {};
     const turnKey = `${event.run_id}:${data.turn}`;
     if (event.type === "message.appended" && data.message?.role === "user") {
       entries.push({ type: "user", key: `message:${data.message.id}`, text: data.message.content });
-      messageIDs.add(data.message.id);
-    } else if (event.type === "message.appended" && data.message) {
-      messageIDs.add(data.message.id);
+      userMessageIDs.add(data.message.id);
     } else if (event.type === "model.request") {
       const entry = { type: "agent", key: `turn:${turnKey}`, text: "", reasoning: "", reasoningTokens: 0, thinkingStartedMS: 0, thinkingEndedMS: 0, thinkingMS: null, done: false };
       turns.set(turnKey, entry);
       entries.push(entry);
     } else if (event.type === "model.delta") {
-      const entry = turns.get(turnKey);
+      let entry = turns.get(turnKey);
+      if (!entry && activeModelTurn(session, event)) {
+        entry = { type: "agent", key: `turn:${turnKey}`, text: "", reasoning: "", reasoningTokens: 0, thinkingStartedMS: 0, thinkingEndedMS: 0, thinkingMS: null, done: false };
+        turns.set(turnKey, entry);
+        entries.push(entry);
+      }
       if (entry) {
         if (data.kind === "reasoning") {
           if (!entry.thinkingStartedMS) entry.thinkingStartedMS = eventTime(event);
@@ -218,6 +248,7 @@ function buildEntries(session) {
         entries.push(entry);
       }
       entry.text = data.content || entry.text;
+      entry.toolCallIDs = (data.tool_calls || []).map((call) => call.id);
       entry.reasoningTokens = data.reasoning_tokens || 0;
       if (entry.thinkingStartedMS && !entry.thinkingEndedMS) entry.thinkingEndedMS = eventTime(event);
       entry.thinkingMS = entry.thinkingStartedMS && entry.thinkingEndedMS
@@ -245,25 +276,16 @@ function buildEntries(session) {
   }
   // The live timeline is a bounded tail. Rebuild messages that aged out as one
   // ordered prefix; separating user and assistant fallbacks destroys turn order.
-  const representedText = new Map();
-  for (const entry of entries) {
-    if (entry.type === "agent" && entry.text)
-      representedText.set(entry.text, (representedText.get(entry.text) || 0) + 1);
-  }
+  const matchedMessages = hydrateAgentEntries(entries, session.messages || []);
   const callDetails = messageCallDetails(session.messages || []);
   const missing = [];
   for (let index = (session.messages || []).length - 1; index >= 0; index--) {
     const message = session.messages[index];
-    if (messageIDs.has(message.id)) continue;
     if (message.role === "user") {
+      if (userMessageIDs.has(message.id)) continue;
       missing.push({ type: "user", key: `message:${message.id}`, text: message.content });
     } else if (message.role === "assistant") {
-      const count = representedText.get(message.content) || 0;
-      if (message.content && count > 0) {
-        representedText.set(message.content, count - 1);
-        continue;
-      }
-      if ((message.tool_calls || []).some((call) => calls.has(call.id))) continue;
+      if (matchedMessages.has(message)) continue;
       if (message.content || message.reasoning) {
         const tokens = Math.ceil((message.reasoning || "").length / 3.6);
         const rate = Number(session._timings?.predicted_per_second || 0);
@@ -323,6 +345,11 @@ function eventTime(event) {
   return Number.isFinite(value) ? value : 0;
 }
 
+function activeModelTurn(session, event) {
+  const status = session.run?.status || "idle";
+  return status !== "idle" && status !== "replay" && modelTurnKey(event) === `${session.run.run_id}:${session.run.turn}`;
+}
+
 function messageCallDetails(messages) {
   const details = new Map();
   for (const message of messages) {
@@ -351,66 +378,102 @@ const noticeTypes = new Set([
 function renderEntry(session, entry) {
   if (entry.type === "notice") return renderNotice(session, entry);
   if (entry.type === "response") return renderResponse(session, entry);
-  const row = document.createElement("section");
-  row.className = `chat-entry ${entry.type === "user" ? "chat-user" : entry.type === "tool" ? "tool-entry" : "chat-agent"}`;
-  row.tabIndex = 0;
-  row.append(speaker(entry.type === "user" ? "you" : "agent"));
-  const content = document.createElement("div");
-  content.className = "chat-content";
-  if (entry.type === "user") content.textContent = entry.text;
+  let view = entryViews.get(entry.key);
+  if (!view) {
+    const row = document.createElement("section");
+    row.tabIndex = 0;
+    const content = document.createElement("div");
+    content.className = "chat-content";
+    row.append(speaker(entry.type === "user" ? "you" : "agent"), content);
+    view = { row, content, text: "" };
+    entryViews.set(entry.key, view);
+  }
+  usedEntryViews.add(entry.key);
+  view.row.className = `chat-entry ${entry.type === "user" ? "chat-user" : entry.type === "tool" ? "tool-entry" : "chat-agent"}`;
+  const content = view.content;
+  if (entry.type === "user") {
+    if (view.text !== entry.text) content.textContent = entry.text;
+    view.text = entry.text;
+  }
   else if (entry.type === "tool") content.append(toolTick(entry));
   else {
+    const nodes = [];
     const tokens = entry.reasoningTokens || Math.ceil((entry.reasoning || "").length / 3.6);
-    if (tokens > 0 || !entry.done) content.append(thinking(entry, tokens));
-    if (entry.text) renderMarkdown(content, entry.text);
+    if (tokens > 0 || !entry.done) nodes.push(thinking(entry, tokens));
+    if (entry.text) {
+      const answer = document.createElement("div");
+      renderMarkdown(answer, entry.text);
+      nodes.push(answer);
+    }
     if (!entry.done) {
       const caret = document.createElement("span");
       caret.className = "stream-caret";
-      content.append(caret);
+      nodes.push(caret);
     }
+    reconcileChildren(content, nodes);
   }
-  row.append(content);
-  return row;
+  return view.row;
 }
 
 function renderResponse(session, entry) {
-  const row = document.createElement("section");
-  row.className = "chat-entry chat-agent chat-response";
-  row.tabIndex = 0;
-  row.append(speaker("agent"));
-  const content = document.createElement("div");
-  content.className = "chat-content chat-response-content";
+  let view = entryViews.get(entry.key);
+  if (!view) {
+    const row = document.createElement("section");
+    row.className = "chat-entry chat-agent chat-response";
+    row.tabIndex = 0;
+    const content = document.createElement("div");
+    content.className = "chat-content chat-response-content";
+    row.append(speaker("agent"), content);
+    view = { row, content, items: new Map() };
+    entryViews.set(entry.key, view);
+  }
+  usedEntryViews.add(entry.key);
+  const nodes = [];
+  const usedItems = new Set();
   for (const item of entry.items) {
-    if (item.type === "agent") {
-      const step = document.createElement("div");
-      step.className = "chat-response-step";
-      const tokens = item.reasoningTokens || Math.ceil((item.reasoning || "").length / 3.6);
-      if (tokens > 0 || !item.done) step.append(thinking(item, tokens));
-      if (item.text) {
-        const answer = document.createElement("div");
-        answer.className = "chat-response-answer";
-        renderMarkdown(answer, item.text);
-        step.append(answer);
-      }
-      if (!item.done) {
-        const caret = document.createElement("span");
-        caret.className = "stream-caret";
-        step.append(caret);
-      }
-      content.append(step);
-    } else if (item.type === "tool") {
-      const step = document.createElement("div");
-      step.className = "chat-response-step chat-response-tool";
-      step.append(toolTick(item));
-      content.append(step);
-    } else if (item.type === "notice") {
+    usedItems.add(item.key);
+    if (item.type === "notice") {
       const notice = noticeContent(session, item);
       notice.classList.add("chat-response-notice");
-      content.append(notice);
+      nodes.push(notice);
+      continue;
     }
+    let itemView = view.items.get(item.key);
+    if (!itemView) {
+      const step = document.createElement("div");
+      step.className = `chat-response-step ${item.type === "tool" ? "chat-response-tool" : ""}`;
+      itemView = { step, answer: null, caret: null, answerText: "" };
+      view.items.set(item.key, itemView);
+    }
+    const stepNodes = [];
+    if (item.type === "agent") {
+      const tokens = item.reasoningTokens || Math.ceil((item.reasoning || "").length / 3.6);
+      if (tokens > 0 || !item.done) stepNodes.push(thinking(item, tokens));
+      if (item.text) {
+        if (!itemView.answer) {
+          itemView.answer = document.createElement("div");
+          itemView.answer.className = "chat-response-answer";
+        }
+        if (itemView.answerText !== item.text) renderMarkdown(itemView.answer, item.text);
+        itemView.answerText = item.text;
+        stepNodes.push(itemView.answer);
+      }
+      if (!item.done) {
+        if (!itemView.caret) {
+          itemView.caret = document.createElement("span");
+          itemView.caret.className = "stream-caret";
+        }
+        stepNodes.push(itemView.caret);
+      }
+    } else if (item.type === "tool") {
+      stepNodes.push(toolTick(item));
+    }
+    reconcileChildren(itemView.step, stepNodes);
+    nodes.push(itemView.step);
   }
-  row.append(content);
-  return row;
+  reconcileChildren(view.content, nodes);
+  for (const key of view.items.keys()) if (!usedItems.has(key)) view.items.delete(key);
+  return view.row;
 }
 
 function speaker(name) {
@@ -429,45 +492,7 @@ function speaker(name) {
 }
 
 function thinking(entry, tokens) {
-  const root = document.createElement("div");
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = `thinking-line ${entry.done ? "thought-line" : "thinking-active"}`;
-  const open = expanded.has(entry.key);
-  button.setAttribute("aria-expanded", String(open));
-  const caret = document.createElement("span");
-  caret.className = "disclosure-caret";
-  caret.textContent = open ? "▾" : "▸";
-  button.append(caret);
-  if (entry.done) {
-    const summary = document.createElement("em");
-    const duration = formatThoughtSeconds(entry.thinkingMS);
-    summary.textContent = `Thought ${entry.thinkingEstimated && duration ? "~" : ""}${duration || "—"} seconds (${format(tokens)} tokens)`;
-    button.append(summary);
-  } else {
-    const label = document.createElement("span");
-    label.textContent = "Thinking";
-    const dots = document.createElement("span");
-    dots.className = "thinking-dots";
-    dots.textContent = "...";
-    // Streaming deltas rebuild the row frequently. Preserve the visual phase so
-    // those rebuilds do not pin the progress indicator to its first dot.
-    dots.style.animationDelay = `-${Date.now() % 1200}ms`;
-    label.append(dots);
-    button.append(label);
-  }
-  button.onclick = () => {
-    expanded.has(entry.key) ? expanded.delete(entry.key) : expanded.add(entry.key);
-    render();
-  };
-  root.append(button);
-  if (expanded.has(entry.key)) {
-    const pre = document.createElement("pre");
-    pre.className = "thinking-body";
-    pre.textContent = entry.reasoning;
-    root.append(pre);
-  }
-  return root;
+  return thinkingRenderer.render(entry, tokens);
 }
 
 function toolTick(entry) {
