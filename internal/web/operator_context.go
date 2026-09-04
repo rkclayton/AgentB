@@ -11,8 +11,10 @@ import (
 )
 
 func (s *Server) setOperatorContext(enabled bool, reason string, expectedEpoch uint64) tools.ShellIdentityStatus {
+	s.operatorChangeMu.Lock()
+	defer s.operatorChangeMu.Unlock()
 	s.mu.RLock()
-	timeoutMinutes := s.cfg.Shell.OperatorContextTimeoutMinutes
+	timeoutMinutes := s.cfg.Shell.OperatorContextIdleTimeoutMinutes
 	s.mu.RUnlock()
 
 	s.operatorMu.Lock()
@@ -21,6 +23,28 @@ func (s *Server) setOperatorContext(enabled bool, reason string, expectedEpoch u
 		s.operatorMu.Unlock()
 		return status
 	}
+	s.resetOperatorTimerLocked(enabled, timeoutMinutes)
+	s.operatorMu.Unlock()
+	return s.applyOperatorContext(enabled, reason)
+}
+
+func (s *Server) touchOperatorContext(reason string) {
+	s.operatorChangeMu.Lock()
+	defer s.operatorChangeMu.Unlock()
+	s.mu.RLock()
+	timeoutMinutes := s.cfg.Shell.OperatorContextIdleTimeoutMinutes
+	s.mu.RUnlock()
+	s.operatorMu.Lock()
+	if !s.operatorEnabled {
+		s.operatorMu.Unlock()
+		return
+	}
+	s.resetOperatorTimerLocked(true, timeoutMinutes)
+	s.operatorMu.Unlock()
+	s.applyOperatorContext(true, reason)
+}
+
+func (s *Server) resetOperatorTimerLocked(enabled bool, timeoutMinutes int) {
 	s.operatorEpoch++
 	epoch := s.operatorEpoch
 	if s.operatorTimer != nil {
@@ -29,16 +53,18 @@ func (s *Server) setOperatorContext(enabled bool, reason string, expectedEpoch u
 	}
 	s.operatorEnabled = enabled
 	s.operatorExpires = ""
-	if enabled {
-		duration := s.operatorDuration(timeoutMinutes)
-		expires := time.Now().Add(duration).UTC()
-		s.operatorExpires = expires.Format(time.RFC3339)
-		s.operatorTimer = time.AfterFunc(duration, func() {
-			s.setOperatorContext(false, "automatic timeout expired", epoch)
-		})
+	if !enabled {
+		return
 	}
-	s.operatorMu.Unlock()
+	duration := time.Duration(timeoutMinutes) * time.Minute
+	expires := s.operatorNow().Add(duration).UTC()
+	s.operatorExpires = expires.Format(time.RFC3339)
+	s.operatorTimer = s.operatorAfter(duration, func() {
+		s.setOperatorContext(false, "idle timeout expired", epoch)
+	})
+}
 
+func (s *Server) applyOperatorContext(enabled bool, reason string) tools.ShellIdentityStatus {
 	runtimeConfig := s.ConfigSnapshot()
 	if s.runner != nil {
 		s.runner.Configure(runtimeConfig)
@@ -93,8 +119,8 @@ func operatorContextPatch(patch map[string]any) (enabled bool, present bool, onl
 	}
 	value, present := shell["operator_context"]
 	if !present {
-		if _, protected := shell["operator_context_timeout_minutes"]; protected {
-			return false, false, false, fmt.Errorf("shell.operator_context_timeout_minutes can be changed only in the protected configuration file while Agent_b is stopped")
+		if _, protected := shell["operator_context_idle_timeout_minutes"]; protected {
+			return false, false, false, fmt.Errorf("shell.operator_context_idle_timeout_minutes can be changed only in the protected configuration file while Agent_b is stopped")
 		}
 		return false, false, false, nil
 	}
@@ -136,7 +162,7 @@ func protectedShellConfigField(patch map[string]any) string {
 	if !ok {
 		return ""
 	}
-	for _, field := range []string{"operator_context", "operator_context_timeout_minutes", "service_account"} {
+	for _, field := range []string{"operator_context", "operator_context_idle_timeout_minutes", "service_account"} {
 		if _, present := shell[field]; present {
 			return "shell." + field
 		}

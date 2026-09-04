@@ -1,5 +1,5 @@
 {
-  "config_version": 2,
+  "config_version": 3,
   "listen": "127.0.0.1:8790",
   "workspace": "./workspace",
   "log_dir": "logs",
@@ -67,7 +67,7 @@
     "max_output_lines_tail": 40,
     "file_routing_guard": true,
     "operator_context": false,
-    "operator_context_timeout_minutes": 60,
+    "operator_context_idle_timeout_minutes": 20,
     "service_account": { "enabled": false, "account": "agentb-svc", "domain": "." },
     "deny": ["rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"]
   }

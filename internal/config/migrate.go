@@ -2,6 +2,34 @@ package config
 
 import "encoding/json"
 
+func migrateOperatorIdleTimeout(data []byte, version int) (bool, bool, []byte, error) {
+	if version == CurrentConfigVersion {
+		return false, false, data, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false, false, nil, err
+	}
+	remapped := false
+	if shellRaw := raw["shell"]; shellRaw != nil {
+		var shell map[string]json.RawMessage
+		if err := json.Unmarshal(shellRaw, &shell); err != nil {
+			return false, false, nil, err
+		}
+		if old, present := shell["operator_context_timeout_minutes"]; present {
+			if _, alreadyPresent := shell["operator_context_idle_timeout_minutes"]; !alreadyPresent {
+				shell["operator_context_idle_timeout_minutes"] = old
+			}
+			delete(shell, "operator_context_timeout_minutes")
+			remapped = true
+		}
+		raw["shell"], _ = json.Marshal(shell)
+	}
+	raw["config_version"], _ = json.Marshal(CurrentConfigVersion)
+	out, err := json.Marshal(raw)
+	return true, remapped, out, err
+}
+
 func migrateV1(data []byte) (bool, []byte, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {

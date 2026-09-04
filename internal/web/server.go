@@ -47,13 +47,19 @@ type Server struct {
 	shellTest        func(context.Context) (string, error)
 	accountMu        sync.Mutex
 	mutationToken    string
+	operatorChangeMu sync.Mutex
 	operatorMu       sync.Mutex
 	operatorEnabled  bool
 	operatorExpires  string
-	operatorTimer    *time.Timer
+	operatorTimer    operatorTimer
 	operatorEpoch    uint64
 	operatorRequest  func(*http.Request) error
-	operatorDuration func(int) time.Duration
+	operatorNow      func() time.Time
+	operatorAfter    func(time.Duration, func()) operatorTimer
+}
+
+type operatorTimer interface {
+	Stop() bool
 }
 
 func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
@@ -61,8 +67,11 @@ func New(cfg *config.Config, path, webDir string, bus *events.Bus) *Server {
 	cfg.Shell.OperatorContextExpiresAt = ""
 	return &Server{
 		cfg: cfg, configPath: path, webDir: webDir, bus: bus, mutationToken: newMutationToken(),
-		operatorRequest:  requireOperatorHTTPClient,
-		operatorDuration: func(minutes int) time.Duration { return time.Duration(minutes) * time.Minute },
+		operatorRequest: requireOperatorHTTPClient,
+		operatorNow:     time.Now,
+		operatorAfter: func(duration time.Duration, fn func()) operatorTimer {
+			return time.AfterFunc(duration, fn)
+		},
 	}
 }
 func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry }
@@ -78,6 +87,11 @@ func (s *Server) SetRuntime(scheduler *agent.Scheduler, runner *agent.Runner, pr
 	s.scheduler = scheduler
 	s.runner = runner
 	s.prompt = prompt
+	if runner != nil {
+		runner.SetToolActivity(func(phase string) {
+			s.touchOperatorContext("idle window reset: tool execution " + phase)
+		})
+	}
 }
 func (s *Server) ConfigSnapshot() config.Config {
 	s.mu.RLock()

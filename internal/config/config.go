@@ -112,7 +112,7 @@ type Approval struct {
 }
 
 const (
-	CurrentConfigVersion     = 2
+	CurrentConfigVersion     = 3
 	ApprovalModeBoundaryOnly = "boundary-only"
 	ApprovalModeMutating     = "mutating"
 	ApprovalModeAll          = "all"
@@ -120,6 +120,7 @@ const (
 )
 
 const ApprovalDefaultMigrationNotice = "corrected inherited approval default from mutating to boundary-only; mutating can be reselected in Settings > Run & approval"
+const OperatorIdleTimeoutMigrationNotice = "migrated shell.operator_context_timeout_minutes to shell.operator_context_idle_timeout_minutes; operator mode now expires after agent inactivity"
 
 type GlobalContext struct {
 	SoftPct    float64 `json:"soft_pct"`
@@ -168,11 +169,11 @@ type Shell struct {
 	MaxOutputLinesTail int      `json:"max_output_lines_tail"`
 	FileRoutingGuard   *bool    `json:"file_routing_guard"`
 	// OperatorContext is exposed to the UI but Save always persists it as false.
-	OperatorContext               bool                `json:"operator_context"`
-	OperatorContextExpiresAt      string              `json:"-"`
-	OperatorContextTimeoutMinutes int                 `json:"operator_context_timeout_minutes"`
-	ServiceAccount                ShellServiceAccount `json:"service_account"`
-	Deny                          []string            `json:"deny"`
+	OperatorContext                   bool                `json:"operator_context"`
+	OperatorContextExpiresAt          string              `json:"-"`
+	OperatorContextIdleTimeoutMinutes int                 `json:"operator_context_idle_timeout_minutes"`
+	ServiceAccount                    ShellServiceAccount `json:"service_account"`
+	Deny                              []string            `json:"deny"`
 }
 
 type ShellServiceAccount struct {
@@ -194,7 +195,7 @@ func Defaults(workspace string) Config {
 		Servers: []Profile{{ID: "local", Label: "Local", BaseURL: "http://127.0.0.1:8080", Model: "", RequestTimeoutS: 900, ProbeMode: "full", Sampling: SamplingPair{Thinking: thinking, Nonthinking: nonthinking}, Reasoning: Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}}, Context: Context{ReserveOutput: 10240}, Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}}}},
 		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
 		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500, AllowDomains: []string{}, AllowInternalHosts: []string{}}},
-		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextTimeoutMinutes: 60, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
+		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextIdleTimeoutMinutes: 20, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
 	}
 }
 
@@ -226,10 +227,18 @@ func Load(path string) (*Config, bool, bool, error) {
 		return nil, false, created, err
 	}
 	unstamped := metadata.ConfigVersion == nil
-	if !unstamped && *metadata.ConfigVersion != CurrentConfigVersion {
+	if !unstamped && *metadata.ConfigVersion != 2 && *metadata.ConfigVersion != CurrentConfigVersion {
 		return nil, false, created, fmt.Errorf("config_version: unsupported value %d (current %d)", *metadata.ConfigVersion, CurrentConfigVersion)
 	}
 	migrated, data, err := migrateV1(data)
+	if err != nil {
+		return nil, false, created, err
+	}
+	version := 0
+	if metadata.ConfigVersion != nil {
+		version = *metadata.ConfigVersion
+	}
+	schemaMigrated, idleTimeoutRemapped, data, err := migrateOperatorIdleTimeout(data, version)
 	if err != nil {
 		return nil, false, created, err
 	}
@@ -248,15 +257,18 @@ func Load(path string) (*Config, bool, bool, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, false, created, err
 	}
-	if migrated || unstamped {
+	if migrated || schemaMigrated || unstamped {
 		if err := cfg.Save(path); err != nil {
 			return nil, false, created, err
 		}
 	}
 	if approvalDefaultCorrected {
-		cfg.LoadNotices = []string{ApprovalDefaultMigrationNotice}
+		cfg.LoadNotices = append(cfg.LoadNotices, ApprovalDefaultMigrationNotice)
 	}
-	return &cfg, migrated, created, nil
+	if idleTimeoutRemapped {
+		cfg.LoadNotices = append(cfg.LoadNotices, OperatorIdleTimeoutMigrationNotice)
+	}
+	return &cfg, migrated || schemaMigrated, created, nil
 }
 
 func (c Config) Save(path string) error {
@@ -396,8 +408,8 @@ func (c Config) Validate() error {
 	if c.Shell.MaxOutputLinesHead < 0 || c.Shell.MaxOutputLinesTail < 0 {
 		return fmt.Errorf("shell: output line limits cannot be negative")
 	}
-	if c.Shell.OperatorContextTimeoutMinutes < 1 || c.Shell.OperatorContextTimeoutMinutes > 1440 {
-		return fmt.Errorf("shell.operator_context_timeout_minutes: must be between 1 and 1440")
+	if c.Shell.OperatorContextIdleTimeoutMinutes < 1 || c.Shell.OperatorContextIdleTimeoutMinutes > 1440 {
+		return fmt.Errorf("shell.operator_context_idle_timeout_minutes: must be between 1 and 1440")
 	}
 	if strings.TrimSpace(c.Shell.ServiceAccount.Account) == "" {
 		return fmt.Errorf("shell.service_account.account: required")
@@ -466,8 +478,8 @@ func applyDefaults(c *Config) {
 	if c.Shell.FileRoutingGuard == nil {
 		c.Shell.FileRoutingGuard = boolPointer(true)
 	}
-	if c.Shell.OperatorContextTimeoutMinutes == 0 {
-		c.Shell.OperatorContextTimeoutMinutes = d.Shell.OperatorContextTimeoutMinutes
+	if c.Shell.OperatorContextIdleTimeoutMinutes == 0 {
+		c.Shell.OperatorContextIdleTimeoutMinutes = d.Shell.OperatorContextIdleTimeoutMinutes
 	}
 	if c.Shell.ServiceAccount.Account == "" {
 		c.Shell.ServiceAccount.Account = d.Shell.ServiceAccount.Account

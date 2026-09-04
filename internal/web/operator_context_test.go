@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,82 @@ import (
 	"harness/internal/session"
 	"harness/internal/tools"
 )
+
+type fakeOperatorTimer struct {
+	clock   *fakeOperatorClock
+	due     time.Time
+	fn      func()
+	stopped bool
+	fired   bool
+}
+
+func (t *fakeOperatorTimer) Stop() bool {
+	t.clock.mu.Lock()
+	defer t.clock.mu.Unlock()
+	wasActive := !t.stopped && !t.fired
+	t.stopped = true
+	return wasActive
+}
+
+type fakeOperatorClock struct {
+	mu     sync.Mutex
+	now    time.Time
+	timers []*fakeOperatorTimer
+}
+
+func newFakeOperatorClock() *fakeOperatorClock {
+	return &fakeOperatorClock{now: time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)}
+}
+
+func (c *fakeOperatorClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.now
+}
+
+func (c *fakeOperatorClock) After(duration time.Duration, fn func()) operatorTimer {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	timer := &fakeOperatorTimer{clock: c, due: c.now.Add(duration), fn: fn}
+	c.timers = append(c.timers, timer)
+	return timer
+}
+
+func (c *fakeOperatorClock) Advance(duration time.Duration) {
+	c.mu.Lock()
+	target := c.now.Add(duration)
+	for {
+		var next *fakeOperatorTimer
+		for _, timer := range c.timers {
+			if timer.stopped || timer.fired || timer.due.After(target) || next != nil && !timer.due.Before(next.due) {
+				continue
+			}
+			next = timer
+		}
+		if next == nil {
+			c.now = target
+			c.mu.Unlock()
+			return
+		}
+		c.now = next.due
+		next.fired = true
+		fn := next.fn
+		c.mu.Unlock()
+		fn()
+		c.mu.Lock()
+	}
+}
+
+func (c *fakeOperatorClock) Fire(timer *fakeOperatorTimer) {
+	timer.fn()
+}
+
+func useFakeOperatorClock(server *Server) *fakeOperatorClock {
+	clock := newFakeOperatorClock()
+	server.operatorNow = clock.Now
+	server.operatorAfter = clock.After
+	return clock
+}
 
 func operatorTestServer(t *testing.T) (*Server, *tools.Shell, string) {
 	t.Helper()
@@ -131,10 +208,10 @@ func TestServiceIdentityCannotDisableItsOwnSplit(t *testing.T) {
 	}
 }
 
-func TestOperatorContextIsRuntimeOnlyAndAutomaticallyExpires(t *testing.T) {
+func TestOperatorContextIsRuntimeOnlyAndExpiresAfterIdleTimeout(t *testing.T) {
 	server, shell, path := operatorTestServer(t)
 	server.operatorRequest = func(*http.Request) error { return nil }
-	server.operatorDuration = func(int) time.Duration { return 25 * time.Millisecond }
+	clock := useFakeOperatorClock(server)
 
 	response := postOperatorContext(t, server, true)
 	if response.Code != http.StatusOK {
@@ -151,10 +228,7 @@ func TestOperatorContextIsRuntimeOnlyAndAutomaticallyExpires(t *testing.T) {
 	if loaded.Shell.OperatorContext {
 		t.Fatal("operator context persisted to config")
 	}
-	deadline := time.Now().Add(time.Second)
-	for shell.IdentityStatus().OperatorContext && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
+	clock.Advance(20 * time.Minute)
 	if shell.IdentityStatus().OperatorContext || server.ConfigSnapshot().Shell.OperatorContext {
 		t.Fatal("operator context did not expire")
 	}
@@ -168,12 +242,105 @@ func TestOperatorContextIsRuntimeOnlyAndAutomaticallyExpires(t *testing.T) {
 		if data["enabled"] == true {
 			enabled = true
 		}
-		if data["enabled"] == false && data["reason"] == "automatic timeout expired" {
+		if data["enabled"] == false && data["reason"] == "idle timeout expired" {
 			disabled = true
 		}
 	}
 	if !enabled || !disabled {
 		t.Fatalf("audit events enabled=%t disabled=%t events=%#v", enabled, disabled, eventsSeen)
+	}
+}
+
+func TestOperatorActivityKeepsGrantActivePastFormerAbsoluteCeiling(t *testing.T) {
+	server, _, _ := operatorTestServer(t)
+	clock := useFakeOperatorClock(server)
+	server.setOperatorContext(true, "test enable", 0)
+	for range 7 {
+		clock.Advance(10 * time.Minute)
+		server.touchOperatorContext("idle window reset: tool execution completed")
+	}
+	if !server.ConfigSnapshot().Shell.OperatorContext {
+		t.Fatal("sub-window tool activity did not keep operator context active past 60 minutes")
+	}
+	clock.Advance(20 * time.Minute)
+	if server.ConfigSnapshot().Shell.OperatorContext {
+		t.Fatal("operator context remained active after a full idle window")
+	}
+}
+
+func TestLongExecutionLapsesAndCompletionDoesNotResurrectGrant(t *testing.T) {
+	server, _, _ := operatorTestServer(t)
+	clock := useFakeOperatorClock(server)
+	server.setOperatorContext(true, "test enable", 0)
+	server.touchOperatorContext("idle window reset: tool execution started")
+	clock.Advance(21 * time.Minute)
+	if server.ConfigSnapshot().Shell.OperatorContext {
+		t.Fatal("long execution held operator context beyond the idle window")
+	}
+	server.touchOperatorContext("idle window reset: tool execution completed")
+	if server.ConfigSnapshot().Shell.OperatorContext {
+		t.Fatal("completion resurrected an expired operator grant")
+	}
+}
+
+func TestManualRevokeDuringExecutionCannotBeResurrected(t *testing.T) {
+	server, _, _ := operatorTestServer(t)
+	useFakeOperatorClock(server)
+	server.setOperatorContext(true, "test enable", 0)
+	server.touchOperatorContext("idle window reset: tool execution started")
+	server.setOperatorContext(false, "disabled by operator request", 0)
+	server.touchOperatorContext("idle window reset: tool execution completed")
+	if server.ConfigSnapshot().Shell.OperatorContext {
+		t.Fatal("completion resurrected a manually revoked operator grant")
+	}
+}
+
+func TestToolActivityWithoutGrantCreatesNoGrant(t *testing.T) {
+	server, _, _ := operatorTestServer(t)
+	clock := useFakeOperatorClock(server)
+	server.touchOperatorContext("idle window reset: tool execution started")
+	server.touchOperatorContext("idle window reset: tool execution completed")
+	if server.ConfigSnapshot().Shell.OperatorContext || len(clock.timers) != 0 {
+		t.Fatalf("activity created grant=%t timers=%d", server.ConfigSnapshot().Shell.OperatorContext, len(clock.timers))
+	}
+}
+
+func TestStaleTimerCannotRevokeResetGrant(t *testing.T) {
+	server, _, _ := operatorTestServer(t)
+	clock := useFakeOperatorClock(server)
+	server.setOperatorContext(true, "test enable", 0)
+	first := clock.timers[0]
+	clock.Advance(10 * time.Minute)
+	server.touchOperatorContext("idle window reset: tool execution started")
+	clock.Fire(first)
+	if !server.ConfigSnapshot().Shell.OperatorContext {
+		t.Fatal("stale pre-reset timer revoked the active grant")
+	}
+	clock.Advance(20 * time.Minute)
+	if server.ConfigSnapshot().Shell.OperatorContext {
+		t.Fatal("current timer did not revoke the idle grant")
+	}
+}
+
+func TestBrowserAndConfigReadsDoNotResetIdleTimeout(t *testing.T) {
+	server, _, _ := operatorTestServer(t)
+	clock := useFakeOperatorClock(server)
+	server.setOperatorContext(true, "test enable", 0)
+	clock.Advance(19 * time.Minute)
+	for _, path := range []string{"/api/state", "/api/config"} {
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		response := httptest.NewRecorder()
+		server.Handler().ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("GET %s status=%d", path, response.Code)
+		}
+	}
+	if !firstSSESnapshotOperatorContext(t, server) {
+		t.Fatal("SSE snapshot did not report active operator context")
+	}
+	clock.Advance(time.Minute)
+	if server.ConfigSnapshot().Shell.OperatorContext {
+		t.Fatal("browser, SSE, or config read reset the idle timeout")
 	}
 }
 
@@ -189,7 +356,7 @@ func TestOperatorContextPatchMustBeIsolatedAndTimeoutIsProtected(t *testing.T) {
 		t.Fatalf("mixed patch status=%d body=%s", response.Code, response.Body)
 	}
 
-	request = httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(`{"shell":{"operator_context_timeout_minutes":1}}`))
+	request = httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(`{"shell":{"operator_context_idle_timeout_minutes":1}}`))
 	authorizeMutation(request, server)
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)

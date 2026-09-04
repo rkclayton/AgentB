@@ -166,12 +166,31 @@ func TestDeniedServiceShellPolicyExecutesNothing(t *testing.T) {
 	}
 }
 
+func TestOrdinaryToolExecutionReportsStartAndCompletionActivity(t *testing.T) {
+	cfg := config.Defaults(t.TempDir())
+	cfg.Approval.Mode = config.ApprovalModeBoundaryOnly
+	tool := &shellPolicyTool{}
+	runner, s, _ := shellPolicyRunner(t, cfg, tool)
+	phases := []string{}
+	runner.SetToolActivity(func(phase string) { phases = append(phases, phase) })
+
+	outcome := runner.executeTool(context.Background(), s, "run", "call", "shell", map[string]any{"command": "Write-Output service-ok"})
+	if !outcome.OK || outcome.OperatorContext {
+		t.Fatalf("outcome=%+v", outcome)
+	}
+	if strings.Join(phases, ",") != "started,completed" {
+		t.Fatalf("activity phases=%#v", phases)
+	}
+}
+
 func TestApprovedServiceShellDenialStillRequiresOperatorEscape(t *testing.T) {
 	cfg := config.Defaults(t.TempDir())
 	cfg.Approval.Mode = config.ApprovalModeBoundaryOnly
 	cfg.Shell.ServiceAccount.Enabled = true
 	tool := &shellPolicyTool{offerOverride: true}
 	runner, s, bus := shellPolicyRunner(t, cfg, tool)
+	phases := []string{}
+	runner.SetToolActivity(func(phase string) { phases = append(phases, phase) })
 	eventCh, unsubscribe := bus.Subscribe()
 	defer unsubscribe()
 	done := make(chan tools.CallOutcome, 1)
@@ -203,5 +222,8 @@ func TestApprovedServiceShellDenialStillRequiresOperatorEscape(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("operator escape did not complete")
+	}
+	if strings.Join(phases, ",") != "started,completed" {
+		t.Fatalf("one-shot operator escape changed activity phases=%#v", phases)
 	}
 }

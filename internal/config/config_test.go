@@ -123,6 +123,9 @@ func TestHarnessExampleShipsBoundaryOnlyIndependentlyOfDefaults(t *testing.T) {
 		Approval      struct {
 			Mode string `json:"mode"`
 		} `json:"approval"`
+		Shell struct {
+			OperatorContextIdleTimeoutMinutes int `json:"operator_context_idle_timeout_minutes"`
+		} `json:"shell"`
 	}
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
@@ -132,6 +135,82 @@ func TestHarnessExampleShipsBoundaryOnlyIndependentlyOfDefaults(t *testing.T) {
 	}
 	if document.Approval.Mode != "boundary-only" {
 		t.Fatalf("template approval mode=%q, want literal boundary-only", document.Approval.Mode)
+	}
+	if document.Shell.OperatorContextIdleTimeoutMinutes != 20 {
+		t.Fatalf("template operator idle timeout=%d, want literal 20", document.Shell.OperatorContextIdleTimeoutMinutes)
+	}
+}
+
+func TestOperatorIdleTimeoutSchemaMigration(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	cfg := Defaults(t.TempDir())
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	document["config_version"] = float64(2)
+	shell := document["shell"].(map[string]any)
+	delete(shell, "operator_context_idle_timeout_minutes")
+	shell["operator_context_timeout_minutes"] = float64(37)
+	data, err = json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, migrated, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || loaded.Shell.OperatorContextIdleTimeoutMinutes != 37 {
+		t.Fatalf("migrated=%t version=%d idle=%d", migrated, loaded.ConfigVersion, loaded.Shell.OperatorContextIdleTimeoutMinutes)
+	}
+	if len(loaded.LoadNotices) != 1 || loaded.LoadNotices[0] != OperatorIdleTimeoutMigrationNotice {
+		t.Fatalf("migration notices=%#v", loaded.LoadNotices)
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(persisted, []byte(`operator_context_timeout_minutes`)) || !bytes.Contains(persisted, []byte(`"operator_context_idle_timeout_minutes": 37`)) {
+		t.Fatalf("persisted migration=%s", persisted)
+	}
+	reloaded, migrated, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrated || len(reloaded.LoadNotices) != 0 || reloaded.Shell.OperatorContextIdleTimeoutMinutes != 37 {
+		t.Fatalf("second load migrated=%t notices=%#v idle=%d", migrated, reloaded.LoadNotices, reloaded.Shell.OperatorContextIdleTimeoutMinutes)
+	}
+}
+
+func TestCurrentOperatorIdleTimeoutConfigIsUntouched(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	cfg := Defaults(t.TempDir())
+	cfg.Shell.OperatorContextIdleTimeoutMinutes = 11
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, migrated, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrated || loaded.Shell.OperatorContextIdleTimeoutMinutes != 11 || !bytes.Equal(before, after) {
+		t.Fatalf("migrated=%t idle=%d changed=%t", migrated, loaded.Shell.OperatorContextIdleTimeoutMinutes, !bytes.Equal(before, after))
 	}
 }
 
@@ -246,8 +325,8 @@ func TestServiceAccountSplitDefaultsOffWithLocalAccountDefaults(t *testing.T) {
 	if cfg.Shell.OperatorContext {
 		t.Fatal("operator context defaulted on")
 	}
-	if cfg.Shell.OperatorContextTimeoutMinutes != 60 {
-		t.Fatalf("operator context timeout=%d, want 60", cfg.Shell.OperatorContextTimeoutMinutes)
+	if cfg.Shell.OperatorContextIdleTimeoutMinutes != 20 {
+		t.Fatalf("operator context idle timeout=%d, want 20", cfg.Shell.OperatorContextIdleTimeoutMinutes)
 	}
 	if cfg.Shell.ServiceAccount.Account != "agentb-svc" || cfg.Shell.ServiceAccount.Domain != "." {
 		t.Fatalf("service-account defaults = %+v", cfg.Shell.ServiceAccount)

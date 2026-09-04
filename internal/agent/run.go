@@ -19,23 +19,25 @@ import (
 )
 
 type Runner struct {
-	bus     *events.Bus
-	tools   *tools.Registry
-	prompt  *PromptRenderer
-	profile func(string) (*config.Profile, bool)
-	cfg     func() config.Config
-	gate    *Gate
-	budget  *Budgeter
-	compact *contextmgr.Compactor
-	ids     atomic.Int64
+	bus          *events.Bus
+	tools        *tools.Registry
+	prompt       *PromptRenderer
+	profile      func(string) (*config.Profile, bool)
+	cfg          func() config.Config
+	gate         *Gate
+	budget       *Budgeter
+	compact      *contextmgr.Compactor
+	toolActivity func(string)
+	ids          atomic.Int64
 }
 
 func NewRunner(bus *events.Bus, registry *tools.Registry, prompt *PromptRenderer, profile func(string) (*config.Profile, bool), cfg func() config.Config) *Runner {
 	return &Runner{bus: bus, tools: registry, prompt: prompt, profile: profile, cfg: cfg, gate: NewGate(bus, cfg), budget: NewBudgeter(), compact: contextmgr.New(bus)}
 }
-func (r *Runner) Configure(cfg config.Config) { r.tools.Configure(cfg) }
-func (r *Runner) Gate() *Gate                 { return r.gate }
-func (r *Runner) id(prefix string) string     { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
+func (r *Runner) Configure(cfg config.Config)     { r.tools.Configure(cfg) }
+func (r *Runner) Gate() *Gate                     { return r.gate }
+func (r *Runner) SetToolActivity(fn func(string)) { r.toolActivity = fn }
+func (r *Runner) id(prefix string) string         { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
 func (r *Runner) AddUser(ctx context.Context, s *session.Session, text string) (events.Message, error) {
 	message, err := r.QueueUser(ctx, s, text)
 	if err != nil {
@@ -286,7 +288,7 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	if !approved {
 		return tools.CallOutcome{Content: "error: call denied by user"}
 	}
-	outcome := r.tools.CallDetailed(ctx, s, name, args)
+	outcome := r.callDetailed(ctx, s, name, args)
 	if !outcome.OperatorOverrideAvailable {
 		return outcome
 	}
@@ -331,6 +333,14 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	}
 	outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override was attempted but failed:\n"+overrideContent, false, false
 	return outcome
+}
+
+func (r *Runner) callDetailed(ctx context.Context, s *session.Session, name string, args map[string]any) (outcome tools.CallOutcome) {
+	if r.toolActivity != nil {
+		r.toolActivity("started")
+		defer r.toolActivity("completed")
+	}
+	return r.tools.CallDetailed(ctx, s, name, args)
 }
 
 func (r *Runner) stage(s *session.Session, runID string, turn int, name string, fn func()) {
