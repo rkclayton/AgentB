@@ -128,8 +128,8 @@ func TestFetchRegistryClassifiesRefusalsAsUntrustedFetchedResults(t *testing.T) 
 	cfg := fetchTestConfig()
 	cfg.AllowInternalHosts = nil
 	registry := New(NewFetch(cfg))
-	item := &session.Session{ToolsEnabled: map[string]bool{"fetch": true}}
-	outcome := registry.CallDetailed(context.Background(), item, "fetch", map[string]any{"url": "http://127.0.0.1/"})
+	item := &session.Session{ToolsEnabled: map[string]bool{"fetch_url": true}}
+	outcome := registry.CallDetailed(context.Background(), item, "fetch_url", map[string]any{"url": "http://127.0.0.1/"})
 	if outcome.OK || outcome.Category != "fetched" || !outcome.Untrusted {
 		t.Fatalf("outcome classification = %+v", outcome)
 	}

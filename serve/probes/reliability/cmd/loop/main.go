@@ -270,7 +270,7 @@ func selftest(workspace string) error {
 	}{
 		{"list_dir", `{"path":".","depth":2}`, true, "calc/ops.go"},
 		{"read_file", `{"path":"calc/ops.go"}`, true, "func Subtract"},
-		{"grep", `{"pattern":"Subtract","path":"."}`, true, "calc/ops.go"},
+		{"search_text", `{"pattern":"Subtract","path":"."}`, true, "calc/ops.go"},
 		{"write_file", `{"path":"scratch/note.txt","content":"ok"}`, true, "ok: wrote"},
 		{"edit_file", `{"path":"calc/ops.go","old_string":"return a + b\n}\n\nfunc Divide","new_string":"return a - b\n}\n\nfunc Divide"}`, true, "ok: edited"},
 		{"edit_file", `{"path":"calc/ops.go","old_string":"does not exist","new_string":"x"}`, false, "error: old_string not found in calc/ops.go; read the file and retry with the exact text."},

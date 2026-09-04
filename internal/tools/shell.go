@@ -55,7 +55,7 @@ func NewShell(cfg config.Shell) *Shell {
 }
 func (*Shell) Name() string { return "shell" }
 func (*Shell) Description() string {
-	return "Run a non-interactive shell command from the workspace root with a timeout and bounded output. Direct file discovery and reads are refused; use glob or read_file. Network access belongs in fetch."
+	return "Run command with optional timeout from the workspace root; execution is unconfined. Prefer structured tools when one applies; shell is the fallback."
 }
 func (s *Shell) Schema() map[string]any {
 	cfg := s.config()
@@ -467,7 +467,7 @@ func inspectShellFileRouting(command string) (*shellRoutingRefusal, bool) {
 	for _, segment := range inspected {
 		switch segment.kind {
 		case shellSegmentDiscovery:
-			return routingRefusal(command, "file discovery", "glob", discoveryArguments(segment.words)), false
+			return routingRefusal(command, "file discovery", "find_files", discoveryArguments(segment.words)), false
 		case shellSegmentRead:
 			return routingRefusal(command, "file read", "read_file", readArguments(segment.words)), false
 		}

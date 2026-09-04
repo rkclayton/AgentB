@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -92,5 +93,23 @@ func TestSecurityHeaders(t *testing.T) {
 		if response.Header().Get(name) == "" {
 			t.Errorf("missing %s", name)
 		}
+	}
+}
+
+func TestSnapshotToolInventoryUsesPublicNames(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root)
+	server := New(&cfg, filepath.Join(root, "harness.json"), root, events.NewBus())
+	raw := server.snapshotWithSessions(map[string]any{}, false)["tools"].([]map[string]string)
+	names := make([]string, 0, len(raw))
+	for _, item := range raw {
+		names = append(names, item["name"])
+		if item["description"] == "" {
+			t.Errorf("tool %q has no description", item["name"])
+		}
+	}
+	want := []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files"}
+	if !reflect.DeepEqual(names, want) {
+		t.Fatalf("tool inventory = %v, want %v", names, want)
 	}
 }

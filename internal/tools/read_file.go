@@ -20,7 +20,7 @@ type ReadFile struct {
 func NewReadFile(cfg config.ReadFileTool) *ReadFile { return &ReadFile{cfg: cfg} }
 func (*ReadFile) Name() string                      { return "read_file" }
 func (*ReadFile) Description() string {
-	return "Read a UTF-8 text file allowed by the current file identity. Returns lines from offset, at most limit lines; a trailing note says how many lines remain."
+	return "Read local UTF-8 file lines from path, starting at offset and capped by limit. Unlike fetch_url, it reads the filesystem."
 }
 func (r *ReadFile) Schema() map[string]any {
 	cfg := r.config()

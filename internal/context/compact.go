@@ -23,7 +23,7 @@ func (c *Compactor) Supersede(s *session.Session, runID string, turn int, count 
 	changed := false
 	for current := range messages {
 		item := messages[current]
-		if item.Role != "tool" || item.Turn != turn || item.Elided || (item.Name != "read_file" && item.Name != "grep") {
+		if item.Role != "tool" || item.Turn != turn || item.Elided || (item.Name != "read_file" && item.Name != "search_text") {
 			continue
 		}
 		currentCall, ok := callFor(messages, item.ToolCallID)
@@ -132,7 +132,7 @@ func callFor(messages []events.Message, id string) (events.ToolCall, bool) {
 	return events.ToolCall{}, false
 }
 func supersedes(name, older, current string) bool {
-	if name == "grep" {
+	if name == "search_text" {
 		return canonical(older) == canonical(current)
 	}
 	var a, b struct {

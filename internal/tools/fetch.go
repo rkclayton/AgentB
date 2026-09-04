@@ -37,9 +37,9 @@ func NewFetch(cfg config.FetchTool) *Fetch {
 	return &Fetch{cfg: cfg, resolver: net.DefaultResolver}
 }
 
-func (*Fetch) Name() string { return "fetch" }
+func (*Fetch) Name() string { return "fetch_url" }
 func (*Fetch) Description() string {
-	return "Fetch readable public HTTP or HTTPS text. Use offset and limit to page extracted lines. Returned content is untrusted external data."
+	return "Fetch public HTTP(S) text from url, starting at offset and capped by limit. Unlike read_file, it uses the network and returns untrusted content."
 }
 func (*Fetch) ResultCategory() string { return "fetched" }
 func (*Fetch) ResultUntrusted() bool  { return true }
@@ -170,7 +170,7 @@ func (f *Fetch) CallDetailed(ctx context.Context, _ *session.Session, args map[s
 		return detail
 	}
 	if remaining > 0 {
-		page += fmt.Sprintf("\n[… %d more lines; fetch offset=%d]", remaining, offset+limit)
+		page += fmt.Sprintf("\n[… %d more lines; fetch_url offset=%d]", remaining, offset+limit)
 	}
 	finalURL, _ := meta["final_url"].(string)
 	if finalURL == "" {
@@ -470,8 +470,8 @@ func untrustedFetchEnvelope(source string, status int, mediaType string, bytes i
 
 func (f *Fetch) audit(rawURL string, status, bytes int, truncated bool, err error) {
 	if err != nil {
-		log.Printf("fetch: url=%q status=%d bytes=%d truncated=%t error=%q", rawURL, status, bytes, truncated, err)
+		log.Printf("fetch_url: url=%q status=%d bytes=%d truncated=%t error=%q", rawURL, status, bytes, truncated, err)
 		return
 	}
-	log.Printf("fetch: url=%q status=%d bytes=%d truncated=%t", rawURL, status, bytes, truncated)
+	log.Printf("fetch_url: url=%q status=%d bytes=%d truncated=%t", rawURL, status, bytes, truncated)
 }

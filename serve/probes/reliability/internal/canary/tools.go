@@ -69,7 +69,7 @@ func ToolDefinitions() []ToolDefinition {
 		tool("edit_file", "Replace exactly one occurrence of old_string with new_string. old_string must match the file text exactly, including indentation, and must be unique; include surrounding lines if needed. Returns what changed, or an error naming the closest match.", map[string]any{
 			"path": stringValue(), "old_string": stringValue(), "new_string": stringValue(),
 		}, []string{"path", "old_string", "new_string"}),
-		tool("grep", "Search files under path for a regular expression. Returns up to 50 matching lines as file:line: text.", map[string]any{
+		tool("search_text", "Search local file contents under path for pattern, optionally filtering filenames with glob. Unlike find_files, it returns matching text lines.", map[string]any{
 			"pattern": stringValue(), "path": map[string]any{"type": "string", "default": "."}, "glob": stringValue(),
 		}, []string{"pattern"}),
 		tool("shell", "Run a non-interactive shell command from the workspace root with a timeout. Returns the exit code and combined output, cut to head and tail if long.", map[string]any{
@@ -102,7 +102,7 @@ func (e *ToolExecutor) Execute(ctx context.Context, name string, raw json.RawMes
 		result, err = e.writeFile(args)
 	case "edit_file":
 		result, err = e.editFile(args)
-	case "grep":
+	case "search_text":
 		result, err = e.grep(args)
 	case "shell":
 		result, err = e.shell(ctx, args)

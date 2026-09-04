@@ -14,7 +14,7 @@ type Recall struct {
 func NewRecall(manager *memory.Manager) *Recall { return &Recall{memory: manager} }
 func (*Recall) Name() string                    { return "recall" }
 func (*Recall) Description() string {
-	return "Read every durable note stored for this workspace."
+	return "Read all durable workspace notes; takes no arguments. Use before remember to avoid duplicates; unlike remember, recall never writes."
 }
 func (*Recall) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}

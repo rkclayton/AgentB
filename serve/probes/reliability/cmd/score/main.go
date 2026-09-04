@@ -115,7 +115,7 @@ func scoreFile(path string) (score, error) {
 					value.wrong++
 				}
 			}
-			if item.OK && (item.Name == "read_file" || item.Name == "grep") {
+			if item.OK && (item.Name == "read_file" || item.Name == "search_text") {
 				inspectionSucceeded = true
 				if item.Name == "read_file" {
 					readPaths[pathArg] = true

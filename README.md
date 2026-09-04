@@ -1,6 +1,6 @@
 # Agent_b
 
-Agent_b is a small Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, nine governed tools, exact-or-labeled context accounting, compaction, durable workspace notes, and a unified Chat, Console, and Settings interface. The browser remains dependency-free; the backend uses the listed TLS-fingerprinting and HTML parsing modules for `fetch`.
+Agent_b is a small Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, ten governed tools, exact-or-labeled context accounting, compaction, durable workspace notes, and a unified Chat, Console, and Settings interface. The browser remains dependency-free; the backend uses the listed TLS-fingerprinting and HTML parsing modules for `fetch_url`.
 
 Choose one serving path before you start.
 
@@ -16,7 +16,7 @@ To remove the installed application, use **Settings → Apps → Installed apps 
 
 ## Path A — an endpoint you already run (~5 minutes)
 
-Prerequisites: Go 1.24+ and an OpenAI-compatible endpoint you already run, such as Ollama, LM Studio, vLLM, or a hosted API. Nothing else is required: no GPU, CUDA, or model download. The first source build needs access to the Go module proxy (or a populated module cache) for the fetch tool's pinned dependencies; running the built binary does not.
+Prerequisites: Go 1.24+ and an OpenAI-compatible endpoint you already run, such as Ollama, LM Studio, vLLM, or a hosted API. Nothing else is required: no GPU, CUDA, or model download. The first source build needs access to the Go module proxy (or a populated module cache) for the `fetch_url` tool's pinned dependencies; running the built binary does not.
 
 ```text
 git clone <repo-url>
@@ -59,7 +59,7 @@ With the service-account split enabled, shell and built-in file tools use the `a
 
 The operator control beside Stop is the sole persistent indicator and toggle for the longer-lived operator mode. Its off/on image follows server events in both Console and Chat. Enabling requires confirmation and runs subsequent shell and file tools as the non-elevated Windows account that launched Agent_b; disabling is immediate. There is no absolute ceiling: the grant lapses after 20 minutes without agent tool activity by default, every ordinary tool execution resets that idle deadline at start and completion, and process exit always revokes it. A single call running beyond the idle window can therefore lapse while still executing. The one-shot **Run once as operator** escape neither creates a grant nor resets this clock.
 
-Use `fetch` for public HTTP/HTTPS text. It sends GET requests without model-supplied headers, cookies, or credentials; extracts readable HTML; refuses binary responses and private, loopback, or link-local destinations; and marks every result as untrusted external data. `tools.fetch.allow_domains` optionally limits public domains (an empty list permits all public domains), while `allow_internal_hosts` is an exact-host exception for deliberately configured private endpoints. Defaults are a 20-second request timeout, five redirects, a 2 MiB response cap, and 200 returned lines (maximum 400).
+Use `fetch_url` for public HTTP/HTTPS text. It sends GET requests without model-supplied headers, cookies, or credentials; extracts readable HTML; refuses binary responses and private, loopback, or link-local destinations; and marks every result as untrusted external data. `tools.fetch.allow_domains` optionally limits public domains (an empty list permits all public domains), while `allow_internal_hosts` is an exact-host exception for deliberately configured private endpoints. Defaults are a 20-second request timeout, five redirects, a 2 MiB response cap, and 200 returned lines (maximum 400).
 
 ## Bring your own model
 
@@ -99,7 +99,7 @@ The generated JSONL, workspaces, server logs, score sheets, and summary stay und
 | Profiles | `servers[].{id,label,base_url,model,api_key,request_timeout_s,probe_mode,sampling,reasoning,context,system_prompt_override,capabilities}` |
 | Runs | `run.{max_turns,cycle_window,max_consecutive_tool_errors,max_concurrent,queue_depth}`, `approval.mode` |
 | Context and memory | `context.{soft_pct,summary_pct,accounting}`, `memory.{enabled,dir,max_tokens}` |
-| Tool caps | `tools.{read_file,list_dir,grep,fetch:{timeout_s,max_bytes,max_redirects,default_limit,max_limit,max_line_chars,allow_domains,allow_internal_hosts}}`, `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,file_routing_guard,operator_context,operator_context_idle_timeout_minutes,service_account,deny}` (`fetch` defaults to public hosts with private-network access denied; `file_routing_guard` defaults on; `operator_context` and `service_account.enabled` default off; operator context is process-global, runtime-only, and lapses after 20 idle minutes by default) |
+| Tool caps | `tools.{read_file,list_dir,grep,fetch:{timeout_s,max_bytes,max_redirects,default_limit,max_limit,max_line_chars,allow_domains,allow_internal_hosts}}`, `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,file_routing_guard,operator_context,operator_context_idle_timeout_minutes,service_account,deny}` (`fetch_url` defaults to public hosts with private-network access denied; `file_routing_guard` defaults on; `operator_context` and `service_account.enabled` default off; operator context is process-global, runtime-only, and lapses after 20 idle minutes by default) |
 
 See [web/DESIGN.md](web/DESIGN.md) for the UI contract, [INTERFACES.md](INTERFACES.md) for events and APIs, and [SECURITY.md](SECURITY.md) plus [Windows host hardening](docs/HARDENING.md) before granting a model shell access. The UI uses only the six-color industrial-console system; artwork and vendored fonts live under `web/assets/`.
 
@@ -113,4 +113,12 @@ Dependency licenses and included transitive modules are recorded in [docs/THIRD_
 - API authentication. Agent_b intentionally binds loopback; an EventSource query-string token was rejected because it leaks through logs/history without addressing a present network threat. Authentication must be designed when `listen` moves off loopback.
 - MCP tools and the Discord process. The two Discord integration hooks are the existing `/api/message` plus SSE client surface, and `run.queue_depth`/`message.queued` for chat backpressure; no bot process is included.
 - Session persistence across restarts and orchestration or handoff between sessions.
-- Electron/Tauri packaging, image input, and a second local `--parallel 2` server slot.
+- Image input and a second local `--parallel 2` server slot.
+
+## Decided against
+
+**Desktop packaging (Electron/Tauri), 2026-09-04.** Evaluated and rejected. This is a decision, not a deferral. Packaging would have supplied global hotkeys, tray-resident operation with OS notifications, native file dialogs, taskbar progress and badges, single-instance enforcement, a pinned Chromium, and guaranteed freedom from background throttling.
+
+Background throttling was the only concrete defect it would have fixed, and it was fixed at the correct layer instead: clients reconcile operator state from `/api/state` on every SSE open and foreground resume, and operator events render synchronously rather than waiting on an animation frame. Attachment ingest, the one capability treated as mandatory, does not require packaging either. Drag-and-drop, clipboard paste, and the file picker all deliver file contents to a browser client, and an attachment must be copied into the workspace in either case, because one left outside it defeats `internal/tools/jail.go`. The only thing a browser cannot supply is the attachment's source path, and that limitation is the workspace boundary working as intended.
+
+Against that, packaging adds a bundled Chromium and a Node toolchain to a project whose rules are one process, one binary, and a dependency-free browser; it makes Chromium patching a local responsibility; it assumes a local operator, which conflicts with any later move off loopback; and its main process runs as the operator with full Node access beside the OS-level boundary this project treats as its security model. The remaining benefits, tray residency, notifications, and an always-on-top chat window, are polish and do not carry the trade on their own. Revisit only if a requirement appears that a browser client genuinely cannot serve.

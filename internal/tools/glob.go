@@ -24,9 +24,9 @@ var globIgnoredDirs = map[string]bool{
 type Glob struct{}
 
 func NewGlob() *Glob       { return &Glob{} }
-func (*Glob) Name() string { return "glob" }
+func (*Glob) Name() string { return "find_files" }
 func (*Glob) Description() string {
-	return "Find files by name pattern under an allowed path. Returns sorted paths; skips .git, node_modules, logs, and memory."
+	return "Find local files under path whose names or relative paths match pattern. Unlike search_text, it does not inspect file contents."
 }
 func (*Glob) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"pattern": map[string]any{"type": "string"}, "path": map[string]any{"type": "string", "default": "."}}, "required": []string{"pattern"}}

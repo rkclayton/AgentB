@@ -319,7 +319,7 @@ function tools(active) {
     ${number("tools.list_dir.max_entries", "max entries", cfg.tools?.list_dir?.max_entries)}
     ${text("tools.list_dir.ignore", "ignore", (cfg.tools?.list_dir?.ignore || []).join(", "), "list")}
     ${head("write_file")}${head("edit_file")}
-    ${head("grep")}
+    ${head("search_text")}
     ${number("tools.grep.max_matches", "max matches", cfg.tools?.grep?.max_matches)}
     ${number("tools.grep.max_line_chars", "max line chars", cfg.tools?.grep?.max_line_chars)}
     ${head("shell")}
@@ -328,7 +328,7 @@ function tools(active) {
     ${number("shell.max_output_lines_head", "head lines", cfg.shell?.max_output_lines_head)}
     ${number("shell.max_output_lines_tail", "tail lines", cfg.shell?.max_output_lines_tail)}
     ${text("shell.deny", "deny", (cfg.shell?.deny || []).join(", "), "list")}
-    ${head("remember")}${head("recall")}`;
+    ${head("remember")}${head("recall")}${head("fetch_url")}${head("find_files")}`;
 }
 
 function memory(active) {

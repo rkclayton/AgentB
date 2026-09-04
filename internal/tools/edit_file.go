@@ -17,7 +17,7 @@ type EditFile struct{ coordinator *FileCoordinator }
 func NewEditFile(c *FileCoordinator) *EditFile { return &EditFile{coordinator: c} }
 func (*EditFile) Name() string                 { return "edit_file" }
 func (*EditFile) Description() string {
-	return "Replace exactly one occurrence of old_string with new_string. old_string must match the file text exactly, including indentation, and must be unique; include surrounding lines if needed. Returns what changed, or an error naming the closest match."
+	return "Replace one exact, unique old_string in path with new_string. Unlike write_file, it avoids reproducing the whole file."
 }
 func (*EditFile) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "old_string": map[string]any{"type": "string"}, "new_string": map[string]any{"type": "string"}}, "required": []string{"path", "old_string", "new_string"}}

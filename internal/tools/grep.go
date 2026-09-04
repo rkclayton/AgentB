@@ -28,9 +28,9 @@ func NewGrep(cfg config.GrepTool, list config.ListDirTool) *Grep {
 	}
 	return &Grep{cfg: cfg, ignore: ignore}
 }
-func (*Grep) Name() string { return "grep" }
+func (*Grep) Name() string { return "search_text" }
 func (*Grep) Description() string {
-	return "Search files under path for a regular expression. Returns up to 50 matching lines as file:line: text."
+	return "Search local file contents under path for pattern, optionally filtering filenames with glob. Unlike find_files, it returns matching text lines."
 }
 func (*Grep) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"pattern": map[string]any{"type": "string"}, "path": map[string]any{"type": "string", "default": "."}, "glob": map[string]any{"type": "string"}}, "required": []string{"pattern"}}

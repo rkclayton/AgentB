@@ -57,7 +57,7 @@ type WriteFile struct{ coordinator *FileCoordinator }
 func NewWriteFile(c *FileCoordinator) *WriteFile { return &WriteFile{coordinator: c} }
 func (*WriteFile) Name() string                  { return "write_file" }
 func (*WriteFile) Description() string {
-	return "Create or overwrite a file with the given content, creating parent folders. For changes inside an existing file use edit_file."
+	return "Create or fully replace the file at path with content, creating parent directories. Unlike edit_file, it writes the whole file."
 }
 func (*WriteFile) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"path", "content"}}

@@ -19,7 +19,7 @@ func NewRemember(manager *memory.Manager, bus *events.Bus) *Remember {
 }
 func (*Remember) Name() string { return "remember" }
 func (*Remember) Description() string {
-	return "Save a short durable fact about this workspace for future sessions. Check recall first to avoid duplicates. Takes effect next session, not now."
+	return "Save note as durable workspace memory for future sessions. Call recall first to avoid duplicates; unlike recall, remember writes."
 }
 func (*Remember) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"note": map[string]any{"type": "string"}}, "required": []string{"note"}}

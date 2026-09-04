@@ -18,9 +18,9 @@ func TestGateRequiredMatrix(t *testing.T) {
 		{mode: config.ApprovalModeOff, want: map[string]bool{}},
 		{mode: config.ApprovalModeBoundaryOnly, want: map[string]bool{}},
 		{mode: config.ApprovalModeMutating, want: map[string]bool{"write_file": true, "edit_file": true, "shell": true}},
-		{mode: config.ApprovalModeAll, want: map[string]bool{"read_file": true, "write_file": true, "edit_file": true, "shell": true, "fetch": true}},
+		{mode: config.ApprovalModeAll, want: map[string]bool{"read_file": true, "write_file": true, "edit_file": true, "shell": true, "fetch_url": true}},
 	}
-	tools := []string{"read_file", "write_file", "edit_file", "shell", "fetch"}
+	tools := []string{"read_file", "write_file", "edit_file", "shell", "fetch_url"}
 	for _, test := range tests {
 		t.Run(test.mode, func(t *testing.T) {
 			cfg := config.Defaults(t.TempDir())
