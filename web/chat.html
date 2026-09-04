@@ -10,16 +10,17 @@
   <link rel="stylesheet" href="/static/css/chat.css">
 </head>
 <body class="chat-page">
-  <header class="chat-header">
+  <header class="chat-header window-titlebar">
     <div class="chat-brand"><img src="/static/assets/mark.svg" alt=""><span>Agent_b</span></div>
     <div id="chat-binding"></div>
     <span id="chat-status"></span>
     <span id="connection" role="status"></span>
-    <nav class="chat-nav" aria-label="Application views">
-      <a href="/">Console</a>
-      <a href="/#settings/servers">Settings</a>
+    <nav class="chat-nav" aria-label="Application">
+      <button class="chat-header-action selected" type="button" aria-current="page" disabled>Chat</button>
+      <button id="chat-stop" class="chat-header-action chat-stop" type="button">Stop</button>
+      <button id="chat-console" class="chat-header-action" type="button">Console</button>
+      <button id="chat-settings" class="chat-icon-button" type="button" aria-label="Settings" title="Settings">⚙</button>
     </nav>
-    <button id="chat-stop" class="chat-stop" type="button">Stop</button>
   </header>
   <div id="chat-identity-alarm" class="chat-identity-alarm" role="alert" hidden></div>
   <div id="chat-budget" class="chat-budget" aria-label="Context budget"><span class="chat-budget-fill"></span><span class="chat-budget-tip"></span></div>

@@ -3,6 +3,7 @@
   "short_name": "Agent_b",
   "start_url": "/chat",
   "display": "standalone",
+  "display_override": ["window-controls-overlay"],
   "background_color": "#2A2E35",
   "theme_color": "#2A2E35",
   "icons": [

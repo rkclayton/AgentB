@@ -411,3 +411,38 @@
     width: 3ch;
   }
 }
+
+/* Compact application frame shared with Console. */
+.chat-page {
+  grid-template-rows: var(--app-header-height) auto 4px minmax(0, 1fr) auto;
+}
+.chat-header {
+  height: var(--app-header-height);
+  gap: 6px;
+  padding: 0 8px;
+}
+.chat-brand img { width: 20px; height: 20px; }
+.chat-nav { align-items: center; gap: 2px; }
+.chat-page .chat-header-action {
+  min-height: 26px;
+  padding: 3px 9px;
+}
+.chat-page .chat-header-action.selected,
+.chat-page .chat-header-action:disabled {
+  color: var(--ink);
+  background: rgba(216, 221, 227, 0.16);
+  cursor: default;
+  opacity: 1;
+}
+.chat-page .chat-icon-button {
+  width: 28px;
+  min-height: 26px;
+  padding: 3px;
+  color: rgba(216, 221, 227, 0.6);
+}
+.chat-composer { padding: 6px 8px; }
+
+@media (max-width: 620px) {
+  .chat-brand span { display: none; }
+  #chat-binding select { max-width: 110px; }
+}

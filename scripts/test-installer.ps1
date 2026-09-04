@@ -35,19 +35,27 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Installed launcher check exited $LASTEXITCODE." }
 
     $launcherSource = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'scripts\launch-Agent_b.ps1')
-    if ($launcherSource -notmatch "'chat'" -or $launcherSource -notmatch 'Show-AgentBWindow -Url \$appUrl') {
+    if ($launcherSource -notmatch "'chat'" -or $launcherSource -notmatch 'Show-AgentBWindow -Url \$appUrl -ReplaceExisting') {
         throw 'Installed launcher is not configured to open the Chat-first application view.'
     }
     $indexSource = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'web\index.html')
     $chatSource = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'web\chat.html')
-    if ($indexSource -match 'target="agent_b_chat"' -or $chatSource -match 'target="agent_b_chat"') {
-        throw 'Installed application still opens Chat in a second browser window.'
+    if ($indexSource -match 'target=' -or $chatSource -match 'target=') {
+        throw 'Installed application still contains second-window navigation.'
     }
-    foreach ($required in @('href="/"', 'href="/#settings/servers"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
+    foreach ($required in @('id="chat-console"', 'id="chat-settings"', 'id="chat-stop"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
         if ($chatSource -notmatch [regex]::Escape($required)) { throw "Installed Chat view is missing: $required" }
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $testInstall 'web\app.webmanifest') -PathType Leaf)) {
+    $manifestPath = Join-Path $testInstall 'web\app.webmanifest'
+    if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         throw 'Installed application manifest is missing.'
+    }
+    $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
+    if ($manifest.display_override[0] -ne 'window-controls-overlay') {
+        throw 'Installed application does not request native Window Controls Overlay.'
+    }
+    if ($indexSource -match 'id="state-filters"' -or $indexSource -notmatch '>Activity<' -or $indexSource -notmatch '>Context<' -or $indexSource -notmatch '>History<') {
+        throw 'Installed Console is not using the simplified instrument layout.'
     }
 
     $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $testStart 'Agent_b.lnk'))
@@ -124,7 +132,7 @@ try {
         (Test-Path -LiteralPath $testRegistry)) {
         throw 'Uninstall left a program, shortcut, or registration artifact.'
     }
-    Write-Host 'PASS: isolated Chat-first install, same-window navigation, branded app and shortcut icons, registration, settings and ACL-preserving upgrade, stale-file cleanup, preserving uninstall, reinstall, and purging uninstall'
+    Write-Host 'PASS: isolated Chat-first install, compact same-window navigation, native-controls manifest, simplified Console, branded app and shortcut icons, registration, settings and ACL-preserving upgrade, stale-file cleanup, preserving uninstall, reinstall, and purging uninstall'
 } finally {
     if (Test-Path -LiteralPath $testRegistry) { Remove-Item -LiteralPath $testRegistry -Recurse -Force }
     if (Test-Path -LiteralPath $testRoot) {

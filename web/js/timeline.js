@@ -27,7 +27,7 @@ export function renderTimeline() {
   const state = view(session.id),
     events = session.timeline || [],
     turns = events.filter((event) => event.type === "model.response").length;
-  count.textContent = `${turns} turns`;
+  count.textContent = String(turns);
   const calls = new Map(),
     results = new Map(),
     decisions = new Map();
@@ -57,7 +57,7 @@ export function renderTimeline() {
 	if (!entries.length) {
 	  const empty = document.createElement("div");
 	  empty.className = "panel-empty";
-	  empty.textContent = "No turns yet";
+	  empty.textContent = "—";
 	  root.append(empty);
 	}
   if (hidden) {
@@ -92,15 +92,11 @@ function modelRow(session, event, calls, results, state) {
     key = `${event.run_id}:model:${data.turn}`,
     row = baseRow(key, state, "timeline-model");
   const usage = data.usage || {};
-  row.head.innerHTML = `<span class="turn number"></span><span>model</span><span class="duration number"></span><span class="usage number"></span><span class="cached number"></span><span class="finish"></span>`;
-  row.head.children[0].textContent = data.turn || "";
-  row.head.children[2].textContent = formatDuration(data.duration_ms);
-  row.head.children[3].textContent = `${formatNumber(usage.prompt_tokens)} / ${formatNumber(usage.completion_tokens)}`;
-  row.head.children[4].textContent =
-    usage.cached_tokens === null || usage.cached_tokens === undefined
-      ? ""
-      : `cached ${formatNumber(usage.cached_tokens)}`;
-  row.head.children[5].textContent = data.finish_reason || "";
+  row.head.innerHTML = '<span class="timeline-label"></span><span class="duration number"></span><span class="usage number"></span><span class="finish"></span>';
+  row.head.children[0].textContent = `Turn ${data.turn || ""}`;
+  row.head.children[1].textContent = formatDuration(data.duration_ms);
+  row.head.children[2].textContent = `${formatNumber(usage.prompt_tokens)} in · ${formatNumber(usage.completion_tokens)} out`;
+  row.head.children[3].textContent = friendly(data.finish_reason || "done");
   const assistant = [...(session.messages || [])]
     .reverse()
     .find(
@@ -132,15 +128,16 @@ function toolRow(session, call, callEvent, resultEvent, state) {
       state,
       `timeline-tool ${result.ok === false ? "error" : ""}`,
     );
-  row.head.innerHTML = `<span></span><span class="mono"></span><span></span><span class="number"></span><span class="number"></span>`;
-  row.head.children[1].textContent = call.name;
-  row.head.children[2].textContent = result.ok === false ? "error" : "ok";
-  row.head.children[3].textContent = `${result.ms || 0} ms`;
-  row.head.children[4].textContent = `${formatNumber(result.tokens || 0)} tokens`;
+  const args = callEvent?.data?.args || safeJSON(call.arguments);
+  row.head.innerHTML = '<span class="timeline-lamp"></span><span class="timeline-label"></span><span class="timeline-key"></span><span class="duration number"></span><span class="finish"></span>';
+  row.head.children[1].textContent = friendly(call.name);
+  row.head.children[2].textContent = keyArgument(args);
+  row.head.children[3].textContent = formatDuration(result.ms || 0);
+  row.head.children[4].textContent = result.ok === false ? "Failed" : "Done";
   addBlock(
     row.expansion,
     "arguments",
-    callEvent?.data?.args || safeJSON(call.arguments),
+    args,
   );
   const message = (session.messages || []).find(
     (item) => item.tool_call_id === call.id,
@@ -169,8 +166,8 @@ function inlineRow(session, event, decisions, state) {
     const operatorOverride = data.name?.endsWith(".operator_override");
     const path = data.args?.path || "";
     text.textContent = operatorOverride
-	  ? `${data.args?.reason || "service identity could not run operation"} — operator retry requested`
-      : `approval  ${data.name} ${path}`;
+      ? `${data.args?.reason || "Service identity denied the operation"}`
+      : `Approval · ${friendly(data.name)} ${path}`;
     if (operatorOverride) row.node.classList.add("fault");
     const decision = decisions.get(data.call_id);
     if (decision) {
@@ -198,18 +195,18 @@ function inlineRow(session, event, decisions, state) {
       }
     addBlock(row.expansion, "arguments", data.args || {});
   } else if (event.type === "workspace.conflict") {
-    text.textContent = `conflict  ${data.path}  written by ${data.other_label} ${data.age_s} s ago`;
+    text.textContent = `Conflict · ${data.path} · ${data.other_label} · ${data.age_s} s`;
   } else if (event.type === "message.queued") {
-    text.textContent = `queued  message #${String(data.message_id || "").replace(/\D/g, "")} (position ${data.position})`;
+    text.textContent = `Queued · message ${String(data.message_id || "").replace(/\D/g, "")} · position ${data.position}`;
   } else if (event.type === "run.queued") {
-    text.textContent = `waiting for a slot (position ${data.position})`;
+    text.textContent = `Waiting · position ${data.position}`;
   } else if (event.type === "compaction") {
     const affected = data.affected_ids?.length || "",
       delta = (data.after || 0) - (data.before || 0);
-    text.textContent = `compact  ${data.kind}${affected ? ` ${affected} results` : ""}  ${formatSigned(delta)} tokens`;
+    text.textContent = `Compacted · ${friendly(data.kind)}${affected ? ` · ${affected} results` : ""} · ${formatSigned(delta)} tokens`;
   } else if (event.type === "run.stopped") {
     const label = (data.reason || "").replaceAll("_", " ");
-    text.textContent = `stopped: ${label}${data.detail ? ` — ${data.detail}` : ""}`;
+    text.textContent = `Stopped · ${label}${data.detail ? ` · ${data.detail}` : ""}`;
   }
   addBlock(row.expansion, "detail", data);
   return row.node;
@@ -278,4 +275,17 @@ function formatNumber(value) {
 }
 function formatSigned(value) {
   return `${value < 0 ? "−" : value > 0 ? "+" : "±"}${formatNumber(Math.abs(value))}`;
+}
+
+function keyArgument(args) {
+  if (!args || typeof args !== "object") return "";
+  for (const key of ["path", "pattern", "query", "command", "note"]) {
+    if (args[key]) return String(args[key]).replaceAll("\n", " ").slice(0, 120);
+  }
+  return "";
+}
+
+function friendly(value) {
+  const text = String(value || "").replaceAll("_", " ").replaceAll(".", " ");
+  return text ? text[0].toUpperCase() + text.slice(1) : "";
 }

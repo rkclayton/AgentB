@@ -10,8 +10,16 @@ const form = document.getElementById("composer"),
   input = document.getElementById("task"),
   chatLaunch = document.getElementById("chat-launch"),
   stop = document.getElementById("stop");
+const requestedSession = new URLSearchParams(location.search).get("session");
+let initialSession = requestedSession;
 initSettings();
-subscribe(() => {
+subscribe((_state, event) => {
+  if (event.type === "snapshot" && initialSession && store.sessions[initialSession]) {
+    const id = initialSession;
+    initialSession = "";
+    setActive(id);
+    return;
+  }
   renderTabs();
   renderRail();
   renderFlow();
@@ -27,7 +35,6 @@ subscribe(() => {
   const s = store.sessions[store.active],
     busy = s && s.run.status !== "idle";
   input.disabled = !!busy;
-	chatLaunch.href = s ? `/chat?session=${encodeURIComponent(s.id)}` : "/chat";
 	stop.hidden = !!store.replay;
 	document.getElementById("mode").textContent = store.replay ? "replay" : "";
   input.placeholder =
@@ -39,6 +46,12 @@ subscribe(() => {
         ? "Run in progress"
         : "Send a task";
 });
+chatLaunch.onclick = () => {
+  const session = store.sessions[store.active];
+  const query = new URLSearchParams();
+  if (session) query.set("session", session.id);
+  location.assign(`/chat${query.size ? `?${query}` : ""}`);
+};
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const s = store.sessions[store.active],

@@ -9,6 +9,8 @@ const input = document.getElementById("chat-task");
 const send = document.getElementById("chat-send");
 const notice = document.getElementById("chat-notice");
 const identityAlarm = document.getElementById("chat-identity-alarm");
+const consoleButton = document.getElementById("chat-console");
+const settingsButton = document.getElementById("chat-settings");
 const requested = new URLSearchParams(location.search).get("session");
 const expanded = new Set();
 let bound = requested || "";
@@ -17,6 +19,15 @@ let page = 0;
 let localNotice = "";
 let localAlarm = false;
 let frame = 0;
+
+consoleButton.onclick = () => location.assign(consoleURL());
+settingsButton.onclick = () => location.assign(`${consoleURL()}#settings/servers`);
+
+function consoleURL() {
+  const query = new URLSearchParams();
+  if (bound) query.set("session", bound);
+  return `/${query.size ? `?${query}` : ""}`;
+}
 
 subscribe((_state, event) => {
   if (event.type === "snapshot") {

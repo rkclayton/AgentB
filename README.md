@@ -39,7 +39,7 @@ For either path, Node.js is optional and is used only for `node --check` verific
 
 ## Use Agent_b
 
-The installed application opens its Chat view at `http://127.0.0.1:8790/chat`; use the header to move to Console or Settings without opening another tab or window. The Console route remains available directly at `http://127.0.0.1:8790/`, and `?session=main` binds Chat to a specific session.
+The installed application opens its Chat view at `http://127.0.0.1:8790/chat`; its compact header switches between Chat, Console, and Settings without another tab or window. Edge app mode keeps its small native title bar and reliable Windows minimize, maximize/restore, and close controls; a true installed-PWA host may merge the application header into that area through Window Controls Overlay. The Console route remains available directly at `http://127.0.0.1:8790/`, and `?session=main` binds Chat to a specific session.
 
 Replay one or more session logs without loading a model or enabling mutations:
 

@@ -10,19 +10,22 @@
   <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
-  <header class="header">
+  <header class="header window-titlebar">
     <div class="brand"><img src="/static/assets/mark.svg" alt=""><span>Agent_b</span><span id="mode" class="mode"></span></div>
     <div id="connection" role="status"></div>
-    <a id="chat-launch" class="header-action" href="/chat">Chat</a>
-    <button id="stop" class="stop" type="button">Stop</button>
-    <button id="settings" class="icon-button" type="button" aria-label="Settings">⚙</button>
+    <nav class="app-nav" aria-label="Application">
+      <button id="chat-launch" class="header-action" type="button">Chat</button>
+      <button id="stop" class="header-action stop" type="button">Stop</button>
+      <button class="header-action selected" type="button" aria-current="page" disabled>Console</button>
+      <button id="settings" class="icon-button" type="button" aria-label="Settings" title="Settings">⚙</button>
+    </nav>
   </header>
   <div id="shell-identity-alarm" class="identity-alarm" role="alert" hidden></div>
   <nav id="tabs" class="tabs" aria-label="Sessions"></nav>
   <section id="rail" class="rail" aria-label="Context budget"></section>
   <main class="grid">
     <section class="well flow-well">
-      <header class="panel-caption"><span>Flow</span><span id="flow-count"></span></header>
+      <header class="panel-caption"><span>Activity</span><span id="flow-count"></span></header>
       <div id="flow" class="flow"></div>
       <form id="composer" class="composer"><input id="task" autocomplete="off" aria-label="Task" placeholder="Send a task"><button type="submit">Send</button></form>
     </section>
@@ -31,12 +34,11 @@
       <div id="rack" class="rack"></div>
     </section>
     <section class="well state-well">
-      <header class="panel-caption"><span>State</span><span id="state-count"></span></header>
-      <nav id="state-filters" class="state-filters" aria-label="State categories"></nav>
+      <header class="panel-caption"><span>Context</span><span id="state-count"></span></header>
       <div id="state-list" class="panel-scroll"></div>
     </section>
     <section class="well timeline-well">
-      <header class="panel-caption"><span>Timeline</span><span id="timeline-count"></span></header>
+      <header class="panel-caption"><span>History</span><span id="timeline-count"></span></header>
       <div id="timeline-list" class="panel-scroll"></div>
     </section>
   </main>

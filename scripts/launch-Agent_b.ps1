@@ -50,7 +50,7 @@ function Get-AgentBProcesses {
 }
 
 function Show-AgentBWindow {
-    param([string]$Url)
+    param([string]$Url, [switch]$ReplaceExisting)
     if ($NoBrowser -or $env:AGENTB_NO_BROWSER) {
         Write-Host "UI ready: $Url"
         return
@@ -59,9 +59,16 @@ function Show-AgentBWindow {
     $shell = New-Object -ComObject WScript.Shell
     foreach ($name in @('msedge', 'chrome', 'firefox')) {
         foreach ($browser in Get-Process -Name $name -ErrorAction SilentlyContinue) {
-            if ($browser.MainWindowTitle -like 'Agent_b*' -and $shell.AppActivate($browser.Id)) {
-                Write-Host 'REUSED: existing Agent_b browser window'
-                return
+            if ($browser.MainWindowTitle -like 'Agent_b*') {
+                if ($ReplaceExisting) {
+                    if ($browser.CloseMainWindow()) {
+                        Write-Host 'CLOSED: stale Agent_b application window'
+                        try { $browser.WaitForExit(3000) | Out-Null } catch { }
+                    }
+                } elseif ($shell.AppActivate($browser.Id)) {
+                    Write-Host 'REUSED: existing Agent_b browser window'
+                    return
+                }
             }
         }
     }
@@ -162,7 +169,7 @@ try {
         Write-Host 'The process is being left running in this console so delayed startup remains visible.'
     } else {
         Write-Host "Agent_b is ready at $appUrl"
-        Show-AgentBWindow -Url $appUrl
+        Show-AgentBWindow -Url $appUrl -ReplaceExisting
     }
 } finally {
     if ($locked) { $mutex.ReleaseMutex() }
