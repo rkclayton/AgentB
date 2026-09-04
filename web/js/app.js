@@ -8,6 +8,7 @@ import { renderTimeline } from "./timeline.js";
 import { initSettings } from "./settings.js";
 const form = document.getElementById("composer"),
   input = document.getElementById("task"),
+  chatLaunch = document.getElementById("chat-launch"),
   stop = document.getElementById("stop");
 initSettings();
 subscribe(() => {
@@ -26,6 +27,7 @@ subscribe(() => {
   const s = store.sessions[store.active],
     busy = s && s.run.status !== "idle";
   input.disabled = !!busy;
+	chatLaunch.disabled = !s;
 	stop.hidden = !!store.replay;
 	document.getElementById("mode").textContent = store.replay ? "replay" : "";
   input.placeholder =
@@ -37,6 +39,18 @@ subscribe(() => {
         ? "Run in progress"
         : "Send a task";
 });
+chatLaunch.onclick = () => {
+  const s = store.sessions[store.active];
+  if (!s) return;
+  const name = `agent_b_chat_${s.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+  const chat = window.open(
+    `/chat?session=${encodeURIComponent(s.id)}`,
+    name,
+    "popup,width=560,height=780",
+  );
+  if (chat) chat.focus();
+  else showError("Chat could not open. Allow pop-ups for Agent_b and try again.");
+};
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const s = store.sessions[store.active],

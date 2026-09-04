@@ -196,7 +196,8 @@ function servers() {
           : !reason && profile.capabilities?.probed_at
             ? "ready"
             : "not tested";
-      const lamp = profile._probing ? "live" : failed || reason ? "alarm" : "";
+      const ready = !reason && !!profile.capabilities?.probed_at;
+      const lamp = failed || reason ? "alarm" : profile._probing || ready ? "live" : "";
       return `<div class="profile ${isOpen ? "expanded" : ""}">
         <div class="profile-row">
           <button type="button" class="profile-summary" data-action="profile-toggle" data-id="${attr(profile.id)}">
