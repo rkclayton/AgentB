@@ -380,7 +380,6 @@ function run() {
 
 function shell(active) {
 	const service = store.config.shell?.service_account || {};
-	const operatorContext = !!store.config.shell?.operator_context;
 	const credential = store.shell_credential || {};
 	const stored = credential.stored
 		? `stored ${credential.stored_at || "(time unavailable)"}`
@@ -435,8 +434,7 @@ function shell(active) {
 		? `Apply unavailable: ${applyBlocker}${hardeningMessage ? ` Last result: ${hardeningMessage}` : ""}`
 		: hardeningMessage;
   return `<div class="settings-subhead">Service identity</div>
-	${toggle("shell.operator_context", "run tools as me", operatorContext)}
-	${operatorContext ? feedback("Operator context bypasses service-account isolation. Windows still enforces your normal, non-elevated permissions.", true, "") : ""}
+	<p class="settings-note">Use the operator control beside Stop to run tools temporarily as your Windows account.</p>
     ${row("status", `<span class="account-status"><span class="lamp ${serviceAccountStatus.administrator ? "alarm" : serviceAccountStatus.exists ? "live" : ""}"></span>${html(accountState)}</span>`)}
     ${row("credential", `<span class="account-status">${html(stored)}</span>`)}
     ${row("new password", `<input id="service-account-setup-password" type="password" autocomplete="new-password" aria-label="New service-account password" ${setupDisabled ? "disabled" : ""}>`)}

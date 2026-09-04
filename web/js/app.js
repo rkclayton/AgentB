@@ -6,7 +6,7 @@ import { renderRack } from "./rack.js";
 import { renderState } from "./state.js";
 import { renderTimeline } from "./timeline.js";
 import { initSettings } from "./settings.js";
-import { renderOperatorStatus } from "./operator-status.js";
+import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
 const form = document.getElementById("composer"),
   input = document.getElementById("task"),
   chatLaunch = document.getElementById("chat-launch"),
@@ -16,8 +16,16 @@ const form = document.getElementById("composer"),
 const requestedSession = new URLSearchParams(location.search).get("session");
 let initialSession = requestedSession;
 let renderFrame = 0;
+const operatorControl = createOperatorStatusController(operatorStatus, {
+  identity: () => store.shell_identity,
+  interactive: () => !store.replay,
+  confirmEnable: () => window.confirm("Enable operator mode? Tools will run as your Windows account until you turn it off or it expires."),
+  setOperatorContext: (enabled) => api("/api/config", { shell: { operator_context: enabled } }),
+  reportError: showError,
+});
 initSettings();
 subscribe((_state, event) => {
+  if (isOperatorStateEvent(event)) operatorControl.render();
   if (event.type === "snapshot" && initialSession && store.sessions[initialSession]) {
     const id = initialSession;
     initialSession = "";
@@ -45,7 +53,7 @@ function renderConsole() {
   renderTimeline();
 	const identityAlarm = document.getElementById("shell-identity-alarm");
 	const identityUnavailable = store.shell_identity?.operator_approval_required || store.shell_identity?.fallback;
-	renderOperatorStatus(operatorStatus, store.shell_identity);
+	operatorControl.render();
 	identityAlarm.hidden = !identityUnavailable;
 	identityAlarm.textContent = identityUnavailable
 		? `SERVICE IDENTITY UNAVAILABLE — shell requires explicit operator approval: ${store.shell_identity.reason}`

@@ -1,6 +1,8 @@
 package web
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +13,7 @@ import (
 
 	"harness/internal/config"
 	"harness/internal/events"
+	"harness/internal/session"
 	"harness/internal/tools"
 )
 
@@ -24,6 +27,12 @@ func operatorTestServer(t *testing.T) (*Server, *tools.Shell, string) {
 	}
 	bus := events.NewBus()
 	server := New(&cfg, path, root, bus)
+	writers, err := events.NewWriters(filepath.Join(root, "logs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = writers.Close() })
+	server.SetRegistry(session.NewRegistry(bus, writers, server.Profile, cfg.Run.MaxTurns, server.ConfigSnapshot))
 	shell := tools.NewShell(cfg.Shell)
 	server.SetShellSecurity(nil, shell)
 	return server, shell, path
@@ -40,6 +49,61 @@ func postOperatorContext(t *testing.T, server *Server, enabled bool) *httptest.R
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	return response
+}
+
+func firstSSESnapshotOperatorContext(t *testing.T, server *Server) bool {
+	t.Helper()
+	host := httptest.NewServer(server.Handler())
+	defer host.Close()
+	response, err := host.Client().Get(host.URL + "/api/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	scanner := bufio.NewScanner(response.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event events.Event
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Type != events.Snapshot {
+			t.Fatalf("first SSE event type=%q, want snapshot", event.Type)
+		}
+		data, ok := event.Data.(map[string]any)
+		if !ok {
+			t.Fatalf("snapshot data=%T", event.Data)
+		}
+		identity, ok := data["shell_identity"].(map[string]any)
+		if !ok {
+			t.Fatalf("snapshot shell_identity=%T", data["shell_identity"])
+		}
+		value, _ := identity["operator_context"].(bool)
+		return value
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	t.Fatal("SSE ended before snapshot")
+	return false
+}
+
+func TestEverySSEConnectionStartsWithCurrentOperatorContext(t *testing.T) {
+	server, _, _ := operatorTestServer(t)
+	if firstSSESnapshotOperatorContext(t, server) {
+		t.Fatal("initial SSE snapshot reported operator context on")
+	}
+	server.setOperatorContext(true, "test enable", 0)
+	if !firstSSESnapshotOperatorContext(t, server) {
+		t.Fatal("new SSE connection missed enabled operator context")
+	}
+	server.setOperatorContext(false, "test disable", 0)
+	if firstSSESnapshotOperatorContext(t, server) {
+		t.Fatal("new SSE connection missed disabled operator context")
+	}
 }
 
 func TestOperatorContextEnableRequiresOperatorOwnedHTTPClient(t *testing.T) {

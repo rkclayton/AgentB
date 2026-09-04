@@ -1,5 +1,5 @@
 import { api, store, subscribe } from "./bus.js";
-import { renderOperatorStatus } from "./operator-status.js";
+import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
 
 const binding = document.getElementById("chat-binding");
 const status = document.getElementById("chat-status");
@@ -25,6 +25,17 @@ let frame = 0;
 let renderTimer = 0;
 let lastRender = 0;
 const renderIntervalMS = 50;
+const operatorControl = createOperatorStatusController(operatorStatus, {
+  identity: () => store.shell_identity,
+  interactive: () => !store.replay,
+  confirmEnable: () => window.confirm("Enable operator mode? Tools will run as your Windows account until you turn it off or it expires."),
+  setOperatorContext: (enabled) => api("/api/config", { shell: { operator_context: enabled } }),
+  reportError: (message) => {
+    localNotice = message;
+    localAlarm = true;
+    renderComposer(store.sessions[bound]);
+  },
+});
 
 chatCurrent.addEventListener("click", (event) => event.preventDefault());
 
@@ -35,6 +46,7 @@ function consoleURL() {
 }
 
 subscribe((_state, event) => {
+  if (isOperatorStateEvent(event)) operatorControl.render();
   if (event.type === "snapshot") {
     if (!store.sessions[bound]) bound = requested && store.sessions[requested] ? requested : Object.keys(store.sessions)[0] || "";
   }
@@ -72,7 +84,7 @@ function render() {
 
 function renderIdentityAlarm() {
   const unavailable = store.shell_identity?.operator_approval_required || store.shell_identity?.fallback;
-  renderOperatorStatus(operatorStatus, store.shell_identity);
+  operatorControl.render();
   identityAlarm.hidden = !unavailable;
   identityAlarm.textContent = unavailable
     ? `SERVICE IDENTITY UNAVAILABLE — tools require explicit operator approval: ${store.shell_identity.reason}`

@@ -1,3 +1,5 @@
+import { createOperatorReconciler } from "./operator-reconcile.js";
+
 export const store = {
   sessions: {},
   active: "",
@@ -12,6 +14,14 @@ export const store = {
   replay: false,
 };
 const listeners = new Set();
+const operatorReconciler = createOperatorReconciler({
+  readState: async () => {
+    const response = await fetch("/api/state", { cache: "no-store" });
+    if (!response.ok) throw new Error(`state reconciliation failed: HTTP ${response.status}`);
+    return response.json();
+  },
+  applyIdentity: (identity) => reduce({ type: "shell.identity", data: identity }),
+});
 export function subscribe(fn) {
   listeners.add(fn);
   fn(store, { type: "init" });
@@ -36,6 +46,7 @@ export function reduce(event) {
       ? active
       : Object.keys(store.sessions)[0] || "";
     for (const value of Object.values(store.sessions)) hydrate(value);
+    operatorReconciler.observed();
     notify(event);
     return;
   }
@@ -91,9 +102,19 @@ export function reduce(event) {
       break;
 	case "shell.identity":
 		store.shell_identity = data;
+		operatorReconciler.observed();
 		break;
 	case "shell.credential":
 		store.shell_credential = data;
+		break;
+	case "operator.context":
+		store.shell_identity = {
+			...store.shell_identity,
+			operator_context: !!data.enabled,
+			operator_context_expires_at: data.expires_at || "",
+			reason: data.enabled ? data.reason || store.shell_identity.reason : "",
+		};
+		operatorReconciler.observed();
 		break;
     case "error":
       store.error = data;
@@ -316,6 +337,7 @@ source.onopen = () => {
     }, 3000);
   }
   reconnected = true;
+  void operatorReconciler.reconcile().catch(() => {});
 };
 source.onerror = () => {
   if (connection) {
@@ -335,6 +357,7 @@ for (const type of [
   "config.changed",
 	"shell.identity",
 	"shell.credential",
+	"operator.context",
   "error",
   "run.queued",
   "run.started",
@@ -360,3 +383,10 @@ for (const type of [
 ]) {
   source.addEventListener(type, (event) => reduce(JSON.parse(event.data)));
 }
+
+function reconcileVisibleClient() {
+  if (!document.hidden) void operatorReconciler.reconcile().catch(() => {});
+}
+document.addEventListener("visibilitychange", reconcileVisibleClient);
+window.addEventListener("focus", reconcileVisibleClient);
+window.addEventListener("pageshow", reconcileVisibleClient);
