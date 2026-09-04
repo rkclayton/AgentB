@@ -172,12 +172,14 @@ function inlineRow(session, event, decisions, state) {
   }
   row.head.replaceChildren(text);
   if (event.type === "approval.required") {
-    const operatorOverride = data.name?.endsWith(".operator_override");
+    const boundaryEscape = typeof data.boundary_escape === "boolean"
+      ? data.boundary_escape
+      : data.name?.endsWith(".operator_override");
     const path = data.args?.path || "";
-    text.textContent = operatorOverride
-      ? `${data.args?.reason || "Service identity denied the operation"}`
-      : `Approval · ${friendly(data.name)} ${path}`;
-    if (operatorOverride) row.node.classList.add("fault");
+    text.textContent = boundaryEscape
+      ? `Privilege escalation · ${data.args?.reason || "Service identity denied the operation"}`
+      : `Policy confirmation · ${friendly(data.name)} ${path}`;
+    if (boundaryEscape) row.node.classList.add("fault");
     const decision = decisions.get(data.call_id);
     if (decision) {
       const decided = document.createElement("span");
@@ -185,7 +187,7 @@ function inlineRow(session, event, decisions, state) {
       decided.textContent = decision;
       row.head.append(decided);
     } else
-      for (const choice of operatorOverride
+      for (const choice of boundaryEscape
         ? [["approve", "Run once as operator"], ["deny", "Keep denied"]]
         : [["approve", "Approve"], ["deny", "Deny"]]) {
         const [value, label] = choice;

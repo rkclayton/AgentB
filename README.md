@@ -99,6 +99,8 @@ The generated JSONL, workspaces, server logs, score sheets, and summary stay und
 
 See [web/DESIGN.md](web/DESIGN.md) for the UI contract, [INTERFACES.md](INTERFACES.md) for events and APIs, and [SECURITY.md](SECURITY.md) plus [Windows host hardening](docs/HARDENING.md) before granting a model shell access. The UI uses only the six-color industrial-console system; artwork and vendored fonts live under `web/assets/`.
 
+`approval.mode` accepts `boundary-only` (the default; no generic confirmations), `mutating` (confirm `write_file`, `edit_file`, and `shell`), and `all` (confirm every tool call). The deprecated `off` value remains accepted as an alias for `boundary-only` but is hidden from Settings. None of these modes disables the mandatory **Run once as operator** decision described above after a Windows identity or permission denial.
+
 Dependency licenses and included transitive modules are recorded in [docs/THIRD_PARTY_NOTICES.md](docs/THIRD_PARTY_NOTICES.md).
 
 ## Deferred boundaries

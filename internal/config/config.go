@@ -12,16 +12,18 @@ import (
 )
 
 type Config struct {
-	Listen    string        `json:"listen"`
-	Workspace string        `json:"workspace"`
-	LogDir    string        `json:"log_dir"`
-	Servers   []Profile     `json:"servers"`
-	Run       RunConfig     `json:"run"`
-	Approval  Approval      `json:"approval"`
-	Context   GlobalContext `json:"context"`
-	Memory    Memory        `json:"memory"`
-	Tools     Tools         `json:"tools"`
-	Shell     Shell         `json:"shell"`
+	ConfigVersion int           `json:"config_version"`
+	Listen        string        `json:"listen"`
+	Workspace     string        `json:"workspace"`
+	LogDir        string        `json:"log_dir"`
+	Servers       []Profile     `json:"servers"`
+	Run           RunConfig     `json:"run"`
+	Approval      Approval      `json:"approval"`
+	Context       GlobalContext `json:"context"`
+	Memory        Memory        `json:"memory"`
+	Tools         Tools         `json:"tools"`
+	Shell         Shell         `json:"shell"`
+	LoadNotices   []string      `json:"-"`
 }
 
 type Profile struct {
@@ -108,6 +110,17 @@ type RunConfig struct {
 type Approval struct {
 	Mode string `json:"mode"`
 }
+
+const (
+	CurrentConfigVersion     = 2
+	ApprovalModeBoundaryOnly = "boundary-only"
+	ApprovalModeMutating     = "mutating"
+	ApprovalModeAll          = "all"
+	ApprovalModeOff          = "off"
+)
+
+const ApprovalDefaultMigrationNotice = "corrected inherited approval default from mutating to boundary-only; mutating can be reselected in Settings > Run & approval"
+
 type GlobalContext struct {
 	SoftPct    float64 `json:"soft_pct"`
 	SummaryPct float64 `json:"summary_pct"`
@@ -176,9 +189,10 @@ func Defaults(workspace string) Config {
 	thinking := Sampling{Temperature: .6, TopP: .95, TopK: 20, RepeatPenalty: 1}
 	nonthinking := Sampling{Temperature: .7, TopP: .8, TopK: 20, PresencePenalty: 1.5, RepeatPenalty: 1}
 	return Config{
-		Listen: "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
+		ConfigVersion: CurrentConfigVersion,
+		Listen:        "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
 		Servers: []Profile{{ID: "local", Label: "Local", BaseURL: "http://127.0.0.1:8080", Model: "", RequestTimeoutS: 900, ProbeMode: "full", Sampling: SamplingPair{Thinking: thinking, Nonthinking: nonthinking}, Reasoning: Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}}, Context: Context{ReserveOutput: 10240}, Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}}}},
-		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: "mutating"}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
+		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
 		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 200, MaxLimit: 400, MaxLineChars: 500, AllowDomains: []string{}, AllowInternalHosts: []string{}}},
 		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextTimeoutMinutes: 60, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
 	}
@@ -202,6 +216,19 @@ func Load(path string) (*Config, bool, bool, error) {
 		return nil, false, false, err
 	}
 	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
+	var metadata struct {
+		ConfigVersion *int `json:"config_version"`
+		Approval      struct {
+			Mode string `json:"mode"`
+		} `json:"approval"`
+	}
+	if err := json.Unmarshal(data, &metadata); err != nil {
+		return nil, false, created, err
+	}
+	unstamped := metadata.ConfigVersion == nil
+	if !unstamped && *metadata.ConfigVersion != CurrentConfigVersion {
+		return nil, false, created, fmt.Errorf("config_version: unsupported value %d (current %d)", *metadata.ConfigVersion, CurrentConfigVersion)
+	}
 	migrated, data, err := migrateV1(data)
 	if err != nil {
 		return nil, false, created, err
@@ -214,22 +241,30 @@ func Load(path string) (*Config, bool, bool, error) {
 	cfg.Shell.OperatorContext = false
 	cfg.Shell.OperatorContextExpiresAt = ""
 	applyDefaults(&cfg)
+	approvalDefaultCorrected := unstamped && metadata.Approval.Mode == ApprovalModeMutating
+	if approvalDefaultCorrected {
+		cfg.Approval.Mode = ApprovalModeBoundaryOnly
+	}
 	if err := cfg.Validate(); err != nil {
 		return nil, false, created, err
 	}
-	if migrated {
+	if migrated || unstamped {
 		if err := cfg.Save(path); err != nil {
 			return nil, false, created, err
 		}
+	}
+	if approvalDefaultCorrected {
+		cfg.LoadNotices = []string{ApprovalDefaultMigrationNotice}
 	}
 	return &cfg, migrated, created, nil
 }
 
 func (c Config) Save(path string) error {
-	if err := c.Validate(); err != nil {
+	persisted := c
+	persisted.ConfigVersion = CurrentConfigVersion
+	if err := persisted.Validate(); err != nil {
 		return err
 	}
-	persisted := c
 	persisted.Shell.OperatorContext = false
 	persisted.Shell.OperatorContextExpiresAt = ""
 	data, err := json.MarshalIndent(persisted, "", "  ")
@@ -243,6 +278,9 @@ func (c Config) Save(path string) error {
 var slug = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 func (c Config) Validate() error {
+	if c.ConfigVersion != CurrentConfigVersion {
+		return fmt.Errorf("config_version: unsupported value %d (current %d)", c.ConfigVersion, CurrentConfigVersion)
+	}
 	if c.Listen == "" {
 		return fmt.Errorf("listen: required")
 	}
@@ -302,7 +340,7 @@ func (c Config) Validate() error {
 	if c.Run.MaxConsecutiveToolErrors < 0 {
 		return fmt.Errorf("run.max_consecutive_tool_errors: cannot be negative")
 	}
-	if !oneOf(c.Approval.Mode, "off", "mutating", "all") {
+	if !oneOf(c.Approval.Mode, ApprovalModeBoundaryOnly, ApprovalModeMutating, ApprovalModeAll, ApprovalModeOff) {
 		return fmt.Errorf("approval.mode: invalid")
 	}
 	if !(c.Context.SoftPct > 0 && c.Context.SoftPct < c.Context.SummaryPct && c.Context.SummaryPct <= 1) {
@@ -384,6 +422,9 @@ func ProfileSetupReason(profile *Profile) string {
 
 func applyDefaults(c *Config) {
 	d := Defaults(c.Workspace)
+	if c.ConfigVersion == 0 {
+		c.ConfigVersion = CurrentConfigVersion
+	}
 	if c.Listen == "" {
 		c.Listen = d.Listen
 	}

@@ -519,15 +519,17 @@ function noticeContent(session, entry) {
   } else if (event.type === "memory.noted") content.textContent = "noted for next session";
   else if (event.type === "approval.required") {
     content.className += " chat-approval";
-    const operatorOverride = data.name?.endsWith(".operator_override");
-    if (operatorOverride) content.classList.add("alarm");
-    content.append(document.createTextNode(operatorOverride
-	  ? `${data.args?.reason || "service identity could not run operation"}: run once as your Windows account? ${keyArgument(data.args || {})}`
-      : `approval: ${data.name} ${keyArgument(data.args || {})}`));
+    const boundaryEscape = typeof data.boundary_escape === "boolean"
+      ? data.boundary_escape
+      : data.name?.endsWith(".operator_override");
+    if (boundaryEscape) content.classList.add("alarm");
+    content.append(document.createTextNode(boundaryEscape
+	  ? `Privilege escalation: ${data.args?.reason || "service identity could not run operation"}. Run once as your Windows account? ${keyArgument(data.args || {})}`
+      : `Policy confirmation: ${data.name} ${keyArgument(data.args || {})}`));
     const decision = entry.decisions.get(data.call_id);
     if (decision) content.append(document.createTextNode(` ${decision}`));
     else if (!store.replay) {
-      for (const choice of operatorOverride
+      for (const choice of boundaryEscape
         ? [["approve", "Run once as operator"], ["deny", "Keep denied"]]
         : [["approve", "Approve"], ["deny", "Deny"]]) {
         const [value, label] = choice;

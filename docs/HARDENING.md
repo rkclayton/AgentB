@@ -43,7 +43,7 @@ The network rule permits every loopback and Tailscale destination, not only the 
 Run these through Agent_b after **Apply protection** succeeds:
 
 1. `whoami` returns the service account.
-2. Creating and deleting a file in the workspace succeeds.
+2. With the shipped `boundary-only` approval mode, creating and deleting a file in the workspace succeeds without a generic confirmation.
 3. `list_dir` on an absolute path that Windows allows for the service account succeeds outside the workspace.
 4. Creating a file under the sibling `web` directory reports a permission denial.
 5. Choose **Keep denied** and confirm no operator retry occurs.
@@ -51,7 +51,7 @@ Run these through Agent_b after **Apply protection** succeeds:
 7. A connection to the configured loopback or Tailscale model endpoint succeeds.
 8. A direct connection to a public test address fails under the service identity.
 9. A timed-out command loses its complete process tree.
-10. The timeline/log contains the original operation, the approval decision, and the operator retry result.
+10. The timeline/log distinguishes the original operation from the mandatory boundary-escape decision and the operator retry result.
 
 File-tool denials come directly from Windows while Agent_b is impersonating the service account. Shell permission classification reads command output heuristically, so a shell prompt is not proof of an OS decision: always inspect the exact displayed operation.
 

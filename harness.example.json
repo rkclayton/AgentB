@@ -1,4 +1,5 @@
 {
+  "config_version": 2,
   "listen": "127.0.0.1:8790",
   "workspace": "./workspace",
   "log_dir": "logs",
@@ -40,7 +41,7 @@
     }
   ],
   "run": { "max_turns": 40, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },
-  "approval": { "mode": "mutating" },
+  "approval": { "mode": "boundary-only" },
   "context": { "soft_pct": 0.75, "summary_pct": 0.85, "accounting": "auto" },
   "memory": { "enabled": true, "dir": "memory", "max_tokens": 1500 },
   "tools": {

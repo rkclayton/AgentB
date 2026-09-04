@@ -1,6 +1,7 @@
 package web
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -13,6 +14,39 @@ import (
 
 func authorizeMutation(request *http.Request, server *Server) {
 	request.Header.Set("X-AgentB-Mutation-Token", server.mutationToken)
+}
+
+func TestConfigPOSTRetainsSchemaStamp(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "harness.json")
+	cfg := config.Defaults(root)
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	server := New(&cfg, path, root, events.NewBus())
+	request := httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(`{"approval":{"mode":"mutating"}}`))
+	authorizeMutation(request, server)
+	request.Host = "example.com"
+	request.Header.Set("Origin", "http://example.com")
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+	var returned config.Config
+	if err := json.Unmarshal(response.Body.Bytes(), &returned); err != nil {
+		t.Fatal(err)
+	}
+	if returned.ConfigVersion != config.CurrentConfigVersion || returned.Approval.Mode != config.ApprovalModeMutating {
+		t.Fatalf("response version=%d mode=%q", returned.ConfigVersion, returned.Approval.Mode)
+	}
+	loaded, _, _, err := config.Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ConfigVersion != config.CurrentConfigVersion || loaded.Approval.Mode != config.ApprovalModeMutating {
+		t.Fatalf("disk version=%d mode=%q", loaded.ConfigVersion, loaded.Approval.Mode)
+	}
 }
 
 func TestMutationGuardRequiresLaunchTokenAndSameOrigin(t *testing.T) {

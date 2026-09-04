@@ -373,7 +373,7 @@ function run() {
     <p class="settings-note">0 = off</p>
     ${number("run.max_consecutive_tool_errors", "max tool errors", cfg.run?.max_consecutive_tool_errors)}
     <p class="settings-note">0 = off</p>
-    ${choices("approval.mode", "approval mode", ["off", "mutating", "all"], cfg.approval?.mode)}
+    ${approvalChoices(cfg.approval?.mode)}
     ${number("run.queue_depth", "queue depth", cfg.run?.queue_depth)}`;
 }
 
@@ -548,6 +548,17 @@ function toggle(path, label, value) {
 function choices(path, label, values, selected) {
   selected = currentValue(path, selected);
   return field(path, label, `<span class="choice-row">${values.map((value) => `<button type="button" class="${value === selected ? "selected" : ""}" data-action="config-choice" data-path="${attr(path)}" data-value="${attr(value)}">${html(value)}</button>`).join("")}</span>`);
+}
+
+function approvalChoices(selected) {
+  selected = currentValue("approval.mode", selected);
+  const displayed = selected === "off" ? "boundary-only" : selected;
+  const modes = [
+    ["boundary-only", "Tools run without confirmation; Windows still gates anything outside your permissions."],
+    ["mutating", "Confirm every file write, edit, and shell command."],
+    ["all", "Confirm every tool call."],
+  ];
+  return field("approval.mode", "approval mode", `<span class="approval-choices">${modes.map(([value, explanation]) => `<button type="button" class="${value === displayed ? "selected" : ""}" data-action="config-choice" data-path="approval.mode" data-value="${attr(value)}"><strong>${html(value)}</strong><span>${html(explanation)}</span></button>`).join("")}</span>`);
 }
 
 function copyRow(label, value) {

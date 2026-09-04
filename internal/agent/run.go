@@ -304,7 +304,7 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	if path != "" {
 		overrideArgs["path"] = path
 	}
-	overrideApproved, overrideErr := r.gate.WaitRequired(ctx, s, runID, overrideID, name+".operator_override", overrideArgs)
+	overrideApproved, overrideErr := r.gate.WaitBoundaryEscape(ctx, s, runID, overrideID, name+".operator_override", overrideArgs)
 	if overrideErr != nil {
 		outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override canceled", false, false
 		return outcome
@@ -320,7 +320,7 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 		if strings.TrimSpace(overrideContent) == "" {
 			overrideContent = "the tool completed with no output"
 		}
-		outcome.Content, outcome.OK, outcome.OperatorContext = "operator-identity override succeeded; exact "+subject+" rerun once:\n"+overrideContent, true, false
+		outcome.Content, outcome.OK, outcome.OperatorContext = "operator-identity override succeeded; exact "+subject+" rerun once:\n"+overrideContent, true, true
 		return outcome
 	}
 	outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override was attempted but failed:\n"+overrideContent, false, false

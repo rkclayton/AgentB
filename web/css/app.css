@@ -892,6 +892,25 @@
 .choice-row button.selected {
   color: var(--trace);
 }
+.approval-choices {
+  display: grid;
+  gap: 3px;
+  text-align: left;
+  width: 100%;
+}
+.approval-choices button {
+  text-align: left;
+}
+.approval-choices button strong,
+.approval-choices button span {
+  display: block;
+}
+.approval-choices button span {
+  color: var(--muted);
+}
+.approval-choices button.selected strong {
+  color: var(--trace);
+}
 .settings-page button.confirm {
   color: var(--alarm);
 }

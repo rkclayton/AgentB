@@ -26,9 +26,9 @@ The Windows installer is per-user and does not elevate. On first install it can 
 
 ## Approval and unattended runs
 
-With `approval.mode: "off"`, including during run-until-done operation, writes and shell commands execute without confirmation. The shipped default is `mutating`, which pauses `write_file`, `edit_file`, and `shell` for approval. Approval reduces accidental actions; it does not turn the shell wrapper into a sandbox.
+Agent_b has two distinct approval gates. Normal approval policy is selected by `approval.mode`: the shipped `boundary-only` default runs every model-addressable tool without generic pre-execution confirmation, `mutating` pauses `write_file`, `edit_file`, and `shell`, and `all` pauses every tool call. The deprecated `off` value remains accepted as an alias for `boundary-only`. Approval reduces accidental actions; it does not turn the shell wrapper into a sandbox.
 
-When Windows denies a built-in file operation, or shell output looks like an OS permission denial, Agent_b offers a separate **Run once as operator** decision. This gate is mandatory even when `approval.mode` is `off`; the model cannot invoke the operator path directly, the UI shows the exact path or command, and the decision is logged. Approval reruns only that call once with the non-elevated Agent_b process identity. File-tool denial comes from the impersonated Windows token; shell denial classification remains a text heuristic. Inspect the operation before approving: this escape hatch deliberately bypasses service-account ACL and firewall restrictions once and is not a security boundary.
+When Windows denies a built-in file operation, or shell output looks like an OS permission denial, Agent_b offers the separate **Run once as operator** boundary-escape decision. This gate is mandatory in every approval mode; no mode disables it. The model cannot invoke the operator path directly, the UI shows the exact path or command, and the decision is logged. Approval reruns only that call once with the non-elevated Agent_b process identity. File-tool denial comes from the impersonated Windows token; shell denial classification remains a text heuristic. Inspect the operation before approving: this escape hatch deliberately bypasses service-account ACL and firewall restrictions once and is not a security boundary.
 
 ## Network exposure
 

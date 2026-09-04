@@ -45,6 +45,9 @@ func main() {
 	if migrated {
 		log.Printf("migrated %s: server → servers[local]", filepath.Base(*configPath))
 	}
+	for _, notice := range cfg.LoadNotices {
+		log.Printf("config migration: %s", notice)
+	}
 	facts := readServingFacts("SERVING.md")
 	if !facts.Complete {
 		log.Printf("debug: SERVING.md missing or partial; skipping /tokenize latency hint")
@@ -71,6 +74,9 @@ func main() {
 	bus := events.NewBus()
 	bus.SetSink(writers.Write)
 	web := webserver.New(cfg, *configPath, "web", bus)
+	for _, notice := range cfg.LoadNotices {
+		bus.Publish(events.New(events.ConfigChanged, "", "", map[string]any{"config": cfg.Masked(), "notice": notice}))
+	}
 	memoryManager := memory.New(filepath.Dir(*configPath), web.ConfigSnapshot, func(ctx context.Context, serverID, text string) (int, error) {
 		profile, ok := web.Profile(serverID)
 		if !ok || !profile.Capabilities.Tokenize {

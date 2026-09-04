@@ -2,10 +2,35 @@ package config
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+func writeConfigFixture(t *testing.T, path, mode string, stamped bool) {
+	t.Helper()
+	cfg := Defaults(t.TempDir())
+	cfg.Approval.Mode = mode
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	if !stamped {
+		delete(document, "config_version")
+	}
+	data, err = json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestLoadCreatesConfigFromExample(t *testing.T) {
 	dir := t.TempDir()
@@ -44,6 +69,157 @@ func TestLoadCreatesConfigFromExample(t *testing.T) {
 	}
 	if created {
 		t.Fatal("existing config reported as created")
+	}
+}
+
+func TestApprovalModeDefaultsWhenAbsentOrEmpty(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		absent bool
+	}{
+		{name: "absent", absent: true},
+		{name: "empty"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "harness.json")
+			data, err := json.Marshal(Defaults(t.TempDir()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var document map[string]any
+			if err := json.Unmarshal(data, &document); err != nil {
+				t.Fatal(err)
+			}
+			if test.absent {
+				delete(document, "approval")
+			} else {
+				document["approval"] = map[string]any{"mode": ""}
+			}
+			data, err = json.Marshal(document)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, data, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			cfg, _, _, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Approval.Mode != ApprovalModeBoundaryOnly {
+				t.Fatalf("approval mode=%q, want %q", cfg.Approval.Mode, ApprovalModeBoundaryOnly)
+			}
+		})
+	}
+}
+
+func TestHarnessExampleShipsBoundaryOnlyIndependentlyOfDefaults(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "harness.example.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document struct {
+		ConfigVersion int `json:"config_version"`
+		Approval      struct {
+			Mode string `json:"mode"`
+		} `json:"approval"`
+	}
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.ConfigVersion != CurrentConfigVersion {
+		t.Fatalf("template config_version=%d, want %d", document.ConfigVersion, CurrentConfigVersion)
+	}
+	if document.Approval.Mode != "boundary-only" {
+		t.Fatalf("template approval mode=%q, want literal boundary-only", document.Approval.Mode)
+	}
+}
+
+func TestApprovalModeSchemaMigration(t *testing.T) {
+	tests := []struct {
+		name       string
+		mode       string
+		stamped    bool
+		wantMode   string
+		wantNotice bool
+	}{
+		{name: "unstamped inherited mutating", mode: ApprovalModeMutating, wantMode: ApprovalModeBoundaryOnly, wantNotice: true},
+		{name: "stamped deliberate mutating", mode: ApprovalModeMutating, stamped: true, wantMode: ApprovalModeMutating},
+		{name: "unstamped off alias", mode: ApprovalModeOff, wantMode: ApprovalModeOff},
+		{name: "unstamped all", mode: ApprovalModeAll, wantMode: ApprovalModeAll},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "harness.json")
+			writeConfigFixture(t, path, test.mode, test.stamped)
+			cfg, _, _, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.ConfigVersion != CurrentConfigVersion || cfg.Approval.Mode != test.wantMode {
+				t.Fatalf("loaded version=%d mode=%q, want version=%d mode=%q", cfg.ConfigVersion, cfg.Approval.Mode, CurrentConfigVersion, test.wantMode)
+			}
+			if got := len(cfg.LoadNotices) == 1; got != test.wantNotice {
+				t.Fatalf("notice present=%v, want %v: %#v", got, test.wantNotice, cfg.LoadNotices)
+			}
+			disk, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var persisted Config
+			if err := json.Unmarshal(disk, &persisted); err != nil {
+				t.Fatal(err)
+			}
+			if persisted.ConfigVersion != CurrentConfigVersion || persisted.Approval.Mode != test.wantMode {
+				t.Fatalf("persisted version=%d mode=%q", persisted.ConfigVersion, persisted.Approval.Mode)
+			}
+			reloaded, _, _, err := Load(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(reloaded.LoadNotices) != 0 {
+				t.Fatalf("migration notice repeated: %#v", reloaded.LoadNotices)
+			}
+		})
+	}
+}
+
+func TestSaveStampsConfigVersion(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	cfg := Defaults(t.TempDir())
+	cfg.ConfigVersion = 0
+	cfg.Approval.Mode = ApprovalModeMutating
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.ConfigVersion != CurrentConfigVersion || loaded.Approval.Mode != ApprovalModeMutating {
+		t.Fatalf("round trip version=%d mode=%q", loaded.ConfigVersion, loaded.Approval.Mode)
+	}
+}
+
+func TestLegacyV1WithoutApprovalDefaultsToBoundaryOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	document := map[string]any{
+		"workspace": t.TempDir(),
+		"server":    map[string]any{"base_url": "http://127.0.0.1:8080"},
+	}
+	data, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, migrated, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !migrated || cfg.ConfigVersion != CurrentConfigVersion || cfg.Approval.Mode != ApprovalModeBoundaryOnly {
+		t.Fatalf("migrated=%v version=%d mode=%q", migrated, cfg.ConfigVersion, cfg.Approval.Mode)
 	}
 }
 
