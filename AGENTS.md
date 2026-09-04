@@ -3,8 +3,7 @@
 ## Orientation
 - `NOTES.md` is the document of record for current state: decisions, discovery findings, and the follow-up card backlog. Read it first.
 - `INTERFACES.md` and `SECURITY.md` are binding. `docs/HARDENING.md` is the operator runbook.
-- `harness-plan.md` and the numbered prompt files `01-` through `10-` are the original build plan. **Historical reference only** — the project has moved well past them. They do not override `NOTES.md`, `INTERFACES.md`, or the current prompt.
-- Numbered files `11-` and above are **current planned work**, not history. Execute them in order when directed.
+- Planning documents do not live in this repository. Sequencing comes from the current operator prompt; record durable findings and decisions in `NOTES.md`, not a plan file.
 
 ## Do not lose NOTES.md
 - Never delete, move, rename, truncate, or overwrite `NOTES.md`. It is gitignored, so git holds no copy and any loss is permanent.

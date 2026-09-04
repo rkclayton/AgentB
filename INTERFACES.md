@@ -1,6 +1,6 @@
 # Agent_b interfaces
 
-This document is the stable contract for prompts 3–10. Later prompts implement the tagged records without changing their shapes.
+This document is the stable runtime contract. Bracketed prompt numbers are historical provenance only and carry no sequencing authority.
 
 ## Event envelope and transport
 
@@ -19,6 +19,26 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 `Profile` has `{id,label,base_url,model,api_key,request_timeout_s,probe_mode,sampling:{thinking,nonthinking},reasoning:{control,enabled,effort,valid_efforts,preserve},context:{n_ctx_override,reserve_output},system_prompt_override,capabilities}`. API keys are always `""` or `"•••• set"` in API/event output and never enter logs.
 
 `Capabilities` has `{server:llama.cpp|openai-compatible|unknown,props,n_ctx,tokenize,apply_template,apply_template_tools,streaming,tool_calls,grammar_constrained,cached_tokens,timings,prompt_progress,reasoning_control:chat_template_kwargs|top_level|server_flag|none,valid_efforts,overflow_behavior:error|truncate|unknown,probed_at,findings}`.
+
+## Model-server transport
+
+Profiles target an OpenAI-compatible server at `base_url`. Generation uses `POST /v1/chat/completions`; a nonempty profile key is sent as `Authorization: Bearer <key>`. All requests use JSON and the profile's request timeout. Standard sampling, messages, tools, tool choice, streaming, and usage fields are always OpenAI-shaped. `top_k`, `min_p`, `repeat_penalty`, `cache_prompt`, `return_progress`, and `chat_template_kwargs` are sent only when the probed server is llama.cpp. Reasoning controls never send an effort outside the profile's probed `valid_efforts`. Streaming tool-call arguments may arrive whole or as indexed fragments and are accumulated by index.
+
+Capability probing uses `GET /props` (falling back to `GET /v1/models`), `POST /tokenize`, `POST /apply-template`, and bounded chat-completion checks. A transport failure retains prior capabilities and leaves `probed_at` unchanged. `probe_mode:off` uses documented assumptions, `minimal` performs only the inexpensive identity/tokenization/template/streaming checks, and `full` includes tool, reasoning, timing, cache, progress, and overflow behavior. Every assumed or measured result produces a plain-language finding.
+
+## Model-visible tool interface
+
+The registry sends enabled tools in this stable order: `read_file`, `list_dir`, `write_file`, `edit_file`, `search_text`, `shell`, `remember`, `recall`, `fetch_url`, `find_files`. Tool errors normally enter model context with an `error:` prefix and always produce `tool.result.ok:false`; a stale-view `note:` may precede the error text, while documented empty/no-match/routing results are successful outcomes.
+
+- `read_file {path,offset?,limit?}` reads numbered UTF-8 source text using a one-based byte offset and byte budget. Its header reports `offset`, source `bytes`, `total`, `more`, optional `next_offset`, `start_line`, `start_mid_line`, and `end_mid_line`; display line prefixes are outside the byte budget. When `more` is true the returned `next_offset` is passed back as `offset`.
+- `list_dir {path?,depth?}` enumerates a directory with directories first, case-insensitive alphabetical order, two-space nesting, configured ignored directories, depth 1 by default and 3 maximum, and a configured result cap. Directories end in `/`; an empty result is `directory is empty`.
+- `write_file {path,content}` atomically creates or replaces a file, creates parent directories, and refuses content over 512 KiB. A successful result reports the path and written line count.
+- `edit_file {path,old_string,new_string}` requires one unique match, preserves UTF-8 BOM and CRLF style, and atomically replaces or deletes it. Exact matching is attempted before indentation-aware whitespace matching; ambiguous or absent matches are errors with line-oriented diagnostics. Success reports affected lines and a numbered context region.
+- `search_text {pattern,path?,glob?}` recursively applies a regular expression to text, optionally filters by basename glob, skips configured ignored directories and NUL-detected binary files, and returns `path:line: text`. Results use the configured match count and per-line rune caps; no matches is a successful `no matches` result.
+- `shell {command,timeout_s?}` starts an unconfined command in the workspace directory with bounded combined stdout/stderr. The service-context network restriction is enforced outside the tool layer; network operations belong in `fetch_url`. A nonzero exit is an error containing `exit=<code>` and nonempty combined output. Simple file discovery/read commands may return a structured non-error routing refusal naming the first-class replacement tool.
+- `remember {note}` appends a trimmed workspace note of at most 300 Unicode runes; an exact duplicate is a successful no-op and a new note becomes active next session. `recall {}` returns all notes for the active workspace or a successful empty-state message. Neither accepts a path and neither is widened by operator mode.
+- `fetch_url {url,offset?,limit?}` performs a policy-checked public HTTP(S) GET with no model-supplied headers, cookies, or credentials and returns untrusted text in a UTF-8-safe byte window. The result and event metadata report URL/status/source and window fields. When `more` is true the returned `next_offset` is passed back as `offset`.
+- `find_files {pattern,path?}` recursively matches filenames or relative paths, supports `**`, skips its fixed ignored directories, sorts results, and returns at most 200 paths with an explicit truncation marker; no matches is a successful `no matches` result.
 
 ## Events
 
@@ -46,7 +66,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 - `POST /api/shell-credential {action:store,password}` writes a user-scoped DPAPI blob; `{action:test}` attempts a no-op service-account process; `{action:clear}` removes it. Responses and events expose status only, never the password.
 - `GET /api/service-account` inspects the configured local account without elevation. `POST /api/service-account {action:create|reset,password,confirmation}` requires matching write-only values, stores the DPAPI credential, launches `setup-service-account.ps1` through Windows UAC, validates that credential through Windows, and enables the split. It never returns either password field. A canceled or unavailable UAC prompt makes no account change and restores the previous credential; a failure after the elevated helper starts is reported as potentially partial.
 - `GET /api/hardening?server_id=<id>` inspects complete-tree ACL and user-scoped outbound-firewall state and includes the most recent `operation {action,state,message,started_at,finished_at}` so progress and errors survive a browser refresh. `POST /api/hardening {action:apply|verify|remove,server_id}` orchestrates the policies; apply requires an enabled, stored non-administrator service identity and no active runs. Apply/remove use UAC; apply grants workspace access, verifies both controls, then tests a real alternate-identity process in that workspace. Apply and verify return `ok:false` with the component summaries when drift remains.
-- `POST /api/message`, `/api/stop`, `/api/tools/{name}`, and `/api/approve` drive runs, cancellation, per-session tool toggles, and approval decisions.
+- `POST /api/message {session_id,text}` → 202 `{run_id,queued?,position?}`; an active same-session run returns 409 when queue depth is zero, and a full configured queue returns 409. `POST /api/stop {session_id?,all?}` → 200 `{stopped:[session_id...]}`. `POST /api/tools/{name} {session_id,enabled}` → 200 `{name,enabled}` and takes effect on the next model request. `POST /api/approve {session_id,call_id,decision:approve|deny}` → 200 echoing those fields; an unknown call is 404. These mutation endpoints require the launch mutation token and are unavailable in replay mode.
 
 ## Replay and keyboard
 
