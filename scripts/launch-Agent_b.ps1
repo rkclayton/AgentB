@@ -99,12 +99,14 @@ if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw "Agent_b executable is missing: $executable"
 }
 $url = Get-AgentBUrl
+$appUrl = [Uri]::new([Uri]$url, 'chat').AbsoluteUri
 
 if ($Check) {
     Write-Host 'Agent_b launcher check'
     Write-Host "Executable: $executable"
     Write-Host "Configuration: $configPath"
-    Write-Host "URL: $url"
+    Write-Host "API base: $url"
+    Write-Host "Application: $appUrl"
     Write-Host "Running instances: $((Get-AgentBProcesses).Count)"
     Write-Host "Endpoint ready: $(Test-AgentBEndpoint -Url $url)"
     Write-Host 'CHECK COMPLETE: nothing was started or stopped'
@@ -122,7 +124,7 @@ try {
 
     if (Test-AgentBEndpoint -Url $url) {
         Write-Host 'Agent_b is already running; no new server was started.'
-        Show-AgentBWindow -Url $url
+        Show-AgentBWindow -Url $appUrl
         exit 0
     }
 
@@ -131,7 +133,7 @@ try {
         Write-Host "Agent_b process $($existing[0].ProcessId) exists; waiting for its UI instead of starting another instance."
         $state = Wait-AgentBEndpoint -Url $url -Seconds $StartupTimeoutSeconds
         if ($state -eq 'ready') {
-            Show-AgentBWindow -Url $url
+            Show-AgentBWindow -Url $appUrl
             exit 0
         }
         $existing = Get-AgentBProcesses
@@ -159,8 +161,8 @@ try {
         Write-Warning "Agent_b process $($process.Id) is running, but $url did not become ready within $StartupTimeoutSeconds seconds. No browser was opened."
         Write-Host 'The process is being left running in this console so delayed startup remains visible.'
     } else {
-        Write-Host "Agent_b is ready at $url"
-        Show-AgentBWindow -Url $url
+        Write-Host "Agent_b is ready at $appUrl"
+        Show-AgentBWindow -Url $appUrl
     }
 } finally {
     if ($locked) { $mutex.ReleaseMutex() }

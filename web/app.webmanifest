@@ -1,0 +1,15 @@
+{
+  "name": "Agent_b",
+  "short_name": "Agent_b",
+  "start_url": "/chat",
+  "display": "standalone",
+  "background_color": "#2A2E35",
+  "theme_color": "#2A2E35",
+  "icons": [
+    {
+      "src": "/static/assets/Agent_b.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}

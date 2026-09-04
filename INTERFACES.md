@@ -38,7 +38,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 
 ## HTTP API
 
-- `GET /` and `/chat` serve their page or a placeholder; `GET /static/*` serves `web/`.
+- `GET /` serves Console and Settings, `/chat` serves the default Chat view, and same-window links connect those views; `GET /static/*` serves `web/`.
 - `GET /api/events` is SSE; `GET /api/state` is `snapshot.data`. In replay mode each SSE connection receives the initial synthetic snapshot followed by the merged, timestamp-ordered recording at 20 ms per event; `?instant=1` removes the delay.
 - `GET /api/sessions`; `POST /api/sessions {label?,server_id,workspace?}` → 201 `{session}`; `POST /api/sessions/{id} {label?,server_id?}` → 200 `{session}` (server reassignment requires an idle session and a runnable profile); `DELETE /api/sessions/{id}?force=1`; `POST /api/sessions/{id}/reset`.
 - `GET /api/servers`; `POST /api/servers/{id}/probe` → 202 and an eventual event.

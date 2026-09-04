@@ -1,10 +1,10 @@
 # Agent_b
 
-Agent_b is a small, standard-library Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, eight identity-guarded tools, exact-or-labeled context accounting, compaction, durable workspace notes, an industrial-console UI, and a standalone chat window.
+Agent_b is a small, standard-library Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, eight identity-guarded tools, exact-or-labeled context accounting, compaction, durable workspace notes, and a unified Chat, Console, and Settings interface.
 
 Choose one serving path before you start.
 
-On Windows, double-click **`install-Agent_b.cmd`** once for the normal per-user installation. It builds Agent_b, creates a branded Start Menu shortcut, and registers **Agent_b** in Windows Installed apps without requiring administrator elevation. A first install imports this checkout's local connection settings and user-scoped service credential when present; upgrades preserve the installed settings and protected program-directory ACLs. Open **Agent_b** from Start afterward. Reopening the shortcut focuses an existing Agent_b browser window and never starts a second healthy server; an unresponsive existing process is reported by PID and left for the operator instead of being killed automatically.
+On Windows, double-click **`install-Agent_b.cmd`** once for the normal per-user installation. It builds Agent_b, creates a branded Start Menu shortcut, and registers **Agent_b** in Windows Installed apps without requiring administrator elevation. A first install imports this checkout's local connection settings and user-scoped service credential when present; upgrades preserve the installed settings and protected program-directory ACLs. Open **Agent_b** from Start afterward; it opens Chat first, with Console and Settings in the same branded application window. Reopening the shortcut focuses that window and never starts a second healthy server; an unresponsive existing process is reported by PID and left for the operator instead of being killed automatically.
 
 Developers can instead double-click **`start-Agent_b.cmd`** to build and run directly from the checkout. Both paths find Go on `PATH` or in the ignored local `.tools\go` directory. No PowerShell command is required.
 
@@ -39,7 +39,7 @@ For either path, Node.js is optional and is used only for `node --check` verific
 
 ## Use Agent_b
 
-The main instrument is at `http://127.0.0.1:8790/`, and a bound chat window is at `http://127.0.0.1:8790/chat?session=main`. `serve/chat-window.ps1 main` or `serve/chat-window.sh main` opens a 520×760 Chrome/Edge app window when available and otherwise opens the normal browser.
+The installed application opens its Chat view at `http://127.0.0.1:8790/chat`; use the header to move to Console or Settings without opening another tab or window. The Console route remains available directly at `http://127.0.0.1:8790/`, and `?session=main` binds Chat to a specific session.
 
 Replay one or more session logs without loading a model or enabling mutations:
 

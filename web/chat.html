@@ -3,7 +3,9 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Agent_b chat</title>
+  <title>Agent_b</title>
+  <link rel="icon" href="/static/assets/Agent_b.ico" type="image/x-icon">
+  <link rel="manifest" href="/static/app.webmanifest">
   <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/chat.css">
 </head>
@@ -13,8 +15,13 @@
     <div id="chat-binding"></div>
     <span id="chat-status"></span>
     <span id="connection" role="status"></span>
+    <nav class="chat-nav" aria-label="Application views">
+      <a href="/">Console</a>
+      <a href="/#settings/servers">Settings</a>
+    </nav>
     <button id="chat-stop" class="chat-stop" type="button">Stop</button>
   </header>
+  <div id="chat-identity-alarm" class="chat-identity-alarm" role="alert" hidden></div>
   <div id="chat-budget" class="chat-budget" aria-label="Context budget"><span class="chat-budget-fill"></span><span class="chat-budget-tip"></span></div>
   <main id="chat-log" class="chat-log" tabindex="0" aria-live="polite"></main>
   <footer class="chat-composer">

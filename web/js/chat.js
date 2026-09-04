@@ -8,6 +8,7 @@ const log = document.getElementById("chat-log");
 const input = document.getElementById("chat-task");
 const send = document.getElementById("chat-send");
 const notice = document.getElementById("chat-notice");
+const identityAlarm = document.getElementById("chat-identity-alarm");
 const requested = new URLSearchParams(location.search).get("session");
 const expanded = new Set();
 let bound = requested || "";
@@ -34,11 +35,20 @@ function schedule() {
 
 function render() {
   const session = store.sessions[bound];
+  renderIdentityAlarm();
   renderBinding(session);
   renderHeader(session);
   renderBudget(session);
   renderLog(session);
   renderComposer(session);
+}
+
+function renderIdentityAlarm() {
+  const unavailable = store.shell_identity?.operator_approval_required || store.shell_identity?.fallback;
+  identityAlarm.hidden = !unavailable;
+  identityAlarm.textContent = unavailable
+    ? `SERVICE IDENTITY UNAVAILABLE — tools require explicit operator approval: ${store.shell_identity.reason}`
+    : "";
 }
 
 function renderBinding(session) {

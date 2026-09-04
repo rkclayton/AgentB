@@ -1,6 +1,6 @@
 .chat-page {
   display: grid;
-  grid-template-rows: 40px 4px minmax(0, 1fr) auto;
+  grid-template-rows: 40px auto 4px minmax(0, 1fr) auto;
   height: 100dvh;
   overflow: hidden;
   background: var(--bezel);
@@ -85,6 +85,34 @@
 }
 #connection.alarm {
   color: var(--alarm);
+}
+.chat-nav {
+  display: flex;
+  gap: 4px;
+}
+.chat-nav a {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  color: var(--ink);
+  background: rgba(216, 221, 227, 0.08);
+  border-radius: 2px;
+  text-decoration: none;
+}
+.chat-nav a:hover {
+  background: rgba(216, 221, 227, 0.12);
+}
+.chat-nav a:focus-visible {
+  outline: 1px solid var(--trace);
+  outline-offset: 2px;
+}
+.chat-identity-alarm {
+  padding: 8px 12px;
+  color: var(--well);
+  background: var(--alarm);
+  font-size: 13px;
+  font-weight: 500;
 }
 .chat-stop {
   color: var(--alarm);

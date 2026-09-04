@@ -34,6 +34,22 @@ try {
     & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $testInstall 'scripts\launch-Agent_b.ps1') -Check
     if ($LASTEXITCODE -ne 0) { throw "Installed launcher check exited $LASTEXITCODE." }
 
+    $launcherSource = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'scripts\launch-Agent_b.ps1')
+    if ($launcherSource -notmatch "'chat'" -or $launcherSource -notmatch 'Show-AgentBWindow -Url \$appUrl') {
+        throw 'Installed launcher is not configured to open the Chat-first application view.'
+    }
+    $indexSource = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'web\index.html')
+    $chatSource = Get-Content -Raw -LiteralPath (Join-Path $testInstall 'web\chat.html')
+    if ($indexSource -match 'target="agent_b_chat"' -or $chatSource -match 'target="agent_b_chat"') {
+        throw 'Installed application still opens Chat in a second browser window.'
+    }
+    foreach ($required in @('href="/"', 'href="/#settings/servers"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
+        if ($chatSource -notmatch [regex]::Escape($required)) { throw "Installed Chat view is missing: $required" }
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $testInstall 'web\app.webmanifest') -PathType Leaf)) {
+        throw 'Installed application manifest is missing.'
+    }
+
     $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $testStart 'Agent_b.lnk'))
     if (-not $shortcut.TargetPath.Equals((Join-Path $testInstall 'Agent_b.cmd'), [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Shortcut target does not point to Agent_b.cmd.'
@@ -108,7 +124,7 @@ try {
         (Test-Path -LiteralPath $testRegistry)) {
         throw 'Uninstall left a program, shortcut, or registration artifact.'
     }
-    Write-Host 'PASS: isolated install, branded shortcut, registration, settings and ACL-preserving upgrade, stale-file cleanup, preserving uninstall, reinstall, and purging uninstall'
+    Write-Host 'PASS: isolated Chat-first install, same-window navigation, branded app and shortcut icons, registration, settings and ACL-preserving upgrade, stale-file cleanup, preserving uninstall, reinstall, and purging uninstall'
 } finally {
     if (Test-Path -LiteralPath $testRegistry) { Remove-Item -LiteralPath $testRegistry -Recurse -Force }
     if (Test-Path -LiteralPath $testRoot) {
