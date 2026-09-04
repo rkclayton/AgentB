@@ -522,10 +522,13 @@ function noticeContent(session, entry) {
     const boundaryEscape = typeof data.boundary_escape === "boolean"
       ? data.boundary_escape
       : data.name?.endsWith(".operator_override");
+    const shellPolicy = !boundaryEscape && data.name === "shell";
     if (boundaryEscape) content.classList.add("alarm");
     content.append(document.createTextNode(boundaryEscape
 	  ? `Privilege escalation: ${data.args?.reason || "service identity could not run operation"}. Run once as your Windows account? ${keyArgument(data.args || {})}`
-      : `Policy confirmation: ${data.name} ${keyArgument(data.args || {})}`));
+      : shellPolicy
+        ? `Run shell command? ${keyArgument(data.args || {})}`
+        : `Policy confirmation: ${data.name} ${keyArgument(data.args || {})}`));
     const decision = entry.decisions.get(data.call_id);
     if (decision) content.append(document.createTextNode(` ${decision}`));
     else if (!store.replay) {

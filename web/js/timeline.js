@@ -175,10 +175,13 @@ function inlineRow(session, event, decisions, state) {
     const boundaryEscape = typeof data.boundary_escape === "boolean"
       ? data.boundary_escape
       : data.name?.endsWith(".operator_override");
+    const shellPolicy = !boundaryEscape && data.name === "shell";
     const path = data.args?.path || "";
     text.textContent = boundaryEscape
       ? `Privilege escalation · ${data.args?.reason || "Service identity denied the operation"}`
-      : `Policy confirmation · ${friendly(data.name)} ${path}`;
+      : shellPolicy
+        ? `Run shell command · ${keyArgument(data.args || {})}`
+        : `Policy confirmation · ${friendly(data.name)} ${path}`;
     if (boundaryEscape) row.node.classList.add("fault");
     const decision = decisions.get(data.call_id);
     if (decision) {

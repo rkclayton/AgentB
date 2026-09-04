@@ -38,6 +38,12 @@ func (g *Gate) Wait(ctx context.Context, s *session.Session, runID, callID, name
 	if !g.required(name) {
 		return true, nil
 	}
+	return g.WaitPolicyRequired(ctx, s, runID, callID, name, args)
+}
+
+// WaitPolicyRequired always pauses for a policy decision, regardless of approval.mode.
+// It does not grant operator identity and is not a boundary escape.
+func (g *Gate) WaitPolicyRequired(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) (bool, error) {
 	wait, cleanup := g.beginWait(s, callID)
 	defer cleanup()
 	g.publishPolicyApprovalRequired(s, runID, callID, name, args)

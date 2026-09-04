@@ -273,7 +273,13 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 }
 
 func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) tools.CallOutcome {
-	approved, gateErr := r.gate.Wait(ctx, s, runID, callID, name, args)
+	var approved bool
+	var gateErr error
+	if name == "shell" && r.cfg().Shell.ServiceAccount.Enabled {
+		approved, gateErr = r.gate.WaitPolicyRequired(ctx, s, runID, callID, name, args)
+	} else {
+		approved, gateErr = r.gate.Wait(ctx, s, runID, callID, name, args)
+	}
 	if gateErr != nil {
 		return tools.CallOutcome{Content: "error: call canceled"}
 	}

@@ -374,6 +374,7 @@ function run() {
     ${number("run.max_consecutive_tool_errors", "max tool errors", cfg.run?.max_consecutive_tool_errors)}
     <p class="settings-note">0 = off</p>
     ${approvalChoices(cfg.approval?.mode)}
+    <p class="settings-note">Shell always requires confirmation while the service identity is enabled.</p>
     ${number("run.queue_depth", "queue depth", cfg.run?.queue_depth)}`;
 }
 
@@ -554,7 +555,7 @@ function approvalChoices(selected) {
   selected = currentValue("approval.mode", selected);
   const displayed = selected === "off" ? "boundary-only" : selected;
   const modes = [
-    ["boundary-only", "Tools run without confirmation; Windows still gates anything outside your permissions."],
+    ["boundary-only", "Tools run without generic confirmation; Windows still gates anything outside your permissions."],
     ["mutating", "Confirm every file write, edit, and shell command."],
     ["all", "Confirm every tool call."],
   ];

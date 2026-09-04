@@ -19,8 +19,9 @@ import (
 	"harness/internal/session"
 )
 
-// Shell executes commands without an OS sandbox. Its jail, timeout, approval gate,
-// and deny list reduce accidents but are not a security boundary.
+// Shell executes commands without a workspace jail or OS sandbox. The workspace is
+// only its initial working directory; identity, approval, timeout, and deny-list
+// controls do not make it workspace-confined.
 type Shell struct {
 	mu               sync.RWMutex
 	cfg              config.Shell

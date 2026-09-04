@@ -1,6 +1,8 @@
 # Windows host hardening
 
-These controls reduce the reach of Agent_b's model-selected OS operations. Shell children and built-in file tools use a dedicated local account; relative file paths start in the workspace, while absolute paths succeed only where Windows ACLs grant that account access. The managed Agent_b tree grants writes only to its workspace, and service-account outbound traffic is limited to IPv4 loopback, Tailscale's `100.64.0.0/10`, and IPv6 loopback. This is blast-radius reduction on a dedicated Windows host, not a sandbox or exploit boundary.
+These controls reduce the reach of Agent_b's model-selected OS operations. Shell children and built-in file tools use a dedicated local account. File-tool paths rely on that identity's ACLs; shell is never workspace-confined, and its workspace is only the initial working directory. Absolute paths and `cd ..` therefore remain possible wherever Windows grants the active account access. The managed Agent_b tree grants writes only to its workspace, and service-account outbound traffic is limited to IPv4 loopback, Tailscale's `100.64.0.0/10`, and IPv6 loopback. This is blast-radius reduction on a dedicated Windows host, not a sandbox or exploit boundary.
+
+Because ACLs constrain shell reach rather than behavior, every shell call requires policy confirmation while the service identity is enabled, regardless of `approval.mode`. This confirmation runs the command normally as the service account; it is distinct from the later **Run once as operator** escape offered after an identity or permission denial. With the service identity disabled, no posture-specific shell gate applies: `boundary-only`/`off` are silent, while `mutating`/`all` retain their configured confirmation. In that unrestricted posture, `internal/tools/jail.go` remains the sole workspace constraint for built-in file tools and must not be removed; it does not apply to shell.
 
 For a deliberate temporary capability override, Settings → Security → **run tools as me** runs shell and file tools as the non-elevated Windows account that launched Agent_b and permits OS-authorized paths outside the workspace. It defeats the service-account ACL boundary by design while on. The read-only operator button beside Stop shows the live on/off state; the mode is off after every start and automatically turns off after 60 minutes by default. Turn the switch off sooner to restore the service identity; this mode does not grant Administrator privileges or bypass Windows ACLs.
 
@@ -42,7 +44,7 @@ The network rule permits every loopback and Tailscale destination, not only the 
 
 Run these through Agent_b after **Apply protection** succeeds:
 
-1. `whoami` returns the service account.
+1. Approve the shell policy confirmation; `whoami` returns the service account and the result reports `operator_context:false`.
 2. With the shipped `boundary-only` approval mode, creating and deleting a file in the workspace succeeds without a generic confirmation.
 3. `list_dir` on an absolute path that Windows allows for the service account succeeds outside the workspace.
 4. Creating a file under the sibling `web` directory reports a permission denial.
