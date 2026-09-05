@@ -57,7 +57,7 @@ function tabStatus(value) {
 function fault(value) {
   return (
     !value.runnable ||
-    ["model_error", "cycle", "tool_errors", "context_ceiling", "profile_not_runnable"].includes(value._lastStop)
+    ["model_error", "cycle", "tool_errors", "context_ceiling", "profile_not_runnable"].includes(value.run?.last_stop_reason || value._lastStop)
   );
 }
 async function closeTab(event, value) {

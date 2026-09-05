@@ -19,30 +19,34 @@ type ReplayTool struct {
 }
 
 type ReplayRun struct {
-	Status        string `json:"status"`
-	RunID         string `json:"run_id"`
-	Turn          int    `json:"turn"`
-	MaxTurns      int    `json:"max_turns"`
-	QueuePosition int    `json:"queue_position"`
-	Partial       string `json:"partial"`
+	Status         string `json:"status"`
+	RunID          string `json:"run_id"`
+	Turn           int    `json:"turn"`
+	MaxTurns       int    `json:"max_turns"`
+	QueuePosition  int    `json:"queue_position"`
+	Partial        string `json:"partial"`
+	LastStopReason string `json:"last_stop_reason"`
 }
 
 type ReplaySession struct {
-	ID                string       `json:"id"`
-	Label             string       `json:"label"`
-	ServerID          string       `json:"server_id"`
-	Workspace         string       `json:"workspace"`
-	Run               ReplayRun    `json:"run"`
-	Tools             []ReplayTool `json:"tools"`
-	Messages          []Message    `json:"messages"`
-	Budget            Budget       `json:"budget"`
-	Timeline          []Event      `json:"timeline"`
-	QueuedMessages    int          `json:"queued_messages"`
-	Runnable          bool         `json:"runnable"`
-	NotRunnableReason string       `json:"not_runnable_reason"`
-	MemoryPath        string       `json:"memory_path"`
-	MemoryContent     string       `json:"memory_content"`
-	LogPath           string       `json:"log_path"`
+	ID                   string       `json:"id"`
+	Label                string       `json:"label"`
+	ServerID             string       `json:"server_id"`
+	Workspace            string       `json:"workspace"`
+	Run                  ReplayRun    `json:"run"`
+	Tools                []ReplayTool `json:"tools"`
+	Messages             []Message    `json:"messages"`
+	Budget               Budget       `json:"budget"`
+	Timeline             []Event      `json:"timeline"`
+	QueuedMessages       int          `json:"queued_messages"`
+	Runnable             bool         `json:"runnable"`
+	NotRunnableReason    string       `json:"not_runnable_reason"`
+	MemoryPath           string       `json:"memory_path"`
+	MemoryContent        string       `json:"memory_content"`
+	LogPath              string       `json:"log_path"`
+	ModelTurns           int          `json:"model_turns"`
+	CompactionCount      int          `json:"compaction_count"`
+	CompactionTokenDelta int          `json:"compaction_token_delta"`
 }
 
 type Replay struct {
@@ -188,6 +192,9 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 			item.Tools[index].Calls = 0
 		}
 		item.QueuedMessages = 0
+		item.ModelTurns = 0
+		item.CompactionCount = 0
+		item.CompactionTokenDelta = 0
 		item.Run = ReplayRun{Status: "replay", MaxTurns: item.Run.MaxTurns}
 	case RunQueued:
 		item.Run.RunID = event.RunID
@@ -200,6 +207,7 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 	case RunStopped:
 		item.Run.RunID = event.RunID
 		item.Run.Partial = ""
+		item.Run.LastStopReason = replayString(data["reason"])
 	case Stage:
 		item.Run.Turn = replayInt(data["turn"])
 	case ModelDelta:
@@ -208,6 +216,7 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 		}
 	case ModelResponse:
 		item.Run.Partial = ""
+		item.ModelTurns++
 	case ToolResult:
 		name := replayString(data["name"])
 		for index := range item.Tools {
@@ -256,6 +265,8 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 	case BudgetEvent:
 		_ = decodeReplay(event.Data, &item.Budget)
 	case Compaction:
+		item.CompactionCount++
+		item.CompactionTokenDelta += replayInt(data["after"]) - replayInt(data["before"])
 		if replayString(data["kind"]) == "summarize" {
 			removed := map[string]bool{}
 			for _, id := range replayStrings(data["affected_ids"]) {

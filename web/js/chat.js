@@ -250,6 +250,7 @@ function buildEntries(session) {
       entry.text = data.content || entry.text;
       entry.toolCallIDs = (data.tool_calls || []).map((call) => call.id);
       entry.reasoningTokens = data.reasoning_tokens || 0;
+      entry.reasoningTokensEstimated = !!data.reasoning_tokens_estimated;
       if (entry.thinkingStartedMS && !entry.thinkingEndedMS) entry.thinkingEndedMS = eventTime(event);
       entry.thinkingMS = entry.thinkingStartedMS && entry.thinkingEndedMS
         ? Math.max(0, entry.thinkingEndedMS - entry.thinkingStartedMS)
@@ -287,7 +288,7 @@ function buildEntries(session) {
     } else if (message.role === "assistant") {
       if (matchedMessages.has(message)) continue;
       if (message.content || message.reasoning) {
-        const tokens = Math.ceil((message.reasoning || "").length / 3.6);
+        const tokens = Math.ceil(Array.from(message.reasoning || "").length / 3.6);
         const rate = Number(session._timings?.predicted_per_second || 0);
         missing.push({
           type: "agent",
@@ -310,7 +311,7 @@ function buildEntries(session) {
         name: message.name || detail.name || "tool",
         args: detail.args || {},
         content,
-        result: { ok: !String(content).startsWith("error:"), ms: null, preview: content },
+        result: { ok: typeof message.ok === "boolean" ? message.ok : null, ms: null, preview: content },
       });
     }
   }
@@ -398,7 +399,7 @@ function renderEntry(session, entry) {
   else if (entry.type === "tool") content.append(toolTick(entry));
   else {
     const nodes = [];
-    const tokens = entry.reasoningTokens || Math.ceil((entry.reasoning || "").length / 3.6);
+    const tokens = entry.reasoningTokens || Math.ceil(Array.from(entry.reasoning || "").length / 3.6);
     if (tokens > 0 || !entry.done) nodes.push(thinking(entry, tokens));
     if (entry.text) {
       const answer = document.createElement("div");
@@ -447,7 +448,7 @@ function renderResponse(session, entry) {
     }
     const stepNodes = [];
     if (item.type === "agent") {
-      const tokens = item.reasoningTokens || Math.ceil((item.reasoning || "").length / 3.6);
+      const tokens = item.reasoningTokens || Math.ceil(Array.from(item.reasoning || "").length / 3.6);
       if (tokens > 0 || !item.done) stepNodes.push(thinking(item, tokens));
       if (item.text) {
         if (!itemView.answer) {
@@ -502,7 +503,7 @@ function toolTick(entry) {
   button.className = "tool-tick";
   const open = expanded.has(entry.key);
   button.setAttribute("aria-expanded", String(open));
-  const state = entry.result ? (entry.result.ok ? "ok" : "error") : "";
+  const state = entry.result && typeof entry.result.ok === "boolean" ? (entry.result.ok ? "ok" : "error") : "";
   button.innerHTML = '<span class="tool-name"></span><span class="tool-key"></span><span class="tool-state"></span><span class="tool-ms"></span>';
   button.children[0].textContent = `${open ? "▾" : "▸"} ${entry.name}`;
   button.children[1].textContent = keyArgument(entry.args);

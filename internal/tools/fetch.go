@@ -134,6 +134,11 @@ func (f *Fetch) CallDetailed(ctx context.Context, _ *session.Session, args map[s
 		data = data[:cfg.MaxBytes]
 	}
 	meta["source_bytes"], meta["source_truncated"] = len(data), truncated
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		detail.Err = fmt.Errorf("HTTP status %d", status)
+		f.audit(rawURL, status, len(data), truncated, detail.Err)
+		return detail
+	}
 	mediaType := response.Header.Get("Content-Type")
 	if mediaType != "" {
 		mediaType, _, _ = mime.ParseMediaType(mediaType)

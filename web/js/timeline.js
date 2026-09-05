@@ -25,14 +25,10 @@ export function renderTimeline() {
   }
   const state = view(session.id),
     events = session.timeline || [],
-    retainedTurns = events.filter((event) => event.type === "model.response").length,
-    turns = Math.max(session.run?.turn || 0, retainedTurns),
-    compactions = events.filter((event) => event.type === "compaction"),
-    compactedTokens = compactions.reduce(
-      (sum, event) => sum + ((event.data?.after || 0) - (event.data?.before || 0)),
-      0,
-    );
-  count.textContent = `${turns} turns${compactions.length ? ` · ${compactions.length} compact · ${formatSigned(compactedTokens)} tokens` : ""}`;
+    turns = session.model_turns || 0,
+    compactions = session.compaction_count || 0,
+    compactedTokens = session.compaction_token_delta || 0;
+  count.textContent = `${turns} turns${compactions ? ` · ${compactions} compact · ${formatSigned(compactedTokens)} tokens` : ""}`;
   const calls = new Map(),
     results = new Map(),
     decisions = new Map();

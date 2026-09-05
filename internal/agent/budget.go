@@ -168,19 +168,26 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			previous = withTools
 			for name, schema := range in.AllSchemas {
 				one, err := render([]llm.Message{{Role: "system", Content: in.System}}, []any{schema})
-				if err == nil {
-					schemaCounts[name] = max(0, one-withMemory)
+				if err != nil {
+					return events.Budget{}, fmt.Errorf("count schema %s: %w", name, err)
 				}
+				schemaCounts[name] = max(0, one-withMemory)
 			}
 		} else {
 			estimated = append(estimated, "tools")
 			data, _ := json.Marshal(in.Schemas)
-			value, _ := client.Tokenize(ctx, string(data), false)
+			value, err := client.Tokenize(ctx, string(data), false)
+			if err != nil {
+				return events.Budget{}, fmt.Errorf("count tool schemas: %w", err)
+			}
 			categories["tools"] = int(math.Ceil(float64(value) * 1.1))
 			previous += categories["tools"]
 			for name, schema := range in.AllSchemas {
 				raw, _ := json.Marshal(schema)
-				value, _ := client.Tokenize(ctx, string(raw), false)
+				value, err := client.Tokenize(ctx, string(raw), false)
+				if err != nil {
+					return events.Budget{}, fmt.Errorf("count schema %s: %w", name, err)
+				}
 				schemaCounts[name] = int(math.Ceil(float64(value) * 1.1))
 			}
 		}
@@ -210,9 +217,15 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			weights, totalWeight := make([]int, groupEnd-index+1), 0
 			for offset := range weights {
 				candidate := in.Messages[index+offset]
-				weight, _ := client.Tokenize(ctx, messageText(candidate.Content)+candidate.ReasoningContent, false)
+				weight, err := client.Tokenize(ctx, messageText(candidate.Content)+candidate.ReasoningContent, false)
+				if err != nil {
+					return events.Budget{}, fmt.Errorf("weight message %d: %w", index+offset, err)
+				}
 				for _, call := range candidate.ToolCalls {
-					value, _ := client.Tokenize(ctx, call.Function.Arguments, false)
+					value, err := client.Tokenize(ctx, call.Function.Arguments, false)
+					if err != nil {
+						return events.Budget{}, fmt.Errorf("weight tool call %s: %w", call.Function.Name, err)
+					}
 					weight += value
 				}
 				weight += 1

@@ -57,6 +57,7 @@ func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(D
 	}
 	result := Response{Usage: Usage{CachedTokens: -1}}
 	var rawStream bytes.Buffer
+	recognizedChunks := 0
 	arguments := map[int]*strings.Builder{}
 	calls := map[int]*ToolCall{}
 	scanner := bufio.NewScanner(response.Body)
@@ -97,9 +98,13 @@ func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(D
 				Processed int `json:"processed"`
 			} `json:"prompt_progress"`
 		}
-		if json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &chunk) != nil {
-			continue
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &chunk); err != nil {
+			return Response{}, fmt.Errorf("decode chat stream chunk: %w", err)
 		}
+		if len(chunk.Choices) == 0 && chunk.Usage == nil && chunk.Timings == nil && chunk.PromptProgress == nil {
+			return Response{}, fmt.Errorf("chat stream chunk contained no recognized fields")
+		}
+		recognizedChunks++
 		if chunk.Usage != nil {
 			result.Usage.PromptTokens = chunk.Usage.PromptTokens
 			result.Usage.CompletionTokens = chunk.Usage.CompletionTokens
@@ -154,6 +159,9 @@ func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(D
 	}
 	if err := scanner.Err(); err != nil {
 		return Response{}, err
+	}
+	if recognizedChunks == 0 {
+		return Response{}, fmt.Errorf("chat stream contained no decodable chunks")
 	}
 	for index := 0; index < len(calls); index++ {
 		call := calls[index]
@@ -210,8 +218,19 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body any) ([]b
 		return nil, 0, err
 	}
 	defer response.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(response.Body, 64<<20))
+	raw, err := readBounded(response.Body, 64<<20)
 	return raw, response.StatusCode, err
+}
+
+func readBounded(reader io.Reader, limit int64) ([]byte, error) {
+	raw, err := io.ReadAll(io.LimitReader(reader, limit+1))
+	if err != nil {
+		return raw, err
+	}
+	if int64(len(raw)) > limit {
+		return nil, fmt.Errorf("response body exceeds %d bytes", limit)
+	}
+	return raw, nil
 }
 func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.profile.BaseURL, "/")+path, body)

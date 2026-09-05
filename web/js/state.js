@@ -74,9 +74,10 @@ function messageRow(session, message, state) {
   const expansion = document.createElement("div");
   expansion.className = "row-expansion";
   if (message.reasoning) {
+    const reasoning = reasoningTokens(session, message);
     const thinking = document.createElement("details");
     const summary = document.createElement("summary");
-    summary.textContent = `Thinking · ${formatNumber(reasoningTokens(session, message))}`;
+    summary.textContent = `Thinking · ${reasoning.estimated ? "~" : ""}${formatNumber(reasoning.tokens)}`;
     const pre = document.createElement("pre");
     pre.textContent = message.reasoning;
     thinking.append(summary, pre);
@@ -100,7 +101,8 @@ function reasoningTokens(session, message) {
   const event = [...(session.timeline || [])].reverse().find(
     (item) => item.type === "model.response" && item.data?.turn === message.turn,
   );
-  return event?.data?.reasoning_tokens || Math.ceil((message.reasoning || "").length / 3.6);
+  if (event) return { tokens: event.data?.reasoning_tokens || 0, estimated: !!event.data?.reasoning_tokens_estimated };
+  return { tokens: Math.ceil(Array.from(message.reasoning || "").length / 3.6), estimated: true };
 }
 
 function friendly(value) {

@@ -11,6 +11,13 @@ test("live telemetry projects chunk age, reasoning, and a recent rate", () => {
   assert.deepEqual(liveTelemetry(session, 4000), { ageSeconds: 1, reasoningTokens: 3, rate: 2, hasChunk: true });
 });
 
+test("live telemetry counts Unicode characters rather than UTF-16 units", () => {
+  const session = { timeline: [] };
+  applyStreamEvent(session, { type: "model.request", run_id: "r1", data: { turn: 1 } }, 1000);
+  applyStreamEvent(session, { type: "model.delta", run_id: "r1", data: { turn: 1, kind: "reasoning", text: "🙂🙂🙂🙂" } }, 2000);
+  assert.equal(liveTelemetry(session, 3000).reasoningTokens, 2);
+});
+
 test("snapshot hydration reconstructs an active stream", () => {
   const session = { timeline: [
     { type: "model.request", ts: "2026-01-01T00:00:01Z", run_id: "r2", data: { turn: 1 } },
@@ -24,7 +31,7 @@ test("snapshot hydration reconstructs an active stream", () => {
 test("replay telemetry is explicitly final recorded data", () => {
   const session = { timeline: [{
     type: "model.response",
-    data: { reasoning_tokens: 1847, timings: { predicted_per_second: 23.6 } },
+    data: { reasoning_tokens: 1847, reasoning_tokens_estimated: true, timings: { predicted_per_second: 23.6 } },
   }] };
-  assert.deepEqual(recordedTelemetry(session), { reasoningTokens: 1847, rate: 24 });
+  assert.deepEqual(recordedTelemetry(session), { reasoningTokens: 1847, reasoningTokensEstimated: true, rate: 24 });
 });

@@ -1,6 +1,9 @@
 package config
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 func migrateByteWindows(data []byte, version int) (bool, []byte, error) {
 	if version >= 4 {
@@ -105,13 +108,19 @@ func migrateV1(data []byte) (bool, []byte, error) {
 		profile.ProbeMode = server.ProbeMode
 	}
 	if v := raw["sampling_thinking"]; v != nil {
-		_ = json.Unmarshal(v, &profile.Sampling.Thinking)
+		if err := json.Unmarshal(v, &profile.Sampling.Thinking); err != nil {
+			return false, nil, fmt.Errorf("migrate sampling_thinking: %w", err)
+		}
 	}
 	if v := raw["sampling_nonthinking"]; v != nil {
-		_ = json.Unmarshal(v, &profile.Sampling.Nonthinking)
+		if err := json.Unmarshal(v, &profile.Sampling.Nonthinking); err != nil {
+			return false, nil, fmt.Errorf("migrate sampling_nonthinking: %w", err)
+		}
 	}
 	if v := raw["thinking"]; v != nil {
-		_ = json.Unmarshal(v, &profile.Reasoning)
+		if err := json.Unmarshal(v, &profile.Reasoning); err != nil {
+			return false, nil, fmt.Errorf("migrate thinking: %w", err)
+		}
 	}
 	if v := raw["context"]; v != nil {
 		var old struct {
@@ -121,7 +130,9 @@ func migrateV1(data []byte) (bool, []byte, error) {
 			SummaryPct    float64 `json:"summary_pct"`
 			Accounting    string  `json:"accounting"`
 		}
-		_ = json.Unmarshal(v, &old)
+		if err := json.Unmarshal(v, &old); err != nil {
+			return false, nil, fmt.Errorf("migrate context: %w", err)
+		}
 		profile.Context.NCtxOverride = old.NCtxOverride
 		if old.ReserveOutput > 0 {
 			profile.Context.ReserveOutput = old.ReserveOutput

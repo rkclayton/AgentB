@@ -655,10 +655,7 @@ func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 func (s *Server) runProbe(profile *config.Profile) {
 	caps, findings, err := probe.Probe(contextBackground{}, profile)
 	if err != nil {
-		caps = profile.Capabilities
-		caps.ProbedAt = time.Now().UTC().Format(time.RFC3339)
-		findings = []string{"probe failed: " + err.Error()}
-		caps.Findings = findings
+		caps, findings = failedProbeCapabilities(profile, err)
 	}
 	s.mu.Lock()
 	for i := range s.cfg.Servers {
@@ -677,6 +674,13 @@ func (s *Server) runProbe(profile *config.Profile) {
 		s.registry.RefreshRunnable()
 	}
 	s.bus.Publish(events.New(events.ServerProbed, "", "", map[string]any{"server_id": profile.ID, "capabilities": caps, "findings": findings}))
+}
+
+func failedProbeCapabilities(profile *config.Profile, err error) (config.Capabilities, []string) {
+	caps := profile.Capabilities
+	findings := []string{"probe failed: " + err.Error()}
+	caps.Findings = findings
+	return caps, findings
 }
 
 // contextBackground implements the small Context surface while avoiding probe cancellation after the request returns.

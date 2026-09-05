@@ -3,8 +3,10 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -391,6 +393,23 @@ func TestFileRoutingGuardDefaultsOnAndCanBeDisabled(t *testing.T) {
 	ApplyDefaults(&cfg)
 	if cfg.Shell.FileRoutingGuardEnabled() {
 		t.Fatal("explicitly disabled file routing guard was re-enabled")
+	}
+}
+
+func TestReserveOutputUsesCanonicalDefault(t *testing.T) {
+	cfg := Config{Servers: []Profile{{}}, Shell: Shell{Command: []string{"unused"}}}
+	ApplyDefaults(&cfg)
+	if got := cfg.Servers[0].Context.ReserveOutput; got != DefaultReserveOutput {
+		t.Fatalf("reserve_output=%d, want canonical default %d", got, DefaultReserveOutput)
+	}
+}
+
+func TestLegacyMigrationRejectsMalformedOptionalSections(t *testing.T) {
+	for _, field := range []string{"sampling_thinking", "sampling_nonthinking", "thinking", "context"} {
+		raw := []byte(fmt.Sprintf(`{"server":{},%q:"not-an-object"}`, field))
+		if _, _, err := migrateV1(raw); err == nil || !strings.Contains(err.Error(), field) {
+			t.Fatalf("field %s migration error=%v", field, err)
+		}
 	}
 }
 

@@ -8,12 +8,13 @@ import (
 )
 
 type RunState struct {
-	Status        string `json:"status"`
-	RunID         string `json:"run_id"`
-	Turn          int    `json:"turn"`
-	MaxTurns      int    `json:"max_turns"`
-	QueuePosition int    `json:"queue_position"`
-	Partial       string `json:"partial"`
+	Status         string `json:"status"`
+	RunID          string `json:"run_id"`
+	Turn           int    `json:"turn"`
+	MaxTurns       int    `json:"max_turns"`
+	QueuePosition  int    `json:"queue_position"`
+	Partial        string `json:"partial"`
+	LastStopReason string `json:"last_stop_reason"`
 }
 type ToolState struct {
 	Name         string `json:"name"`
@@ -22,21 +23,24 @@ type ToolState struct {
 	SchemaTokens int    `json:"schema_tokens"`
 }
 type Snapshot struct {
-	ID                string           `json:"id"`
-	Label             string           `json:"label"`
-	ServerID          string           `json:"server_id"`
-	Workspace         string           `json:"workspace"`
-	Run               RunState         `json:"run"`
-	Tools             []ToolState      `json:"tools"`
-	Messages          []events.Message `json:"messages"`
-	Budget            events.Budget    `json:"budget"`
-	Timeline          []events.Event   `json:"timeline"`
-	QueuedMessages    int              `json:"queued_messages"`
-	Runnable          bool             `json:"runnable"`
-	NotRunnableReason string           `json:"not_runnable_reason"`
-	MemoryPath        string           `json:"memory_path"`
-	MemoryContent     string           `json:"memory_content"`
-	LogPath           string           `json:"log_path"`
+	ID                   string           `json:"id"`
+	Label                string           `json:"label"`
+	ServerID             string           `json:"server_id"`
+	Workspace            string           `json:"workspace"`
+	Run                  RunState         `json:"run"`
+	Tools                []ToolState      `json:"tools"`
+	Messages             []events.Message `json:"messages"`
+	Budget               events.Budget    `json:"budget"`
+	Timeline             []events.Event   `json:"timeline"`
+	QueuedMessages       int              `json:"queued_messages"`
+	Runnable             bool             `json:"runnable"`
+	NotRunnableReason    string           `json:"not_runnable_reason"`
+	MemoryPath           string           `json:"memory_path"`
+	MemoryContent        string           `json:"memory_content"`
+	LogPath              string           `json:"log_path"`
+	ModelTurns           int              `json:"model_turns"`
+	CompactionCount      int              `json:"compaction_count"`
+	CompactionTokenDelta int              `json:"compaction_token_delta"`
 }
 type Session struct {
 	ID, Label, ServerID, Workspace string
@@ -54,6 +58,9 @@ type Session struct {
 	MemoryPath                     string
 	SchemaTokens                   map[string]int
 	queuedMessages                 int
+	modelTurns                     int
+	compactionCount                int
+	compactionTokenDelta           int
 	mu                             sync.Mutex
 }
 
@@ -67,7 +74,7 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
@@ -123,6 +130,13 @@ func (s *Session) SetRun(state RunState)          { s.mu.Lock(); s.Run = state; 
 func (s *Session) UpdatePartial(partial string)   { s.mu.Lock(); s.Run.Partial = partial; s.mu.Unlock() }
 func (s *Session) SetBudget(budget events.Budget) { s.mu.Lock(); s.Budget = budget; s.mu.Unlock() }
 func (s *Session) SetQueuedMessages(count int)    { s.mu.Lock(); s.queuedMessages = count; s.mu.Unlock() }
+func (s *Session) RecordModelTurn()               { s.mu.Lock(); s.modelTurns++; s.mu.Unlock() }
+func (s *Session) RecordCompaction(delta int) {
+	s.mu.Lock()
+	s.compactionCount++
+	s.compactionTokenDelta += delta
+	s.mu.Unlock()
+}
 func (s *Session) SetSchemaTokens(values map[string]int) {
 	s.mu.Lock()
 	s.SchemaTokens = values

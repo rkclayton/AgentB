@@ -16,6 +16,41 @@ import (
 	"harness/internal/session"
 )
 
+type cancellationProbeTool struct{ called bool }
+
+func (t *cancellationProbeTool) Name() string           { return "probe" }
+func (t *cancellationProbeTool) Description() string    { return "test" }
+func (t *cancellationProbeTool) Schema() map[string]any { return map[string]any{} }
+func (t *cancellationProbeTool) Call(context.Context, *session.Session, map[string]any) (string, error) {
+	t.called = true
+	return "success", nil
+}
+
+func TestRegistryDoesNotDispatchCancelledCall(t *testing.T) {
+	probe := &cancellationProbeTool{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	outcome := New(probe).CallDetailed(ctx, &session.Session{ToolsEnabled: map[string]bool{"probe": true}}, "probe", nil)
+	if outcome.OK || probe.called || !strings.Contains(outcome.Content, "context canceled") {
+		t.Fatalf("cancelled outcome=%+v called=%v", outcome, probe.called)
+	}
+}
+
+func TestSearchTextDoesNotHideReadFailure(t *testing.T) {
+	workspace := t.TempDir()
+	path := filepath.Join(workspace, "source.txt")
+	if err := os.WriteFile(path, []byte("needle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Defaults(workspace)
+	grep := NewGrep(cfg.Tools.Grep, cfg.Tools.ListDir)
+	grep.read = func(name string) ([]byte, error) { return nil, fmt.Errorf("read %s failed", filepath.Base(name)) }
+	result, err := grep.Call(context.Background(), &session.Session{Workspace: workspace}, map[string]any{"pattern": "needle"})
+	if err == nil || result != "" || !strings.Contains(err.Error(), "source.txt failed") {
+		t.Fatalf("search result=%q err=%v", result, err)
+	}
+}
+
 func TestRenamedToolsRegisterExposeSchemasAndExecute(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "sample.go"), []byte("package sample\n// unique-search-marker\n"), 0o600); err != nil {

@@ -167,9 +167,11 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		for _, call := range response.ToolCalls {
 			toolCalls = append(toolCalls, events.ToolCall{ID: call.ID, Name: call.Function.Name, Arguments: call.Function.Arguments})
 		}
-		responseData := map[string]any{"turn": turn, "finish_reason": response.FinishReason, "content": response.Content, "reasoning_tokens": r.textTokens(ctx, profile, response.Reasoning), "tool_calls": toolCalls, "usage": map[string]any{"prompt_tokens": response.Usage.PromptTokens, "completion_tokens": response.Usage.CompletionTokens, "cached_tokens": nullable(response.Usage.CachedTokens)}, "timings": response.Timings, "duration_ms": response.DurationMS}
+		reasoningTokens, reasoningTokensEstimated := r.count(ctx, profile, response.Reasoning)
+		responseData := map[string]any{"turn": turn, "finish_reason": response.FinishReason, "content": response.Content, "reasoning_tokens": reasoningTokens, "reasoning_tokens_estimated": reasoningTokensEstimated, "tool_calls": toolCalls, "usage": map[string]any{"prompt_tokens": response.Usage.PromptTokens, "completion_tokens": response.Usage.CompletionTokens, "cached_tokens": nullable(response.Usage.CachedTokens)}, "timings": response.Timings, "duration_ms": response.DurationMS}
 		responseEvent := events.New(events.ModelResponse, s.ID, runID, responseData)
 		responseEvent.Raw = string(response.Raw)
+		s.RecordModelTurn()
 		r.bus.Publish(responseEvent)
 		r.stage(s, runID, turn, "parse", func() {})
 		if len(toolCalls) == 0 && response.FinishReason != "tool_calls" {
@@ -258,12 +260,13 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				message, _ := r.makeMessage(ctx, profile, "tool", item.content, category, turn)
 				message.ToolCallID = item.call.ID
 				message.Name = item.call.Name
+				message.OK = boolPointer(item.ok)
 				s.Append(message)
 				r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
 			}
 		})
 		for _, item := range results {
-			reason, detail, prior := guards.Observe(item.call.ID, item.call.Name, item.args, item.content)
+			reason, detail, prior := guards.Observe(item.call.ID, item.call.Name, item.args, item.content, item.ok)
 			if reason == "cycle" {
 				r.bus.Publish(events.New(events.CycleDetected, s.ID, runID, map[string]any{"call_id": item.call.ID, "name": item.call.Name, "args": item.args, "prior_call_id": prior}))
 			}
@@ -377,7 +380,7 @@ func (r *Runner) count(ctx context.Context, p *config.Profile, text string) (int
 			return count, false
 		}
 	}
-	return int(math.Ceil(float64(len(text)) / 3.6)), true
+	return int(math.Ceil(float64(len([]rune(text))) / 3.6)), true
 }
 func (r *Runner) textTokens(ctx context.Context, p *config.Profile, text string) int {
 	value, _ := r.count(ctx, p, text)
@@ -389,9 +392,11 @@ func (r *Runner) PublishBudget(ctx context.Context, s *session.Session) {
 		return
 	}
 	budget, err := r.measureSession(ctx, p, s, nil, false)
-	if err == nil {
-		r.bus.Publish(events.New(events.BudgetEvent, s.ID, "", budget))
+	if err != nil {
+		r.operationalError(s, "", "budget", err)
+		return
 	}
+	r.bus.Publish(events.New(events.BudgetEvent, s.ID, "", budget))
 }
 func (r *Runner) measureSession(ctx context.Context, p *config.Profile, s *session.Session, currentReasoning map[string]bool, mark bool) (events.Budget, error) {
 	enabled := s.EnabledTools()
@@ -420,13 +425,18 @@ func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID
 	changed := r.compact.Supersede(s, runID, turn, readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
 	budget, err := r.measureSession(ctx, p, s, current, false)
 	if err != nil {
+		r.operationalError(s, runID, "compaction_budget", err)
 		return
 	}
 	if budget.Ceiling > 0 && budget.UsedEst >= int(float64(budget.Ceiling)*cfg.Context.SoftPct) {
 		did, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
 		changed = changed || did
 		if did {
-			budget, _ = r.measureSession(ctx, p, s, current, false)
+			budget, err = r.measureSession(ctx, p, s, current, false)
+			if err != nil {
+				r.operationalError(s, runID, "compaction_budget", err)
+				return
+			}
 		}
 	}
 	if budget.Ceiling > 0 && budget.UsedEst >= int(float64(budget.Ceiling)*cfg.Context.SummaryPct) {
@@ -435,9 +445,12 @@ func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID
 	if changed {
 		r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": "compact", "state": "enter", "turn": turn, "ms": 0}))
 		r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": "compact", "state": "exit", "turn": turn, "ms": 0}))
-		if next, err := r.measureSession(ctx, p, s, current, false); err == nil {
-			r.bus.Publish(events.New(events.BudgetEvent, s.ID, runID, next))
+		next, err := r.measureSession(ctx, p, s, current, false)
+		if err != nil {
+			r.operationalError(s, runID, "compaction_budget", err)
+			return
 		}
+		r.bus.Publish(events.New(events.BudgetEvent, s.ID, runID, next))
 	}
 }
 func (r *Runner) compactToFit(ctx context.Context, s *session.Session, runID string, p *config.Profile, current map[string]bool, budget events.Budget) bool {
@@ -445,7 +458,9 @@ func (r *Runner) compactToFit(ctx context.Context, s *session.Session, runID str
 	readDefaultLimit := min(cfg.Tools.ReadFile.DefaultLimit, cfg.Tools.ReadFile.MaxLimit)
 	changed, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
 	next, err := r.measureSession(ctx, p, s, current, false)
-	if err == nil {
+	if err != nil {
+		r.operationalError(s, runID, "compaction_budget", err)
+	} else {
 		guard := next.UsedEst
 		if next.Mode == "estimated" {
 			guard = int(math.Ceil(float64(guard) * 1.10))
@@ -481,6 +496,7 @@ func (r *Runner) summarize(ctx context.Context, s *session.Session, runID string
 	}
 	response, err := llm.New(&summaryProfile).Chat(ctx, llm.Request{Messages: messages, MaxTokens: 800, Thinking: summaryProfile.Reasoning.Enabled})
 	if err != nil {
+		r.operationalError(s, runID, "compaction_summary", err)
 		return false
 	}
 	message, _ := r.makeMessage(ctx, p, "user", "Progress note (auto-summary of earlier turns):\n"+response.Content, "summary", 0)
@@ -489,6 +505,9 @@ func (r *Runner) summarize(ctx context.Context, s *session.Session, runID string
 	}
 	r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
 	return true
+}
+func (r *Runner) operationalError(s *session.Session, runID, where string, err error) {
+	r.bus.Publish(events.New(events.Error, s.ID, runID, map[string]any{"where": where, "message": err.Error()}))
 }
 func requestParams(p *config.Profile) map[string]any {
 	s := p.Sampling.Nonthinking
@@ -509,10 +528,12 @@ func nullable(value int) any {
 	}
 	return value
 }
+func boolPointer(value bool) *bool { return &value }
 func preview(value string) string {
 	value = strings.ReplaceAll(value, "\r", "")
-	if len(value) > 500 {
-		return value[:500] + "…"
+	runes := []rune(value)
+	if len(runes) > 500 {
+		return string(runes[:500]) + "…"
 	}
 	return value
 }

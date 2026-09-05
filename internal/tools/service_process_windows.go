@@ -50,7 +50,7 @@ type serviceShellProcess struct {
 	process  syscall.Handle
 	job      syscall.Handle
 	output   *os.File
-	copyDone chan struct{}
+	copyDone chan error
 	once     sync.Once
 }
 
@@ -183,12 +183,16 @@ func startServiceAccountProcess(executable string, argv []string, workspace stri
 	outputWrite = 0
 	outputFile := os.NewFile(uintptr(outputRead), "service-shell-output")
 	outputRead = 0
-	done := make(chan struct{})
+	done := make(chan error, 1)
 	go func() {
-		_, _ = io.Copy(output, outputFile)
-		close(done)
+		done <- copyServiceOutput(output, outputFile)
 	}()
 	return &serviceShellProcess{process: process.Process, job: syscall.Handle(job), output: outputFile, copyDone: done}, nil
+}
+
+func copyServiceOutput(output io.Writer, input io.Reader) error {
+	_, err := io.Copy(output, input)
+	return err
 }
 
 func (p *serviceShellProcess) Wait() (int, error) {
@@ -209,8 +213,11 @@ func (p *serviceShellProcess) Wait() (int, error) {
 		p.close()
 		return 0, fmt.Errorf("process remained active after wait")
 	}
-	<-p.copyDone
+	copyErr := <-p.copyDone
 	p.close()
+	if copyErr != nil {
+		return 0, fmt.Errorf("capture service-account shell output: %w", copyErr)
+	}
 	return int(exitCode), nil
 }
 

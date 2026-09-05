@@ -1,11 +1,14 @@
 package events
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestRecentOmitsDiagnosticPayloadsButSinkReceivesThem(t *testing.T) {
 	bus := NewBus()
 	var logged Event
-	bus.SetSink(func(event Event) { logged = event })
+	bus.SetSink(func(event Event) error { logged = event; return nil })
 
 	event := New(ModelResponse, "main", "r1", map[string]any{"content": "done"})
 	event.Body = map[string]any{"messages": []string{"request"}}
@@ -24,6 +27,24 @@ func TestRecentOmitsDiagnosticPayloadsButSinkReceivesThem(t *testing.T) {
 	}
 	if recent[0].Body != nil || recent[0].Raw != nil {
 		t.Fatalf("Recent exposed log-only payloads: body=%v raw=%v", recent[0].Body, recent[0].Raw)
+	}
+}
+
+func TestSinkFailureBecomesOperationalError(t *testing.T) {
+	bus := NewBus()
+	bus.SetSink(func(Event) error { return fmt.Errorf("disk full") })
+	events := bus.Recent("main")
+	if len(events) != 0 {
+		t.Fatalf("unexpected initial events: %#v", events)
+	}
+	bus.Publish(New(ToolResult, "main", "run", map[string]any{"name": "shell"}))
+	events = bus.Recent("main")
+	if len(events) != 2 || events[1].Type != Error {
+		t.Fatalf("sink failure events=%#v", events)
+	}
+	data := events[1].Data.(map[string]any)
+	if data["where"] != "event_log" || data["lost_event_type"] != ToolResult {
+		t.Fatalf("sink failure data=%#v", data)
 	}
 }
 

@@ -82,6 +82,7 @@ func (c *Compactor) ElideOld(s *session.Session, runID string, used, target, rea
 		return false, used
 	}
 	s.ReplaceMessages(messages)
+	s.RecordCompaction(used - before)
 	c.bus.Publish(events.New(events.Compaction, s.ID, runID, map[string]any{"kind": "elide", "before": before, "after": used, "affected_ids": affected}))
 	return true, used
 }
@@ -105,7 +106,11 @@ func (c *Compactor) Summarize(s *session.Session, runID string, summary events.M
 		}
 	}
 	before, after := tokenSum(messages), tokenSum(out)
+	if after >= before {
+		return false
+	}
 	s.ReplaceMessages(out)
+	s.RecordCompaction(after - before)
 	c.bus.Publish(events.New(events.Compaction, s.ID, runID, map[string]any{"kind": "summarize", "before": before, "after": after, "affected_ids": affected, "summary_message_id": summary.ID}))
 	return true
 }

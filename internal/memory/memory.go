@@ -113,7 +113,7 @@ func (m *Manager) Note(workspace, note string) (string, bool, error) {
 		return "", false, fmt.Errorf("note is empty")
 	}
 	if len([]rune(note)) > 300 {
-		return "", false, fmt.Errorf("note too long (max 300 chars)")
+		return "", false, fmt.Errorf("note too long (max 300 Unicode characters)")
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -51,14 +51,17 @@ func TestShellFileRoutingRefusals(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			for _, command := range test.commands {
 				t.Run(strings.Fields(command)[0], func(t *testing.T) {
-					cfg := config.Defaults(t.TempDir()).Shell
-					got, err := NewShell(cfg).Call(context.Background(), &session.Session{ID: "test", Workspace: t.TempDir()}, map[string]any{"command": command})
-					if err != nil {
-						t.Fatal(err)
+					root := t.TempDir()
+					cfg := config.Defaults(root).Shell
+					item := &session.Session{ID: "test", Workspace: root, ToolsEnabled: map[string]bool{"shell": true}}
+					outcome := New(NewShell(cfg)).CallDetailed(context.Background(), item, "shell", map[string]any{"command": command})
+					if outcome.OK {
+						t.Fatalf("routing refusal presented as success: %+v", outcome)
 					}
+					got := strings.TrimPrefix(outcome.Content, "note: command was not executed; ")
 					var refusal shellRoutingRefusal
 					if err := json.Unmarshal([]byte(got), &refusal); err != nil {
-						t.Fatalf("result is not structured JSON: %q: %v", got, err)
+						t.Fatalf("result does not contain structured refusal JSON: %q: %v", outcome.Content, err)
 					}
 					if !refusal.Refused || refusal.Replacement.Tool != test.tool {
 						t.Fatalf("got %+v, want refusal naming %s", refusal, test.tool)

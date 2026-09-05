@@ -86,7 +86,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer writers.Close()
+	defer func() {
+		if err := writers.Close(); err != nil {
+			log.Printf("close event logs: %v", err)
+		}
+	}()
 	bus := events.NewBus()
 	bus.SetSink(writers.Write)
 	web := webserver.New(cfg, paths.Config, filepath.Join(paths.Application, "web"), roots, bus)

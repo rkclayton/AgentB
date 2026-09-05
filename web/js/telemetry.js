@@ -78,6 +78,7 @@ export function recordedTelemetry(session) {
   const rawRate = Number(data.timings?.predicted_per_second);
   return {
     reasoningTokens: Number(data.reasoning_tokens || 0),
+    reasoningTokensEstimated: !!data.reasoning_tokens_estimated,
     rate: Number.isFinite(rawRate) && rawRate > 0 ? Math.round(rawRate) : null,
   };
 }

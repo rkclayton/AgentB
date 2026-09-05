@@ -70,6 +70,7 @@ type Message struct {
 	Estimated  bool       `json:"estimated"`
 	Elided     bool       `json:"elided"`
 	Turn       int        `json:"turn"`
+	OK         *bool      `json:"ok,omitempty"`
 }
 type Budget struct {
 	NCtx                int            `json:"n_ctx"`

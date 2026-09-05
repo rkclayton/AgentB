@@ -93,7 +93,7 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 		if refusal != nil {
 			result, _ := json.Marshal(refusal)
 			log.Printf("shell file-routing refusal: session=%s tool=%s command=%q", item.ID, refusal.Replacement.Tool, command)
-			return CallDetail{Content: string(result)}
+			return CallDetail{Err: fmt.Errorf("note: command was not executed; %s", result)}
 		}
 		if ambiguous {
 			log.Printf("debug: shell file-routing guard allowed ambiguous compound command: %q", command)

@@ -9,7 +9,7 @@ func buildRequest(profile *config.Profile, request Request, stream bool) map[str
 	}
 	body := map[string]any{"model": profile.Model, "messages": request.Messages, "temperature": sampling.Temperature, "top_p": sampling.TopP, "presence_penalty": sampling.PresencePenalty, "max_tokens": request.MaxTokens, "stream": stream}
 	if request.MaxTokens == 0 {
-		body["max_tokens"] = 8192
+		body["max_tokens"] = config.DefaultReserveOutput
 	}
 	if len(request.Tools) > 0 {
 		body["tools"] = request.Tools

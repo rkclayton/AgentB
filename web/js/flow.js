@@ -54,7 +54,7 @@ function readoutFor(session, name) {
   if (store.replay) {
     const recorded = recordedTelemetry(session);
     if (!recorded) return "recorded";
-    return `recorded · think ${number(recorded.reasoningTokens)}${recorded.rate === null ? "" : ` · ${recorded.rate} tok/s`}`;
+    return `recorded · think ${recorded.reasoningTokensEstimated ? "~" : ""}${number(recorded.reasoningTokens)}${recorded.rate === null ? "" : ` · ${recorded.rate} tok/s`}`;
   }
   const telemetry = liveTelemetry(session);
   if (telemetry) {

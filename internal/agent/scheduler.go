@@ -110,7 +110,7 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 		next.s.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns})
 		s.queue = append(s.queue, next)
 	}
-	entry.s.SetRun(session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns})
+	entry.s.SetRun(session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: reason})
 	s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": reason, "detail": detail, "turns": turns}))
 	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
 		next := s.queue[0]
@@ -143,7 +143,7 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 			discarded := len(s.pending[entry.s.ID])
 			delete(s.pending, entry.s.ID)
 			entry.s.SetQueuedMessages(0)
-			entry.s.SetRun(session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns})
+			entry.s.SetRun(session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: "user_stop"})
 			detail := ""
 			if discarded > 0 {
 				detail = fmt.Sprintf("discarded %d queued message(s)", discarded)

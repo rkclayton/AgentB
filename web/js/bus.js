@@ -77,7 +77,11 @@ export function reduce(event) {
         target.messages = [];
         target.timeline = [];
         for (const tool of target.tools || []) tool.calls = 0;
-        mergeRun(target, { status: "idle", turn: 0, partial: "" });
+        target.queued_messages = 0;
+        target.model_turns = 0;
+        target.compaction_count = 0;
+        target.compaction_token_delta = 0;
+        mergeRun(target, { status: store.replay ? "replay" : "idle", turn: 0, partial: "", last_stop_reason: "" });
       }
       break;
     case "session.closed":
@@ -133,10 +137,11 @@ export function reduce(event) {
     case "run.started":
       if (target) {
         mergeRun(target, {
-		  status: store.replay ? "replay" : "running",
+          status: store.replay ? "replay" : "running",
           run_id: data.run_id,
           turn: 0,
           queue_position: 0,
+          last_stop_reason: "",
         });
         target.queued_messages = Math.max(0, (target.queued_messages || 0) - 1);
         target._lastStop = "";
@@ -145,7 +150,7 @@ export function reduce(event) {
       break;
     case "run.stopped":
       if (target) {
-		mergeRun(target, { status: store.replay ? "replay" : "idle", partial: "" });
+        mergeRun(target, { status: store.replay ? "replay" : "idle", partial: "", last_stop_reason: data.reason || "" });
         target._streamTurnKey = "";
         target._lastStop = data.reason;
         target._stage = "wait_user";
@@ -187,6 +192,7 @@ export function reduce(event) {
       break;
     case "model.response":
       if (target) {
+        target.model_turns = (target.model_turns || 0) + 1;
         applyStreamEvent(target, event);
         target._timings = data.timings;
         target.run.partial = "";
@@ -249,6 +255,10 @@ export function reduce(event) {
       }
       break;
     case "compaction":
+      if (target) {
+        target.compaction_count = (target.compaction_count || 0) + 1;
+        target.compaction_token_delta = (target.compaction_token_delta || 0) + ((data.after || 0) - (data.before || 0));
+      }
       if (target && data.kind === "summarize") {
         const removed = new Set(data.affected_ids || []);
         target.messages = target.messages.filter(

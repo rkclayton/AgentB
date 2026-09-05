@@ -3,12 +3,24 @@
 package tools
 
 import (
+	"fmt"
+	"io"
 	"strings"
 	"syscall"
 	"testing"
 
 	"harness/internal/config"
 )
+
+type failingServiceOutputReader struct{}
+
+func (failingServiceOutputReader) Read([]byte) (int, error) { return 0, fmt.Errorf("pipe failed") }
+
+func TestServiceOutputCopyReturnsPipeFailure(t *testing.T) {
+	if err := copyServiceOutput(io.Discard, failingServiceOutputReader{}); err == nil || !strings.Contains(err.Error(), "pipe failed") {
+		t.Fatalf("copy error=%v", err)
+	}
+}
 
 func TestServiceSpawnFailureClassification(t *testing.T) {
 	for _, test := range []struct {

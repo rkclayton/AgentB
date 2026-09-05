@@ -2,7 +2,6 @@ package tools
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -19,6 +18,7 @@ type Grep struct {
 	mu     sync.RWMutex
 	cfg    config.GrepTool
 	ignore map[string]bool
+	read   func(string) ([]byte, error)
 }
 
 func NewGrep(cfg config.GrepTool, list config.ListDirTool) *Grep {
@@ -26,7 +26,7 @@ func NewGrep(cfg config.GrepTool, list config.ListDirTool) *Grep {
 	for _, name := range list.Ignore {
 		ignore[name] = true
 	}
-	return &Grep{cfg: cfg, ignore: ignore}
+	return &Grep{cfg: cfg, ignore: ignore, read: os.ReadFile}
 }
 func (*Grep) Name() string { return "search_text" }
 func (*Grep) Description() string {
@@ -80,12 +80,9 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 				return nil
 			}
 		}
-		data, readErr := os.ReadFile(filePath)
+		data, readErr := g.read(filePath)
 		if readErr != nil {
-			if errors.Is(readErr, os.ErrPermission) {
-				return readErr
-			}
-			return nil
+			return readErr
 		}
 		sample := data
 		if len(sample) > 8192 {

@@ -122,7 +122,7 @@ function updateView(view, entry, tokens, options) {
   view.summary.hidden = !entry.done;
   if (entry.done) {
     const duration = options.formatDuration(entry.thinkingMS);
-    view.summary.textContent = `Thought ${entry.thinkingEstimated && duration ? "~" : ""}${duration || "—"} seconds (${options.format(tokens)} tokens)`;
+    view.summary.textContent = `Thought ${entry.thinkingEstimated && duration ? "~" : ""}${duration || "—"} seconds (${entry.reasoningTokensEstimated || entry.thinkingEstimated ? "~" : ""}${options.format(tokens)} tokens)`;
   }
   view.body.hidden = !open;
   view.body.textContent = entry.reasoning || (entry.done

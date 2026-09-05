@@ -31,8 +31,12 @@ func (w *Writers) OpenSession(id string) (string, error) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if old := w.sessions[id]; old != nil {
-		_ = old.Sync()
-		_ = old.Close()
+		if err := old.Sync(); err != nil {
+			return "", err
+		}
+		if err := old.Close(); err != nil {
+			return "", err
+		}
 	}
 	path := filepath.Join(w.dir, fmt.Sprintf("%s-%s.jsonl", id, time.Now().UTC().Format("20060102T150405.000Z")))
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
@@ -42,7 +46,24 @@ func (w *Writers) OpenSession(id string) (string, error) {
 	w.sessions[id] = file
 	return path, nil
 }
-func (w *Writers) Write(event Event) {
+func (w *Writers) CloseSession(id string) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	file := w.sessions[id]
+	if file == nil {
+		return nil
+	}
+	syncErr := file.Sync()
+	closeErr := file.Close()
+	if closeErr == nil {
+		delete(w.sessions, id)
+	}
+	if syncErr != nil {
+		return syncErr
+	}
+	return closeErr
+}
+func (w *Writers) Write(event Event) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	file := w.global
@@ -50,12 +71,16 @@ func (w *Writers) Write(event Event) {
 		file = w.sessions[event.SessionID]
 	}
 	data, err := json.Marshal(event)
-	if err == nil {
-		_, _ = file.Write(append(data, '\n'))
+	if err != nil {
+		return err
+	}
+	if _, err := file.Write(append(data, '\n')); err != nil {
+		return err
 	}
 	if event.Type == "run.stopped" {
-		_ = file.Sync()
+		return file.Sync()
 	}
+	return nil
 }
 func (w *Writers) Close() error {
 	w.mu.Lock()
@@ -65,7 +90,9 @@ func (w *Writers) Close() error {
 		if file == nil {
 			continue
 		}
-		_ = file.Sync()
+		if err := file.Sync(); err != nil && first == nil {
+			first = err
+		}
 		if err := file.Close(); err != nil && first == nil {
 			first = err
 		}

@@ -106,6 +106,9 @@ func (r *Registry) CallDetailed(ctx context.Context, s *session.Session, name st
 	if tool == nil || !s.ToolEnabled(name) {
 		return CallOutcome{Content: fmt.Sprintf("error: tool %s is not available", name)}
 	}
+	if err := ctx.Err(); err != nil {
+		return CallOutcome{Content: "error: " + err.Error()}
+	}
 	var result string
 	var err error
 	overrideReason := ""

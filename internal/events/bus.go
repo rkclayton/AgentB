@@ -12,12 +12,15 @@ type Bus struct {
 	next        int
 	sessionRing map[string][]Event
 	global      []Event
-	sink        func(Event)
+	sink        func(Event) error
 }
 
-func NewBus() *Bus                      { return &Bus{subscribers: map[int]chan Event{}, sessionRing: map[string][]Event{}} }
-func (b *Bus) SetSink(sink func(Event)) { b.mu.Lock(); b.sink = sink; b.mu.Unlock() }
+func NewBus() *Bus                            { return &Bus{subscribers: map[int]chan Event{}, sessionRing: map[string][]Event{}} }
+func (b *Bus) SetSink(sink func(Event) error) { b.mu.Lock(); b.sink = sink; b.mu.Unlock() }
 func (b *Bus) Publish(event Event) Event {
+	return b.publish(event, true)
+}
+func (b *Bus) publish(event Event, writeSink bool) Event {
 	b.mu.Lock()
 	b.seq++
 	event.Seq = b.seq
@@ -42,14 +45,18 @@ func (b *Bus) Publish(event Event) Event {
 	}
 	sink := b.sink
 	b.mu.Unlock()
-	if sink != nil {
-		sink(event)
+	var sinkErr error
+	if writeSink && sink != nil {
+		sinkErr = sink(event)
 	}
 	for _, ch := range subscribers {
 		select {
 		case ch <- event:
 		default:
 		}
+	}
+	if sinkErr != nil {
+		b.publish(New(Error, event.SessionID, event.RunID, map[string]any{"where": "event_log", "message": sinkErr.Error(), "lost_event_type": event.Type}), false)
 	}
 	return event
 }

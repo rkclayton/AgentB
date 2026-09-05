@@ -138,6 +138,20 @@ func TestFetchTimeout(t *testing.T) {
 	}
 }
 
+func TestFetchNon2xxIsFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		fmt.Fprint(w, "upstream unavailable")
+	}))
+	defer server.Close()
+	registry := New(NewFetch(fetchTestConfig()))
+	item := &session.Session{ToolsEnabled: map[string]bool{"fetch_url": true}}
+	outcome := registry.CallDetailed(context.Background(), item, "fetch_url", map[string]any{"url": server.URL})
+	if outcome.OK || !strings.Contains(outcome.Content, "HTTP status 502") || outcome.Metadata["status"] != http.StatusBadGateway {
+		t.Fatalf("non-2xx outcome = %#v", outcome)
+	}
+}
+
 func TestFetchRefusesBinaryMIME(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")

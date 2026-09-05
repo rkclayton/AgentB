@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"strings"
 )
 
 type guardPair struct {
@@ -21,8 +20,8 @@ type runGuards struct {
 func newRunGuards(window, maxErrors int) *runGuards {
 	return &runGuards{window: window, maxErrors: maxErrors}
 }
-func (g *runGuards) Observe(callID, name string, args map[string]any, result string) (reason, detail, priorCallID string) {
-	if strings.HasPrefix(result, "error:") {
+func (g *runGuards) Observe(callID, name string, args map[string]any, result string, ok bool) (reason, detail, priorCallID string) {
+	if !ok {
 		g.errorCount++
 	} else {
 		g.errorCount = 0

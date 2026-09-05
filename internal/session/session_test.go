@@ -16,3 +16,14 @@ func TestSnapshotCarriesToolCallCounts(t *testing.T) {
 		t.Fatalf("snapshot tools=%+v", snapshot.Tools)
 	}
 }
+
+func TestSnapshotCarriesRunAggregates(t *testing.T) {
+	s := &Session{}
+	s.RecordModelTurn()
+	s.RecordModelTurn()
+	s.RecordCompaction(-123)
+	snapshot := s.Snapshot(nil)
+	if snapshot.ModelTurns != 2 || snapshot.CompactionCount != 1 || snapshot.CompactionTokenDelta != -123 {
+		t.Fatalf("snapshot aggregates=%+v", snapshot)
+	}
+}
