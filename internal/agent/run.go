@@ -221,6 +221,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			}
 		})
 		r.stage(s, runID, turn, "execute", func() {
+			remainingResultTokens := max(0, budget.NCtx-budget.Reserve-budget.UsedEst-toolResultContextMargin)
 			for index := range results {
 				item := &results[index]
 				start := time.Now()
@@ -233,7 +234,12 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 					item.category, item.untrusted, item.metadata = outcome.Category, outcome.Untrusted, outcome.Metadata
 				}
 				item.ms = time.Since(start).Milliseconds()
-				data := toolResultEventData(turn, item.call.ID, item.call.Name, item.content, item.ok, item.operatorContext, item.untrusted, item.ms, r.textTokens(ctx, profile, item.content), item.metadata)
+				resultTokens := r.textTokens(ctx, profile, item.content)
+				item.content, item.ok, item.metadata, resultTokens = r.fitWindowResult(
+					ctx, profile, item.call.Name, item.args, item.content, item.ok, item.metadata, resultTokens, remainingResultTokens,
+				)
+				remainingResultTokens = max(0, remainingResultTokens-resultTokens)
+				data := toolResultEventData(turn, item.call.ID, item.call.Name, item.content, item.ok, item.operatorContext, item.untrusted, item.ms, resultTokens, item.metadata)
 				r.bus.Publish(events.New(events.ToolResult, s.ID, runID, data))
 			}
 		})
