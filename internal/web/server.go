@@ -113,13 +113,7 @@ func (s *Server) ConfigSnapshot() config.Config {
 func (s *Server) Profile(id string) (*config.Profile, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	for i := range s.cfg.Servers {
-		if s.cfg.Servers[i].ID == id {
-			copy := s.cfg.Servers[i]
-			return &copy, true
-		}
-	}
-	return nil, false
+	return s.cfg.Profile(id)
 }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -147,8 +141,8 @@ func (s *Server) hardeningRequest(serverID string) (hardening.Request, error) {
 	s.mu.RLock()
 	cfg := *s.cfg
 	s.mu.RUnlock()
-	if serverID == "" && len(cfg.Servers) > 0 {
-		serverID = cfg.Servers[0].ID
+	if serverID == "" {
+		serverID = cfg.Roles.Main
 	}
 	var profile *config.Profile
 	for index := range cfg.Servers {
@@ -481,6 +475,13 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		if body.Workspace == "" {
 			s.mu.RLock()
 			body.Workspace = s.cfg.Workspace
+			if body.ServerID == "" {
+				body.ServerID = s.cfg.Roles.Main
+			}
+			s.mu.RUnlock()
+		} else if body.ServerID == "" {
+			s.mu.RLock()
+			body.ServerID = s.cfg.Roles.Main
 			s.mu.RUnlock()
 		}
 		if runnable, reason := s.registry.ProfileRunnable(body.ServerID); !runnable {
@@ -605,6 +606,11 @@ func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.mu.Lock()
+		if s.cfg.Roles.Main == tail || s.cfg.Roles.Aux == tail {
+			s.mu.Unlock()
+			writeError(w, 409, "profile is assigned to a model role", "roles")
+			return
+		}
 		if len(s.cfg.Servers) == 1 {
 			s.mu.Unlock()
 			writeError(w, 409, "cannot delete the last profile", "server_id")
@@ -663,6 +669,9 @@ func (s *Server) runProbe(profile *config.Profile) {
 		if s.cfg.Servers[i].ID == profile.ID {
 			s.cfg.Servers[i].Capabilities = caps
 			s.cfg.Servers[i].Reasoning.ValidEfforts = append([]string(nil), caps.ValidEfforts...)
+			if s.cfg.Servers[i].Context.NCtx == 0 {
+				s.cfg.Servers[i].Context.NCtx = caps.NCtx
+			}
 		}
 	}
 	saveErr := s.cfg.Save(s.configPath)
@@ -721,6 +730,11 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 		}
 		config.ApplyDefaults(&next)
 		if err := next.Validate(); err != nil {
+			s.mu.Unlock()
+			writeError(w, 400, err.Error(), configField(err, next))
+			return
+		}
+		if err := config.ResolveProfileCredentials(&next, s.roots.Data); err != nil {
 			s.mu.Unlock()
 			writeError(w, 400, err.Error(), configField(err, next))
 			return

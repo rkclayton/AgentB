@@ -5,6 +5,117 @@ import (
 	"fmt"
 )
 
+func migrateModelProfiles(data []byte, version int) (bool, []byte, error) {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false, nil, err
+	}
+	var servers []map[string]json.RawMessage
+	if value := raw["servers"]; value != nil {
+		if err := json.Unmarshal(value, &servers); err != nil {
+			return false, nil, fmt.Errorf("migrate servers: %w", err)
+		}
+	}
+	changed := false
+	if version < 5 {
+		mainID, err := legacyMainProfile(data)
+		if err != nil {
+			return false, nil, err
+		}
+		raw["roles"], _ = json.Marshal(Roles{Main: mainID})
+		for _, profile := range servers {
+			var context map[string]json.RawMessage
+			if value := profile["context"]; value != nil {
+				if err := json.Unmarshal(value, &context); err != nil {
+					return false, nil, fmt.Errorf("migrate profile context: %w", err)
+				}
+			} else {
+				context = map[string]json.RawMessage{}
+			}
+			if context["n_ctx"] == nil {
+				nctx := 0
+				if value := context["n_ctx_override"]; value != nil {
+					if err := json.Unmarshal(value, &nctx); err != nil {
+						return false, nil, fmt.Errorf("migrate profile n_ctx_override: %w", err)
+					}
+				}
+				if nctx == 0 {
+					var capabilities struct {
+						NCtx int `json:"n_ctx"`
+					}
+					if value := profile["capabilities"]; value != nil {
+						if err := json.Unmarshal(value, &capabilities); err != nil {
+							return false, nil, fmt.Errorf("migrate profile capabilities: %w", err)
+						}
+					}
+					nctx = capabilities.NCtx
+				}
+				context["n_ctx"], _ = json.Marshal(nctx)
+			}
+			delete(context, "n_ctx_override")
+			profile["context"], _ = json.Marshal(context)
+		}
+		changed = true
+	}
+	for _, profile := range servers {
+		key, present := profile["api_key"]
+		if !present {
+			continue
+		}
+		var value string
+		if err := json.Unmarshal(key, &value); err != nil {
+			return false, nil, fmt.Errorf("migrate profile api_key: %w", err)
+		}
+		if value != "" && profile["credential"] == nil {
+			var id string
+			if err := json.Unmarshal(profile["id"], &id); err != nil {
+				return false, nil, fmt.Errorf("migrate profile id: %w", err)
+			}
+			profile["credential"], _ = json.Marshal(id)
+		}
+		changed = true
+	}
+	if !changed {
+		return false, data, nil
+	}
+	raw["servers"], _ = json.Marshal(servers)
+	raw["config_version"], _ = json.Marshal(CurrentConfigVersion)
+	out, err := json.Marshal(raw)
+	return true, out, err
+}
+
+func legacyMainProfile(data []byte) (string, error) {
+	var value struct {
+		Servers []struct {
+			ID      string `json:"id"`
+			Label   string `json:"label"`
+			BaseURL string `json:"base_url"`
+			Model   string `json:"model"`
+			Context struct {
+				NCtxOverride int `json:"n_ctx_override"`
+			} `json:"context"`
+			Capabilities Capabilities `json:"capabilities"`
+		} `json:"servers"`
+		Context GlobalContext `json:"context"`
+	}
+	if err := json.Unmarshal(data, &value); err != nil {
+		return "", fmt.Errorf("select migrated main profile: %w", err)
+	}
+	if len(value.Servers) == 0 {
+		return "", nil
+	}
+	for _, profile := range value.Servers {
+		nctx := profile.Capabilities.NCtx
+		if profile.Context.NCtxOverride > 0 {
+			nctx = profile.Context.NCtxOverride
+		}
+		if profile.BaseURL != "" && profile.Model != "" && nctx > 0 && profile.Capabilities.ToolCalls && profile.Capabilities.Streaming && profile.Capabilities.OverflowBehavior != "truncate" && (value.Context.Accounting != "exact" || profile.Capabilities.Tokenize) {
+			return profile.ID, nil
+		}
+	}
+	return value.Servers[0].ID, nil
+}
+
 func migrateByteWindows(data []byte, version int) (bool, []byte, error) {
 	if version >= 4 {
 		return false, data, nil
@@ -133,7 +244,7 @@ func migrateV1(data []byte) (bool, []byte, error) {
 		if err := json.Unmarshal(v, &old); err != nil {
 			return false, nil, fmt.Errorf("migrate context: %w", err)
 		}
-		profile.Context.NCtxOverride = old.NCtxOverride
+		profile.Context.NCtx = old.NCtxOverride
 		if old.ReserveOutput > 0 {
 			profile.Context.ReserveOutput = old.ReserveOutput
 		}

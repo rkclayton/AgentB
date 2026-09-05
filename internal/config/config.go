@@ -3,12 +3,15 @@ package config
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"harness/internal/credential"
 )
 
 type Config struct {
@@ -17,6 +20,7 @@ type Config struct {
 	Workspace     string        `json:"workspace"`
 	LogDir        string        `json:"log_dir"`
 	Servers       []Profile     `json:"servers"`
+	Roles         Roles         `json:"roles"`
 	Run           RunConfig     `json:"run"`
 	Approval      Approval      `json:"approval"`
 	Context       GlobalContext `json:"context"`
@@ -26,12 +30,18 @@ type Config struct {
 	LoadNotices   []string      `json:"-"`
 }
 
+type Roles struct {
+	Main string `json:"main"`
+	Aux  string `json:"aux"`
+}
+
 type Profile struct {
 	ID                   string       `json:"id"`
 	Label                string       `json:"label"`
 	BaseURL              string       `json:"base_url"`
 	Model                string       `json:"model"`
-	APIKey               string       `json:"api_key"`
+	Credential           string       `json:"credential"`
+	APIKey               string       `json:"api_key,omitempty"`
 	RequestTimeoutS      int          `json:"request_timeout_s"`
 	ProbeMode            string       `json:"probe_mode"`
 	Sampling             SamplingPair `json:"sampling"`
@@ -39,6 +49,33 @@ type Profile struct {
 	Context              Context      `json:"context"`
 	SystemPromptOverride string       `json:"system_prompt_override"`
 	Capabilities         Capabilities `json:"capabilities"`
+	initialized          bool
+}
+
+func defaultProfile() Profile {
+	return Profile{
+		RequestTimeoutS: 900,
+		ProbeMode:       "full",
+		Sampling: SamplingPair{
+			Thinking:    Sampling{Temperature: .6, TopP: .95, TopK: 20, RepeatPenalty: 1},
+			Nonthinking: Sampling{Temperature: .7, TopP: .8, TopK: 20, PresencePenalty: 1.5, RepeatPenalty: 1},
+		},
+		Reasoning:    Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}},
+		Context:      Context{ReserveOutput: DefaultReserveOutput},
+		Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}},
+		initialized:  true,
+	}
+}
+
+func (p *Profile) UnmarshalJSON(data []byte) error {
+	type plain Profile
+	value := plain(defaultProfile())
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*p = Profile(value)
+	p.initialized = true
+	return nil
 }
 
 type SamplingPair struct{ Thinking, Nonthinking Sampling }
@@ -50,10 +87,10 @@ func (s SamplingPair) MarshalJSON() ([]byte, error) {
 	}{s.Thinking, s.Nonthinking})
 }
 func (s *SamplingPair) UnmarshalJSON(data []byte) error {
-	var v struct {
+	v := struct {
 		Thinking    Sampling `json:"thinking"`
 		Nonthinking Sampling `json:"nonthinking"`
-	}
+	}{s.Thinking, s.Nonthinking}
 	if err := json.Unmarshal(data, &v); err != nil {
 		return err
 	}
@@ -78,7 +115,7 @@ type Reasoning struct {
 	Preserve     bool     `json:"preserve"`
 }
 type Context struct {
-	NCtxOverride  int `json:"n_ctx_override"`
+	NCtx          int `json:"n_ctx"`
 	ReserveOutput int `json:"reserve_output"`
 }
 type Capabilities struct {
@@ -112,7 +149,7 @@ type Approval struct {
 }
 
 const (
-	CurrentConfigVersion     = 4
+	CurrentConfigVersion     = 5
 	DefaultReserveOutput     = 10240
 	ApprovalModeBoundaryOnly = "boundary-only"
 	ApprovalModeMutating     = "mutating"
@@ -123,6 +160,7 @@ const (
 const ApprovalDefaultMigrationNotice = "corrected inherited approval default from mutating to boundary-only; mutating can be reselected in Settings > Run & approval"
 const OperatorIdleTimeoutMigrationNotice = "migrated shell.operator_context_timeout_minutes to shell.operator_context_idle_timeout_minutes; operator mode now expires after agent inactivity"
 const ByteWindowMigrationNotice = "migrated read_file and fetch_url limits from line counts to UTF-8 byte windows"
+const ModelRolesMigrationNotice = "migrated model profiles to schema 5 with an explicit main role, optional aux role, and per-profile context size"
 
 type GlobalContext struct {
 	SoftPct    float64 `json:"soft_pct"`
@@ -187,13 +225,13 @@ func Defaults(workspace string) Config {
 		workspace = "./workspace"
 	}
 	abs, _ := filepath.Abs(workspace)
-	thinking := Sampling{Temperature: .6, TopP: .95, TopK: 20, RepeatPenalty: 1}
-	nonthinking := Sampling{Temperature: .7, TopP: .8, TopK: 20, PresencePenalty: 1.5, RepeatPenalty: 1}
+	profile := defaultProfile()
+	profile.ID, profile.Label, profile.BaseURL = "local", "Local", "http://127.0.0.1:8080"
 	return Config{
 		ConfigVersion: CurrentConfigVersion,
 		Listen:        "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
-		Servers: []Profile{{ID: "local", Label: "Local", BaseURL: "http://127.0.0.1:8080", Model: "", RequestTimeoutS: 900, ProbeMode: "full", Sampling: SamplingPair{Thinking: thinking, Nonthinking: nonthinking}, Reasoning: Reasoning{Control: "auto", Enabled: true, Effort: "medium", ValidEfforts: []string{}}, Context: Context{ReserveOutput: DefaultReserveOutput}, Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}}}},
-		Run:     RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
+		Servers: []Profile{profile}, Roles: Roles{Main: "local"},
+		Run: RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500},
 		Tools: Tools{ReadFile: ReadFileTool{DefaultLimit: 16 << 10, MaxLimit: 64 << 10}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, AllowInternalHosts: []string{}}},
 		Shell: Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextIdleTimeoutMinutes: 20, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
 	}
@@ -206,6 +244,12 @@ func Load(path string) (*Config, bool, bool, error) {
 // LoadWithTemplate loads the live configuration from path and, on first run,
 // materializes it from the explicitly supplied application template.
 func LoadWithTemplate(path, examplePath string) (*Config, bool, bool, error) {
+	return LoadWithRoots(path, examplePath, filepath.Dir(path))
+}
+
+// LoadWithRoots resolves profile credential references against the explicit
+// operator data root rather than deriving their location from the config path.
+func LoadWithRoots(path, examplePath, dataRoot string) (*Config, bool, bool, error) {
 	data, err := os.ReadFile(path)
 	created := false
 	if os.IsNotExist(err) {
@@ -235,7 +279,7 @@ func LoadWithTemplate(path, examplePath string) (*Config, bool, bool, error) {
 		return nil, false, created, err
 	}
 	unstamped := metadata.ConfigVersion == nil
-	if !unstamped && *metadata.ConfigVersion != 2 && *metadata.ConfigVersion != 3 && *metadata.ConfigVersion != CurrentConfigVersion {
+	if !unstamped && *metadata.ConfigVersion != 2 && *metadata.ConfigVersion != 3 && *metadata.ConfigVersion != 4 && *metadata.ConfigVersion != CurrentConfigVersion {
 		return nil, false, created, fmt.Errorf("config_version: unsupported value %d (current %d)", *metadata.ConfigVersion, CurrentConfigVersion)
 	}
 	migrated, data, err := migrateV1(data)
@@ -254,6 +298,10 @@ func LoadWithTemplate(path, examplePath string) (*Config, bool, bool, error) {
 	if err != nil {
 		return nil, false, created, err
 	}
+	modelRolesMigrated, data, err := migrateModelProfiles(data, version)
+	if err != nil {
+		return nil, false, created, err
+	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, false, created, err
@@ -269,7 +317,10 @@ func LoadWithTemplate(path, examplePath string) (*Config, bool, bool, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, false, created, err
 	}
-	if migrated || schemaMigrated || byteWindowMigrated || unstamped {
+	if err := ResolveProfileCredentials(&cfg, dataRoot); err != nil {
+		return nil, false, created, err
+	}
+	if migrated || schemaMigrated || byteWindowMigrated || modelRolesMigrated || unstamped {
 		if err := cfg.Save(path); err != nil {
 			return nil, false, created, err
 		}
@@ -283,11 +334,18 @@ func LoadWithTemplate(path, examplePath string) (*Config, bool, bool, error) {
 	if byteWindowMigrated && !unstamped {
 		cfg.LoadNotices = append(cfg.LoadNotices, ByteWindowMigrationNotice)
 	}
-	return &cfg, migrated || schemaMigrated || byteWindowMigrated, created, nil
+	if modelRolesMigrated && !unstamped {
+		cfg.LoadNotices = append(cfg.LoadNotices, ModelRolesMigrationNotice)
+	}
+	return &cfg, migrated || schemaMigrated || byteWindowMigrated || modelRolesMigrated, created, nil
 }
 
 func (c Config) Save(path string) error {
 	persisted := c
+	persisted.Servers = append([]Profile(nil), c.Servers...)
+	for i := range persisted.Servers {
+		persisted.Servers[i].APIKey = ""
+	}
 	persisted.ConfigVersion = CurrentConfigVersion
 	if err := persisted.Validate(); err != nil {
 		return err
@@ -300,6 +358,44 @@ func (c Config) Save(path string) error {
 	}
 	data = append(data, '\n')
 	return os.WriteFile(path, data, 0o600)
+}
+
+func ResolveProfileCredentials(cfg *Config, dataRoot string) error {
+	for i := range cfg.Servers {
+		profile := &cfg.Servers[i]
+		if profile.APIKey == "" && profile.Credential == "" {
+			continue
+		}
+		if profile.Credential == "" {
+			profile.Credential = profile.ID
+		}
+		store, err := credential.NewNamed(dataRoot, profile.Credential)
+		if err != nil {
+			return fmt.Errorf("servers[%d].credential: %w", i, err)
+		}
+		if profile.APIKey != "" {
+			if err := store.Write([]byte(profile.APIKey)); err != nil {
+				return fmt.Errorf("store credential %q: %w", profile.Credential, err)
+			}
+			continue
+		}
+		value, err := store.Read()
+		if err != nil {
+			if errors.Is(err, credential.ErrNotStored) {
+				return fmt.Errorf("servers[%d].credential: named credential %q is not stored", i, profile.Credential)
+			}
+			return fmt.Errorf("servers[%d].credential: %w", i, err)
+		}
+		profile.APIKey = string(value)
+		clearBytes(value)
+	}
+	return nil
+}
+
+func clearBytes(value []byte) {
+	for i := range value {
+		value[i] = 0
+	}
 }
 
 var slug = regexp.MustCompile(`^[a-z0-9-]+$`)
@@ -327,6 +423,11 @@ func (c Config) Validate() error {
 			return fmt.Errorf("%s.id: duplicate", prefix)
 		}
 		seen[p.ID] = true
+		if p.Credential != "" {
+			if _, err := credential.NewNamed(".", p.Credential); err != nil {
+				return fmt.Errorf("%s.credential: %w", prefix, err)
+			}
+		}
 		if p.ProbeMode != "full" && p.ProbeMode != "minimal" && p.ProbeMode != "off" {
 			return fmt.Errorf("%s.probe_mode: invalid", prefix)
 		}
@@ -339,18 +440,24 @@ func (c Config) Validate() error {
 		if len(p.Reasoning.ValidEfforts) > 0 && !contains(p.Reasoning.ValidEfforts, p.Reasoning.Effort) {
 			return fmt.Errorf("%s.reasoning.effort: not in valid_efforts", prefix)
 		}
-		if p.Context.NCtxOverride < 0 {
-			return fmt.Errorf("%s.context.n_ctx_override: cannot be negative", prefix)
+		if p.Context.NCtx < 0 {
+			return fmt.Errorf("%s.context.n_ctx: cannot be negative", prefix)
 		}
 		if p.Context.ReserveOutput < 0 {
 			return fmt.Errorf("%s.context.reserve_output: cannot be negative", prefix)
 		}
-		if p.Capabilities.Props && p.Context.NCtxOverride > p.Capabilities.NCtx {
-			return fmt.Errorf("%s.context.n_ctx_override: may only lower probed n_ctx", prefix)
+		if p.Capabilities.Props && p.Capabilities.NCtx > 0 && p.Context.NCtx > p.Capabilities.NCtx {
+			return fmt.Errorf("%s.context.n_ctx: may not exceed probed n_ctx", prefix)
 		}
-		if p.ProbeMode == "off" && p.Context.NCtxOverride == 0 {
-			return fmt.Errorf("%s.context.n_ctx_override: required when probe_mode is off", prefix)
+		if p.ProbeMode == "off" && p.Context.NCtx == 0 {
+			return fmt.Errorf("%s.context.n_ctx: required when probe_mode is off", prefix)
 		}
+	}
+	if c.Roles.Main == "" || !seen[c.Roles.Main] {
+		return fmt.Errorf("roles.main: must name an existing profile")
+	}
+	if c.Roles.Aux != "" && !seen[c.Roles.Aux] {
+		return fmt.Errorf("roles.aux: must be empty or name an existing profile")
 	}
 	if c.Run.MaxTurns < 1 {
 		return fmt.Errorf("run.max_turns: must be positive")
@@ -502,23 +609,26 @@ func applyDefaults(c *Config) {
 	for i := range c.Servers {
 		p := &c.Servers[i]
 		pd := d.Servers[0]
-		if p.RequestTimeoutS == 0 {
-			p.RequestTimeoutS = 900
-		}
-		if p.ProbeMode == "" {
-			p.ProbeMode = "full"
-		}
-		if p.Context.ReserveOutput == 0 {
-			p.Context.ReserveOutput = pd.Context.ReserveOutput
+		if !p.initialized {
+			if p.RequestTimeoutS == 0 {
+				p.RequestTimeoutS = pd.RequestTimeoutS
+			}
+			if p.ProbeMode == "" {
+				p.ProbeMode = pd.ProbeMode
+			}
+			if p.Context.ReserveOutput == 0 {
+				p.Context.ReserveOutput = pd.Context.ReserveOutput
+			}
+			if p.Sampling == (SamplingPair{}) {
+				p.Sampling = pd.Sampling
+			}
+			if p.Reasoning.Control == "" {
+				p.Reasoning = pd.Reasoning
+			}
+			p.initialized = true
 		}
 		if p.Label == "" {
 			p.Label = p.ID
-		}
-		if p.Sampling.Thinking.TopP == 0 {
-			p.Sampling = pd.Sampling
-		}
-		if p.Reasoning.Control == "" {
-			p.Reasoning = pd.Reasoning
 		}
 		if p.Capabilities.ValidEfforts == nil {
 			p.Capabilities.ValidEfforts = []string{}
@@ -526,6 +636,9 @@ func applyDefaults(c *Config) {
 		if p.Capabilities.Findings == nil {
 			p.Capabilities.Findings = []string{}
 		}
+	}
+	if c.Roles.Main == "" && len(c.Servers) > 0 {
+		c.Roles.Main = c.Servers[0].ID
 	}
 }
 
@@ -567,4 +680,24 @@ func (c Config) Masked() Config {
 		}
 	}
 	return out
+}
+
+func (c Config) Profile(id string) (*Profile, bool) {
+	for i := range c.Servers {
+		if c.Servers[i].ID == id {
+			profile := c.Servers[i]
+			return &profile, true
+		}
+	}
+	return nil, false
+}
+
+func (c Config) RoleProfile(role string) (*Profile, bool) {
+	id := c.Roles.Main
+	if role == "aux" && c.Roles.Aux != "" {
+		id = c.Roles.Aux
+	} else if role != "main" && role != "aux" {
+		return nil, false
+	}
+	return c.Profile(id)
 }

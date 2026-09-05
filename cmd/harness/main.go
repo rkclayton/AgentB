@@ -41,7 +41,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	cfg, migrated, created, err := config.LoadWithTemplate(paths.Config, filepath.Join(paths.Application, "harness.example.json"))
+	cfg, migrated, created, err := config.LoadWithRoots(paths.Config, filepath.Join(paths.Application, "harness.example.json"), paths.Data)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func main() {
 		log.Printf("created %s from %s - set servers[0].base_url and model", paths.Config, filepath.Join(paths.Application, "harness.example.json"))
 	}
 	if migrated {
-		log.Printf("migrated %s: server → servers[local]", filepath.Base(paths.Config))
+		log.Printf("migrated %s to config schema %d", filepath.Base(paths.Config), config.CurrentConfigVersion)
 	}
 	for _, notice := range cfg.LoadNotices {
 		log.Printf("config migration: %s", notice)
@@ -145,7 +145,7 @@ func main() {
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)
 	web.SetRuntime(scheduler, runner, renderer)
-	mainServerID := startupServerID(cfg.Servers, registry.ProfileRunnable)
+	mainServerID := cfg.Roles.Main
 	if ready, reason := registry.ProfileRunnable(mainServerID); ready {
 		log.Printf("startup profile %s ready from saved capabilities", mainServerID)
 	} else {
@@ -224,18 +224,6 @@ func resolveStartupPaths(configOverride, applicationOverride, dataOverride strin
 		return startupPaths{}, fmt.Errorf("resolve data root: %w", err)
 	}
 	return startupPaths{Application: filepath.Clean(application), Data: filepath.Clean(data), Config: filepath.Clean(configPath)}, nil
-}
-
-func startupServerID(profiles []config.Profile, runnable func(string) (bool, string)) string {
-	if len(profiles) == 0 {
-		return ""
-	}
-	for index := range profiles {
-		if ready, _ := runnable(profiles[index].ID); ready {
-			return profiles[index].ID
-		}
-	}
-	return profiles[0].ID
 }
 
 func startupElevationError(elevated bool) error {

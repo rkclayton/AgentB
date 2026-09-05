@@ -1,5 +1,5 @@
 {
-  "config_version": 4,
+  "config_version": 5,
   "listen": "127.0.0.1:8790",
   "workspace": "./workspace",
   "log_dir": "logs",
@@ -9,7 +9,7 @@
       "label": "Local",
       "base_url": "http://127.0.0.1:8080",
       "model": "",
-      "api_key": "",
+      "credential": "",
       "request_timeout_s": 900,
       "probe_mode": "full",
       "sampling": {
@@ -17,7 +17,7 @@
         "nonthinking": { "temperature": 0.7, "top_p": 0.8, "top_k": 20, "min_p": 0.0, "presence_penalty": 1.5, "repeat_penalty": 1.0 }
       },
       "reasoning": { "control": "auto", "enabled": true, "effort": "medium", "valid_efforts": [], "preserve": false },
-      "context": { "n_ctx_override": 0, "reserve_output": 10240 },
+      "context": { "n_ctx": 0, "reserve_output": 10240 },
       "system_prompt_override": "",
       "capabilities": {
         "server": "",
@@ -40,6 +40,7 @@
       }
     }
   ],
+  "roles": { "main": "local", "aux": "" },
   "run": { "max_turns": 40, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },
   "approval": { "mode": "boundary-only" },
   "context": { "soft_pct": 0.75, "summary_pct": 0.85, "accounting": "auto" },

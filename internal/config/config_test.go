@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -197,7 +198,7 @@ func TestOperatorIdleTimeoutSchemaMigration(t *testing.T) {
 	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || loaded.Shell.OperatorContextIdleTimeoutMinutes != 37 {
 		t.Fatalf("migrated=%t version=%d idle=%d", migrated, loaded.ConfigVersion, loaded.Shell.OperatorContextIdleTimeoutMinutes)
 	}
-	if len(loaded.LoadNotices) != 2 || loaded.LoadNotices[0] != OperatorIdleTimeoutMigrationNotice || loaded.LoadNotices[1] != ByteWindowMigrationNotice {
+	if len(loaded.LoadNotices) != 3 || loaded.LoadNotices[0] != OperatorIdleTimeoutMigrationNotice || loaded.LoadNotices[1] != ByteWindowMigrationNotice || loaded.LoadNotices[2] != ModelRolesMigrationNotice {
 		t.Fatalf("migration notices=%#v", loaded.LoadNotices)
 	}
 	persisted, err := os.ReadFile(path)
@@ -274,7 +275,7 @@ func TestVersion3LineLimitsMigrateToByteWindows(t *testing.T) {
 	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || loaded.Tools.ReadFile.DefaultLimit != 16<<10 || loaded.Tools.ReadFile.MaxLimit != 64<<10 || loaded.Tools.Fetch.DefaultLimit != 16<<10 || loaded.Tools.Fetch.MaxLimit != 64<<10 {
 		t.Fatalf("migrated=%t config=%+v", migrated, loaded.Tools)
 	}
-	if len(loaded.LoadNotices) != 1 || loaded.LoadNotices[0] != ByteWindowMigrationNotice {
+	if len(loaded.LoadNotices) != 2 || loaded.LoadNotices[0] != ByteWindowMigrationNotice || loaded.LoadNotices[1] != ModelRolesMigrationNotice {
 		t.Fatalf("migration notices=%#v", loaded.LoadNotices)
 	}
 	persisted, err := os.ReadFile(path)
@@ -471,5 +472,180 @@ func TestOperatorContextNeverPersistsOrRestartsEnabled(t *testing.T) {
 	}
 	if loaded.Shell.OperatorContext {
 		t.Fatal("operator context restarted on")
+	}
+}
+
+func TestSchema4ModelProfilesMigrateWithUTF8BOM(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	cfg := Defaults(t.TempDir())
+	cfg.Servers[0].ID = "small"
+	cfg.Servers[0].Label = "Small"
+	cfg.Servers[0].Model = ""
+	main := defaultProfile()
+	main.ID, main.Label, main.BaseURL, main.Model = "homepc", "HomePC", "http://127.0.0.1:8080", "model"
+	main.Context.NCtx = 16384
+	main.Capabilities.NCtx = 32768
+	main.Capabilities.ToolCalls = true
+	main.Capabilities.Streaming = true
+	main.Capabilities.OverflowBehavior = "error"
+	cfg.Servers = append(cfg.Servers, main)
+
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	document["config_version"] = float64(4)
+	delete(document, "roles")
+	for _, raw := range document["servers"].([]any) {
+		profile := raw.(map[string]any)
+		context := profile["context"].(map[string]any)
+		context["n_ctx_override"] = context["n_ctx"]
+		delete(context, "n_ctx")
+		profile["api_key"] = ""
+		delete(profile, "credential")
+	}
+	data, err = json.MarshalIndent(document, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	data = append([]byte{0xef, 0xbb, 0xbf}, data...)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, migrated, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !migrated || loaded.ConfigVersion != 5 || loaded.Roles.Main != "homepc" || loaded.Roles.Aux != "" {
+		t.Fatalf("migrated=%t version=%d roles=%+v", migrated, loaded.ConfigVersion, loaded.Roles)
+	}
+	if loaded.Servers[1].Context.NCtx != 16384 || loaded.Servers[1].Capabilities.NCtx != 32768 {
+		t.Fatalf("profile context=%+v capabilities=%+v", loaded.Servers[1].Context, loaded.Servers[1].Capabilities)
+	}
+	if len(loaded.LoadNotices) != 1 || loaded.LoadNotices[0] != ModelRolesMigrationNotice {
+		t.Fatalf("notices=%#v", loaded.LoadNotices)
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.HasPrefix(persisted, []byte{0xef, 0xbb, 0xbf}) || bytes.Contains(persisted, []byte("n_ctx_override")) || bytes.Contains(persisted, []byte("api_key")) {
+		t.Fatalf("legacy fields survived migration: %s", persisted)
+	}
+}
+
+func TestRoleProfileAuxFallsBackToMain(t *testing.T) {
+	cfg := Defaults(t.TempDir())
+	aux := cfg.Servers[0]
+	aux.ID, aux.Label = "small", "Small"
+	cfg.Servers = append(cfg.Servers, aux)
+	if profile, ok := cfg.RoleProfile("aux"); !ok || profile.ID != "local" {
+		t.Fatalf("unset aux resolved to profile=%+v ok=%t", profile, ok)
+	}
+	cfg.Roles.Aux = "small"
+	if profile, ok := cfg.RoleProfile("aux"); !ok || profile.ID != "small" {
+		t.Fatalf("assigned aux resolved to profile=%+v ok=%t", profile, ok)
+	}
+}
+
+func TestProfileDecodePreservesExplicitNumericZero(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	document := `{
+  "config_version": 5,
+  "workspace": ".",
+  "servers": [{
+    "id": "local", "base_url": "http://127.0.0.1:8080", "model": "model",
+    "sampling": {"thinking": {"temperature": 0, "top_k": 0, "repeat_penalty": 0}},
+    "reasoning": {"enabled": false},
+    "context": {"n_ctx": 8192, "reserve_output": 0}
+  }],
+  "roles": {"main": "local", "aux": ""}
+}`
+	if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, _, _, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := loaded.Servers[0]
+	if profile.Context.ReserveOutput != 0 || profile.Sampling.Thinking.Temperature != 0 || profile.Sampling.Thinking.TopK != 0 || profile.Sampling.Thinking.RepeatPenalty != 0 || profile.Reasoning.Enabled {
+		t.Fatalf("explicit zeros changed: %+v", profile)
+	}
+	if profile.Sampling.Thinking.TopP != .95 || profile.Sampling.Nonthinking.TopP != .8 || profile.Reasoning.Control != "auto" || profile.Reasoning.Effort != "medium" {
+		t.Fatalf("omitted sampling defaults missing: %+v", profile.Sampling)
+	}
+}
+
+func TestProfileCredentialNameIsValidated(t *testing.T) {
+	cfg := Defaults(t.TempDir())
+	cfg.Servers[0].Credential = "../outside"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "servers[0].credential") {
+		t.Fatalf("invalid credential error=%v", err)
+	}
+}
+
+func TestSchema4APIKeyMovesToNamedDPAPIStore(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("DPAPI is Windows-only")
+	}
+	dir := t.TempDir()
+	dataRoot := t.TempDir()
+	path := filepath.Join(dir, "harness.json")
+	cfg := Defaults(t.TempDir())
+	cfg.ConfigVersion = 4
+	cfg.Servers[0].Model = "model"
+	cfg.Servers[0].Context.NCtx = 8192
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	delete(document, "roles")
+	profile := document["servers"].([]any)[0].(map[string]any)
+	profile["api_key"] = "migration-secret"
+	delete(profile, "credential")
+	context := profile["context"].(map[string]any)
+	context["n_ctx_override"] = context["n_ctx"]
+	delete(context, "n_ctx")
+	data, err = json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, _, _, err := LoadWithRoots(path, filepath.Join(dir, "harness.example.json"), dataRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Servers[0].Credential != "local" || loaded.Servers[0].APIKey != "migration-secret" || loaded.Masked().Servers[0].APIKey != "•••• set" {
+		t.Fatalf("loaded profile=%+v masked=%+v", loaded.Servers[0], loaded.Masked().Servers[0])
+	}
+	persisted, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(persisted, []byte("migration-secret")) || bytes.Contains(persisted, []byte("api_key")) || !bytes.Contains(persisted, []byte(`"credential": "local"`)) {
+		t.Fatalf("secret persisted in config: %s", persisted)
+	}
+	if _, err := os.Stat(filepath.Join(dataRoot, ".agentb-profile-credential-local.dpapi")); err != nil {
+		t.Fatalf("named credential missing: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".agentb-profile-credential-local.dpapi")); !os.IsNotExist(err) {
+		t.Fatalf("credential was inferred beside config: %v", err)
+	}
+	reloaded, _, _, err := LoadWithRoots(path, filepath.Join(dir, "harness.example.json"), dataRoot)
+	if err != nil || reloaded.Servers[0].APIKey != "migration-secret" {
+		t.Fatalf("reloaded key=%q err=%v", reloaded.Servers[0].APIKey, err)
 	}
 }

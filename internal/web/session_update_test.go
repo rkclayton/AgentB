@@ -17,6 +17,7 @@ func TestSessionServerReassignment(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root)
 	cfg.Servers[0] = runnableTestProfile("first")
+	cfg.Roles.Main = "first"
 	second := runnableTestProfile("second")
 	second.Context.ReserveOutput = 2048
 	cfg.Servers = append(cfg.Servers, second, config.Profile{ID: "incomplete", Label: "Incomplete"})
@@ -84,6 +85,7 @@ func runnableTestProfile(id string) config.Profile {
 	profile := config.Defaults(".").Servers[0]
 	profile.ID, profile.Label, profile.Model = id, id, "model"
 	profile.Capabilities.NCtx = 32768
+	profile.Context.NCtx = 32768
 	profile.Capabilities.ToolCalls = true
 	profile.Capabilities.Streaming = true
 	profile.Capabilities.OverflowBehavior = "error"

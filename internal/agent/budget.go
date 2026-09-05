@@ -332,10 +332,7 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 	for _, value := range categories {
 		used += value
 	}
-	nctx := profile.Capabilities.NCtx
-	if profile.Context.NCtxOverride > 0 {
-		nctx = profile.Context.NCtxOverride
-	}
+	nctx := profile.Context.NCtx
 	budget := events.Budget{NCtx: nctx, Reserve: profile.Context.ReserveOutput, Ceiling: max(0, nctx-profile.Context.ReserveOutput), UsedEst: used, Mode: mode, Estimated: len(estimated) > 0, EstimatedCategories: estimated, Categories: categories, ToolSchemaTokens: cloneCounts(schemaCounts), ToolMarginalTokens: cloneCounts(marginalCounts)}
 	if state.hasMeasured {
 		budget.UsedMeasured = state.measured

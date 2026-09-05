@@ -227,10 +227,7 @@ func runnable(profile *config.Profile, accounting string) (bool, string) {
 		return false, reason
 	}
 	c := profile.Capabilities
-	n := c.NCtx
-	if n == 0 {
-		n = profile.Context.NCtxOverride
-	}
+	n := profile.Context.NCtx
 	if n == 0 {
 		return false, "context length unknown"
 	}
@@ -250,10 +247,7 @@ func runnable(profile *config.Profile, accounting string) (bool, string) {
 }
 
 func initialBudget(profile *config.Profile) events.Budget {
-	nctx := profile.Capabilities.NCtx
-	if nctx == 0 {
-		nctx = profile.Context.NCtxOverride
-	}
+	nctx := profile.Context.NCtx
 	ceiling := nctx - profile.Context.ReserveOutput
 	if ceiling < 0 {
 		ceiling = 0

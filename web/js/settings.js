@@ -197,6 +197,11 @@ function group(name, content) {
 }
 
 function servers() {
+	const roleOptions = store.servers.map((profile) => [profile.id, profile.label]);
+	const roles = `<div class="settings-subhead">Model roles</div>
+		${selectSetting("roles.main", "main", roleOptions, store.config.roles?.main || "")}
+		${selectSetting("roles.aux", "aux", [["", "main (fallback)"], ...roleOptions], store.config.roles?.aux || "")}
+		<p class="settings-note">Aux falls back to main when unset. Main seeds new sessions; existing sessions keep their assigned profile. Role assignment does not copy model parameters.</p>`;
   const rows = store.servers
     .map((profile) => {
       const isOpen = expanded.has(profile.id);
@@ -227,7 +232,7 @@ function servers() {
       </div>`;
     })
     .join("");
-  return `${rows}<button type="button" class="text-action" data-action="add-server">Add server</button>`;
+  return `${roles}<div class="settings-subhead">Profiles</div>${rows}<button type="button" class="text-action" data-action="add-server">Add server</button>`;
 }
 
 function profileFields(profile, reason) {
@@ -249,10 +254,12 @@ function profileFields(profile, reason) {
   const findings = (caps.findings || [])
     .map((value) => `<li>${html(value)}</li>`)
     .join("");
-  return `${text(`${p}.label`, "label", profile.label)}
+	return `${text(`${p}.label`, "label", profile.label)}
     ${text(`${p}.base_url`, "base_url", profile.base_url)}
     ${text(`${p}.model`, "model", profile.model)}
+	${text(`${p}.credential`, "credential ref", profile.credential || "")}
     ${secret(`${p}.api_key`, "api_key", profile.api_key, id)}
+	<p class="settings-note">API keys are stored in user-scoped DPAPI storage; configuration keeps only the credential reference.</p>
     ${number(`${p}.request_timeout_s`, "timeout", profile.request_timeout_s)}
     ${choices(`${p}.probe_mode`, "probe mode", ["full", "minimal", "off"], profile.probe_mode)}
     <p class="settings-note">minimal and off skip checks that spend tokens; assumed values are marked in findings</p>
@@ -264,7 +271,7 @@ function profileFields(profile, reason) {
     ${efforts.length ? choices(`${p}.reasoning.effort`, "effort", efforts, profile.reasoning.effort) : row("effort", '<span class="settings-note inline">not supported by this server</span>')}
     ${toggle(`${p}.reasoning.preserve`, "preserve", profile.reasoning.preserve)}
     ${number(`${p}.context.reserve_output`, "reserve", profile.context.reserve_output)}
-    ${number(`${p}.context.n_ctx_override`, caps.props ? "n_ctx override" : "n_ctx (required)", profile.context.n_ctx_override, "1", false, "", !caps.props && !profile.context.n_ctx_override)}
+	${number(`${p}.context.n_ctx`, "context size", profile.context.n_ctx, "1", false, "", !profile.context.n_ctx)}
     ${textarea(`${p}.system_prompt_override`, "system prompt override", profile.system_prompt_override || "")}
     <p class="settings-note">variables: {{workspace}} {{tools}} {{memory}}</p>
     <div class="settings-subhead">Capabilities</div>
@@ -298,7 +305,7 @@ function sessions() {
     })
     .join("");
   const options = profiles
-    .map((p) => `<option value="${attr(p.id)}">${html(p.label)}</option>`)
+    .map((p) => `<option value="${attr(p.id)}" ${p.id === store.config.roles?.main ? "selected" : ""}>${html(p.label)}</option>`)
     .join("");
   return `${items}
     <div class="settings-subhead">New session</div>
@@ -560,6 +567,11 @@ function toggle(path, label, value) {
 function choices(path, label, values, selected) {
   selected = currentValue(path, selected);
   return field(path, label, `<span class="choice-row">${values.map((value) => `<button type="button" class="${value === selected ? "selected" : ""}" data-action="config-choice" data-path="${attr(path)}" data-value="${attr(value)}">${html(value)}</button>`).join("")}</span>`);
+}
+
+function selectSetting(path, label, options, selected) {
+	selected = currentValue(path, selected);
+	return field(path, label, `<select class="setting-input" data-path="${attr(path)}" data-kind="text">${options.map(([value, text]) => `<option value="${attr(value)}" ${value === selected ? "selected" : ""}>${html(text)}</option>`).join("")}</select>`);
 }
 
 function approvalChoices(selected) {
@@ -947,7 +959,10 @@ async function duplicateServer(id) {
   delete copy._probing;
   copy.id = uniqueID(`${id}-2`);
   copy.label = `${source.label} copy`;
-  if (copy.api_key === "•••• set") copy.api_key = "";
+  if (copy.api_key === "•••• set") {
+    copy.api_key = "";
+    copy.credential = "";
+  }
   expanded.add(copy.id);
   const result = await api("/api/config", { servers: [copy] });
   reduce({ type: "config.changed", data: { config: result } });
@@ -1025,7 +1040,7 @@ async function resetSession(id) {
 
 function profileReason(profile) {
   const caps = profile.capabilities || {};
-  const nctx = caps.n_ctx || profile.context?.n_ctx_override;
+  const nctx = profile.context?.n_ctx;
   if (!nctx) return "context length unknown";
   if (!caps.tool_calls) return "tool calling unavailable";
   if (caps.overflow_behavior === "truncate") return "server truncates context";

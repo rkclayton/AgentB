@@ -15,8 +15,8 @@ import (
 
 func Probe(ctx context.Context, profile *config.Profile) (config.Capabilities, []string, error) {
 	if profile.ProbeMode == "off" {
-		findings := []string{"probe mode off: all capabilities assumed", "server: assumed openai-compatible", "n_ctx: taken from n_ctx_override", "tokenize/apply-template/cached tokens/timings/prompt progress: assumed unavailable", "streaming: assumed available", "tool calls: assumed available", "overflow: assumed unknown"}
-		caps := config.Capabilities{Server: "openai-compatible", NCtx: profile.Context.NCtxOverride, Streaming: true, ToolCalls: true, ReasoningControl: "none", ValidEfforts: []string{}, OverflowBehavior: "unknown", Findings: findings, ProbedAt: time.Now().UTC().Format(time.RFC3339)}
+		findings := []string{"probe mode off: all capabilities assumed", "server: assumed openai-compatible", "n_ctx: taken from profile context", "tokenize/apply-template/cached tokens/timings/prompt progress: assumed unavailable", "streaming: assumed available", "tool calls: assumed available", "overflow: assumed unknown"}
+		caps := config.Capabilities{Server: "openai-compatible", NCtx: profile.Context.NCtx, Streaming: true, ToolCalls: true, ReasoningControl: "none", ValidEfforts: []string{}, OverflowBehavior: "unknown", Findings: findings, ProbedAt: time.Now().UTC().Format(time.RFC3339)}
 		return caps, findings, nil
 	}
 	caps := config.Capabilities{Server: "unknown", ReasoningControl: "none", OverflowBehavior: "unknown", ValidEfforts: []string{}}
