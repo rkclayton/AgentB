@@ -1,13 +1,12 @@
 import { api, store } from "./bus.js";
+import { createPanelState } from "./panel-state.js";
 
-const states = new Map();
+const states = createPanelState("timeline");
 let rendered = "";
 const root = document.getElementById("timeline-list"),
   count = document.getElementById("timeline-count");
 function view(id) {
-  if (!states.has(id))
-    states.set(id, { expanded: new Set(), scroll: 0, follow: true });
-  return states.get(id);
+  return states.view(id);
 }
 function save() {
   if (!rendered) return;
@@ -26,8 +25,14 @@ export function renderTimeline() {
   }
   const state = view(session.id),
     events = session.timeline || [],
-    turns = events.filter((event) => event.type === "model.response").length;
-  count.textContent = String(turns);
+    retainedTurns = events.filter((event) => event.type === "model.response").length,
+    turns = Math.max(session.run?.turn || 0, retainedTurns),
+    compactions = events.filter((event) => event.type === "compaction"),
+    compactedTokens = compactions.reduce(
+      (sum, event) => sum + ((event.data?.after || 0) - (event.data?.before || 0)),
+      0,
+    );
+  count.textContent = `${turns} turns${compactions.length ? ` · ${compactions.length} compact · ${formatSigned(compactedTokens)} tokens` : ""}`;
   const calls = new Map(),
     results = new Map(),
     decisions = new Map();
@@ -222,7 +227,7 @@ function inlineRow(session, event, decisions, state) {
   } else if (event.type === "compaction") {
     const affected = data.affected_ids?.length || "",
       delta = (data.after || 0) - (data.before || 0);
-    text.textContent = `Compacted · ${friendly(data.kind)}${affected ? ` · ${affected} results` : ""} · ${formatSigned(delta)} tokens`;
+    text.textContent = `Compacted · ${friendly(data.kind)} · ${formatNumber(data.before)} → ${formatNumber(data.after)} · ${formatSigned(delta)} tokens${affected ? ` · ${affected} items` : ""}`;
   } else if (event.type === "run.stopped") {
     const label = (data.reason || "").replaceAll("_", " ");
     text.textContent = `Stopped · ${label}${data.detail ? ` · ${data.detail}` : ""}`;
@@ -237,9 +242,7 @@ function baseRow(key, state, className) {
   head.type = "button";
   head.className = "timeline-head";
   head.onclick = () => {
-    state.expanded.has(key)
-      ? state.expanded.delete(key)
-      : state.expanded.add(key);
+    state.toggle(key);
     renderTimeline();
   };
   const expansion = document.createElement("div");

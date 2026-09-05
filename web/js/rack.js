@@ -1,4 +1,4 @@
-import { api, store } from "./bus.js";
+import { store } from "./bus.js";
 const root = document.getElementById("rack"),
   count = document.getElementById("tool-count");
 export function renderRack() {
@@ -8,20 +8,23 @@ export function renderRack() {
     count.textContent = "";
     return;
   }
-  count.textContent = String(s.tools.length);
-  for (const tool of s.tools) {
+  const visible = s.tools.filter((tool) => tool.calls || s._activeTool === tool.name || s._alarmTool === tool.name);
+  const total = s.tools.reduce((sum, tool) => sum + (tool.calls || 0), 0);
+  count.textContent = `${total} calls`;
+  if (!visible.length) {
+    const empty = document.createElement("div");
+    empty.className = "panel-empty";
+    empty.textContent = "—";
+    root.append(empty);
+  }
+  for (const tool of visible) {
     const row = document.createElement("div");
-    row.className = `tool-row ${tool.enabled ? "" : "off"}`;
+    row.className = "tool-row";
     const live = s._activeTool === tool.name,
       alarm = s._alarmTool === tool.name;
-    row.innerHTML = `<span class="lamp ${live ? "live" : ""} ${alarm ? "alarm" : ""}"></span><span></span><span class="tool-calls number"></span><button class="switch ${tool.enabled ? "on" : ""}" type="button" aria-label="Toggle ${tool.name}"></button>`;
+    row.innerHTML = `<span class="lamp ${live ? "live" : ""} ${alarm ? "alarm" : ""}"></span><span></span><span class="tool-calls number"></span>`;
     row.children[1].textContent = tool.name;
     row.children[2].textContent = tool.calls || 0;
-    row.querySelector("button").onclick = () =>
-      api(`/api/tools/${tool.name}`, {
-        session_id: s.id,
-        enabled: !tool.enabled,
-      });
     root.append(row);
   }
 }

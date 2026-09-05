@@ -9,7 +9,6 @@ import { initSettings } from "./settings.js";
 import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
 const form = document.getElementById("composer"),
   input = document.getElementById("task"),
-  chatLaunch = document.getElementById("chat-launch"),
   consoleLaunch = document.getElementById("console-launch"),
   operatorStatus = document.getElementById("operator-status"),
   stop = document.getElementById("stop");
@@ -32,9 +31,12 @@ subscribe((_state, event) => {
     setActive(id);
     return;
   }
-  // Streaming deltas are not displayed on Console. Rebuilding every panel for
-  // each token can starve navigation while a model is responding.
-  if (event.type === "model.delta") return;
+  // Stream traffic only changes the Activity readout. Avoid rebuilding History
+  // and State rows while the model is producing tokens or prompt progress.
+  if (event.type === "model.delta" || event.type === "model.progress") {
+    scheduleFlowRender();
+    return;
+  }
   scheduleRender();
 });
 
@@ -42,6 +44,19 @@ function scheduleRender() {
   if (renderFrame) return;
   renderFrame = requestAnimationFrame(renderConsole);
 }
+let flowFrame = 0;
+function scheduleFlowRender() {
+  if (flowFrame) return;
+  flowFrame = requestAnimationFrame(() => {
+    flowFrame = 0;
+    renderFlow();
+  });
+}
+setInterval(() => {
+  const session = store.sessions[store.active];
+  if (session && session.run.status === "running" && session._stage === "call_model")
+    scheduleFlowRender();
+}, 1000);
 
 function renderConsole() {
   renderFrame = 0;
@@ -63,7 +78,6 @@ function renderConsole() {
   const query = new URLSearchParams();
   if (s) query.set("session", s.id);
   const suffix = query.size ? `?${query}` : "";
-  chatLaunch.href = `/chat${suffix}`;
   consoleLaunch.href = `/${suffix}`;
   input.disabled = !!busy;
 	stop.hidden = !!store.replay;

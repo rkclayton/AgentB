@@ -1,4 +1,5 @@
 import { store } from "./bus.js";
+import { percentClass } from "./percent.js";
 const root = document.getElementById("rail"),
   order = [
     "system",
@@ -29,27 +30,22 @@ export function renderRail() {
     const value = b.categories?.[name] || 0,
       wide = (value / n) * 100,
       segment = document.createElement("span");
-    segment.className = `segment ${estimated.has(name) ? "estimated" : ""}`;
-    segment.style.width = `${wide}%`;
+    segment.className = `segment ${percentClass(wide)} ${estimated.has(name) ? "estimated" : ""}`;
     segment.title = `${name} ${estimated.has(name) ? "~" : ""}${number(value)}`;
     meter.append(segment);
     const label = document.createElement("span");
-    label.className = "rail-label";
-    label.style.width = `${wide}%`;
+    label.className = `rail-label ${percentClass(wide)}`;
     label.textContent = wide > 5 ? name : "";
     labels.append(label);
   }
   const reserve = document.createElement("span");
-  reserve.className = "reserve";
-  reserve.style.width = `${((b.reserve || 0) / n) * 100}%`;
+  reserve.className = `reserve ${percentClass(((b.reserve || 0) / n) * 100)}`;
   meter.append(reserve);
   const tick = document.createElement("span");
-  tick.className = "ceiling-tick";
-  tick.style.left = `${((b.ceiling || 0) / n) * 100}%`;
+  tick.className = `ceiling-tick ${percentClass(((b.ceiling || 0) / n) * 100)}`;
   meter.append(tick);
   const edge = document.createElement("span");
-  edge.className = "fill-edge";
-  edge.style.cssText = `position:absolute;left:${Math.min(100, (used / n) * 100)}%;width:1px;top:0;bottom:0`;
+  edge.className = `fill-edge ${percentClass((used / n) * 100)}`;
   meter.append(edge);
   const readout = document.createElement("div");
   readout.className = "rail-readout";

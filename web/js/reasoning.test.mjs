@@ -37,7 +37,22 @@ test("active model turn remains intact beyond the ordinary timeline tail", () =>
 
   assert.equal(modelTurnKey(request), "r1:1");
   assert.equal(trimTimeline(timeline, "r1:1").length, 601);
-  assert.equal(trimTimeline(timeline, "").length, 500);
+  assert.deepEqual(trimTimeline(timeline, ""), [request]);
+});
+
+test("completed streams cannot displace operational history", () => {
+  const compaction = { type: "compaction", run_id: "r1", data: { before: 100, after: 60 } };
+  const timeline = [compaction];
+  for (let turn = 1; turn <= 40; turn++) {
+    timeline.push({ type: "model.request", run_id: "r1", data: { turn } });
+    for (let index = 0; index < 20; index++)
+      timeline.push({ type: "model.delta", run_id: "r1", data: { turn, kind: "reasoning", text: "x" } });
+    timeline.push({ type: "model.response", run_id: "r1", data: { turn } });
+  }
+  const trimmed = trimTimeline(timeline, "");
+  assert.equal(trimmed.includes(compaction), true);
+  assert.equal(trimmed.some((event) => event.type === "model.delta"), false);
+  assert.equal(trimmed.filter((event) => event.type === "model.response").length, 40);
 });
 
 test("assistant message turn keys use the nested message turn", () => {

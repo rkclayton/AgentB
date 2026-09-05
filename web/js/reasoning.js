@@ -5,6 +5,13 @@ export function modelTurnKey(event) {
 }
 
 export function trimTimeline(timeline, activeTurnKey, limit = 500) {
+	// Completed raw streams are represented by model.response and the stored
+	// assistant message. Keep only the active turn's deltas so token traffic cannot
+	// evict operational history such as tool results and compactions.
+	timeline = timeline.filter((event) =>
+		(event.type !== "model.delta" && event.type !== "model.progress") ||
+		(activeTurnKey && modelTurnKey(event) === activeTurnKey),
+	);
   if (timeline.length <= limit) return timeline;
   let start = timeline.length - limit;
   if (activeTurnKey) {

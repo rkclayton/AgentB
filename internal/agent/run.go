@@ -240,6 +240,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				)
 				remainingResultTokens = max(0, remainingResultTokens-resultTokens)
 				data := toolResultEventData(turn, item.call.ID, item.call.Name, item.content, item.ok, item.operatorContext, item.untrusted, item.ms, resultTokens, item.metadata)
+				s.IncrementToolCall(item.call.Name)
 				r.bus.Publish(events.New(events.ToolResult, s.ID, runID, data))
 			}
 		})

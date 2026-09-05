@@ -1,6 +1,9 @@
 package events
 
-import "sync"
+import (
+	"fmt"
+	"sync"
+)
 
 type Bus struct {
 	mu          sync.Mutex
@@ -31,7 +34,7 @@ func (b *Bus) Publish(event Event) Event {
 	if event.SessionID == "" {
 		b.global = appendBounded(b.global, recentEvent, 200)
 	} else {
-		b.sessionRing[event.SessionID] = appendBounded(b.sessionRing[event.SessionID], recentEvent, 500)
+		b.sessionRing[event.SessionID] = appendRecent(b.sessionRing[event.SessionID], recentEvent, 500)
 	}
 	subscribers := make([]chan Event, 0, len(b.subscribers))
 	for _, ch := range b.subscribers {
@@ -75,4 +78,68 @@ func appendBounded(values []Event, value Event, limit int) []Event {
 		return append([]Event(nil), values[len(values)-limit:]...)
 	}
 	return values
+}
+
+// appendRecent retains the current model stream until its response arrives, then
+// removes its raw progress/delta events. Completed token streams are diagnostic log
+// detail; they must not displace turns, tool results, or exceptional run events from
+// the live snapshot.
+func appendRecent(values []Event, value Event, limit int) []Event {
+	values = append(values, value)
+	switch value.Type {
+	case ModelDelta, ModelProgress:
+		return values
+	case ModelResponse:
+		values = discardStream(values, func(event Event) bool {
+			return sameTurn(event, value)
+		})
+	case RunStopped:
+		values = discardStream(values, func(event Event) bool {
+			return event.RunID == value.RunID
+		})
+	}
+	// Stage-exit and other operational events can arrive between the final delta
+	// and ModelResponse. Do not bound the ring while any live stream remains or
+	// those events can evict the history the response is meant to preserve.
+	if hasStream(values) {
+		return values
+	}
+	if len(values) > limit {
+		return append([]Event(nil), values[len(values)-limit:]...)
+	}
+	return values
+}
+
+func hasStream(values []Event) bool {
+	for _, event := range values {
+		if event.Type == ModelDelta || event.Type == ModelProgress {
+			return true
+		}
+	}
+	return false
+}
+
+func discardStream(values []Event, matches func(Event) bool) []Event {
+	out := values[:0]
+	for _, event := range values {
+		if (event.Type == ModelDelta || event.Type == ModelProgress) && matches(event) {
+			continue
+		}
+		out = append(out, event)
+	}
+	return out
+}
+
+func sameTurn(left, right Event) bool {
+	if left.RunID != right.RunID {
+		return false
+	}
+	return eventTurn(left) == eventTurn(right)
+}
+
+func eventTurn(event Event) string {
+	if data, ok := event.Data.(map[string]any); ok {
+		return fmt.Sprint(data["turn"])
+	}
+	return ""
 }

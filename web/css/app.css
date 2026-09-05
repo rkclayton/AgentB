@@ -112,6 +112,7 @@
 }
 .tab-budget {
   position: absolute;
+  width: var(--percentage, 0%);
   height: 2px;
   bottom: 0;
   left: 0;
@@ -156,10 +157,10 @@
   background: rgba(125, 135, 148, 0.28);
 }
 .segment {
+  width: var(--percentage, 0%);
   height: 100%;
   background: rgba(216, 221, 227, 0.75);
   min-width: 0;
-  transition: width 160ms ease-in-out;
 }
 .segment.estimated {
   background: transparent;
@@ -167,6 +168,7 @@
   outline-offset: -1px;
 }
 .reserve {
+  width: var(--percentage, 0%);
   height: 100%;
   background: repeating-linear-gradient(
     45deg,
@@ -181,7 +183,15 @@
   top: -2px;
   bottom: -2px;
   width: 1px;
+  left: var(--percentage, 0%);
   background: var(--trace);
+}
+.fill-edge {
+  position: absolute;
+  left: var(--percentage, 0%);
+  width: 1px;
+  top: 0;
+  bottom: 0;
 }
 .meter.over {
   outline: 1px solid var(--alarm);
@@ -211,12 +221,414 @@
   overflow: hidden;
 }
 .rail-label {
+  width: var(--percentage, 0%);
   font-size: 12px;
   line-height: 16px;
   color: var(--mute);
   overflow: hidden;
   white-space: nowrap;
 }
+.pct-0 { --percentage: 0%; }
+.pct-1 { --percentage: 0.25%; }
+.pct-2 { --percentage: 0.5%; }
+.pct-3 { --percentage: 0.75%; }
+.pct-4 { --percentage: 1%; }
+.pct-5 { --percentage: 1.25%; }
+.pct-6 { --percentage: 1.5%; }
+.pct-7 { --percentage: 1.75%; }
+.pct-8 { --percentage: 2%; }
+.pct-9 { --percentage: 2.25%; }
+.pct-10 { --percentage: 2.5%; }
+.pct-11 { --percentage: 2.75%; }
+.pct-12 { --percentage: 3%; }
+.pct-13 { --percentage: 3.25%; }
+.pct-14 { --percentage: 3.5%; }
+.pct-15 { --percentage: 3.75%; }
+.pct-16 { --percentage: 4%; }
+.pct-17 { --percentage: 4.25%; }
+.pct-18 { --percentage: 4.5%; }
+.pct-19 { --percentage: 4.75%; }
+.pct-20 { --percentage: 5%; }
+.pct-21 { --percentage: 5.25%; }
+.pct-22 { --percentage: 5.5%; }
+.pct-23 { --percentage: 5.75%; }
+.pct-24 { --percentage: 6%; }
+.pct-25 { --percentage: 6.25%; }
+.pct-26 { --percentage: 6.5%; }
+.pct-27 { --percentage: 6.75%; }
+.pct-28 { --percentage: 7%; }
+.pct-29 { --percentage: 7.25%; }
+.pct-30 { --percentage: 7.5%; }
+.pct-31 { --percentage: 7.75%; }
+.pct-32 { --percentage: 8%; }
+.pct-33 { --percentage: 8.25%; }
+.pct-34 { --percentage: 8.5%; }
+.pct-35 { --percentage: 8.75%; }
+.pct-36 { --percentage: 9%; }
+.pct-37 { --percentage: 9.25%; }
+.pct-38 { --percentage: 9.5%; }
+.pct-39 { --percentage: 9.75%; }
+.pct-40 { --percentage: 10%; }
+.pct-41 { --percentage: 10.25%; }
+.pct-42 { --percentage: 10.5%; }
+.pct-43 { --percentage: 10.75%; }
+.pct-44 { --percentage: 11%; }
+.pct-45 { --percentage: 11.25%; }
+.pct-46 { --percentage: 11.5%; }
+.pct-47 { --percentage: 11.75%; }
+.pct-48 { --percentage: 12%; }
+.pct-49 { --percentage: 12.25%; }
+.pct-50 { --percentage: 12.5%; }
+.pct-51 { --percentage: 12.75%; }
+.pct-52 { --percentage: 13%; }
+.pct-53 { --percentage: 13.25%; }
+.pct-54 { --percentage: 13.5%; }
+.pct-55 { --percentage: 13.75%; }
+.pct-56 { --percentage: 14%; }
+.pct-57 { --percentage: 14.25%; }
+.pct-58 { --percentage: 14.5%; }
+.pct-59 { --percentage: 14.75%; }
+.pct-60 { --percentage: 15%; }
+.pct-61 { --percentage: 15.25%; }
+.pct-62 { --percentage: 15.5%; }
+.pct-63 { --percentage: 15.75%; }
+.pct-64 { --percentage: 16%; }
+.pct-65 { --percentage: 16.25%; }
+.pct-66 { --percentage: 16.5%; }
+.pct-67 { --percentage: 16.75%; }
+.pct-68 { --percentage: 17%; }
+.pct-69 { --percentage: 17.25%; }
+.pct-70 { --percentage: 17.5%; }
+.pct-71 { --percentage: 17.75%; }
+.pct-72 { --percentage: 18%; }
+.pct-73 { --percentage: 18.25%; }
+.pct-74 { --percentage: 18.5%; }
+.pct-75 { --percentage: 18.75%; }
+.pct-76 { --percentage: 19%; }
+.pct-77 { --percentage: 19.25%; }
+.pct-78 { --percentage: 19.5%; }
+.pct-79 { --percentage: 19.75%; }
+.pct-80 { --percentage: 20%; }
+.pct-81 { --percentage: 20.25%; }
+.pct-82 { --percentage: 20.5%; }
+.pct-83 { --percentage: 20.75%; }
+.pct-84 { --percentage: 21%; }
+.pct-85 { --percentage: 21.25%; }
+.pct-86 { --percentage: 21.5%; }
+.pct-87 { --percentage: 21.75%; }
+.pct-88 { --percentage: 22%; }
+.pct-89 { --percentage: 22.25%; }
+.pct-90 { --percentage: 22.5%; }
+.pct-91 { --percentage: 22.75%; }
+.pct-92 { --percentage: 23%; }
+.pct-93 { --percentage: 23.25%; }
+.pct-94 { --percentage: 23.5%; }
+.pct-95 { --percentage: 23.75%; }
+.pct-96 { --percentage: 24%; }
+.pct-97 { --percentage: 24.25%; }
+.pct-98 { --percentage: 24.5%; }
+.pct-99 { --percentage: 24.75%; }
+.pct-100 { --percentage: 25%; }
+.pct-101 { --percentage: 25.25%; }
+.pct-102 { --percentage: 25.5%; }
+.pct-103 { --percentage: 25.75%; }
+.pct-104 { --percentage: 26%; }
+.pct-105 { --percentage: 26.25%; }
+.pct-106 { --percentage: 26.5%; }
+.pct-107 { --percentage: 26.75%; }
+.pct-108 { --percentage: 27%; }
+.pct-109 { --percentage: 27.25%; }
+.pct-110 { --percentage: 27.5%; }
+.pct-111 { --percentage: 27.75%; }
+.pct-112 { --percentage: 28%; }
+.pct-113 { --percentage: 28.25%; }
+.pct-114 { --percentage: 28.5%; }
+.pct-115 { --percentage: 28.75%; }
+.pct-116 { --percentage: 29%; }
+.pct-117 { --percentage: 29.25%; }
+.pct-118 { --percentage: 29.5%; }
+.pct-119 { --percentage: 29.75%; }
+.pct-120 { --percentage: 30%; }
+.pct-121 { --percentage: 30.25%; }
+.pct-122 { --percentage: 30.5%; }
+.pct-123 { --percentage: 30.75%; }
+.pct-124 { --percentage: 31%; }
+.pct-125 { --percentage: 31.25%; }
+.pct-126 { --percentage: 31.5%; }
+.pct-127 { --percentage: 31.75%; }
+.pct-128 { --percentage: 32%; }
+.pct-129 { --percentage: 32.25%; }
+.pct-130 { --percentage: 32.5%; }
+.pct-131 { --percentage: 32.75%; }
+.pct-132 { --percentage: 33%; }
+.pct-133 { --percentage: 33.25%; }
+.pct-134 { --percentage: 33.5%; }
+.pct-135 { --percentage: 33.75%; }
+.pct-136 { --percentage: 34%; }
+.pct-137 { --percentage: 34.25%; }
+.pct-138 { --percentage: 34.5%; }
+.pct-139 { --percentage: 34.75%; }
+.pct-140 { --percentage: 35%; }
+.pct-141 { --percentage: 35.25%; }
+.pct-142 { --percentage: 35.5%; }
+.pct-143 { --percentage: 35.75%; }
+.pct-144 { --percentage: 36%; }
+.pct-145 { --percentage: 36.25%; }
+.pct-146 { --percentage: 36.5%; }
+.pct-147 { --percentage: 36.75%; }
+.pct-148 { --percentage: 37%; }
+.pct-149 { --percentage: 37.25%; }
+.pct-150 { --percentage: 37.5%; }
+.pct-151 { --percentage: 37.75%; }
+.pct-152 { --percentage: 38%; }
+.pct-153 { --percentage: 38.25%; }
+.pct-154 { --percentage: 38.5%; }
+.pct-155 { --percentage: 38.75%; }
+.pct-156 { --percentage: 39%; }
+.pct-157 { --percentage: 39.25%; }
+.pct-158 { --percentage: 39.5%; }
+.pct-159 { --percentage: 39.75%; }
+.pct-160 { --percentage: 40%; }
+.pct-161 { --percentage: 40.25%; }
+.pct-162 { --percentage: 40.5%; }
+.pct-163 { --percentage: 40.75%; }
+.pct-164 { --percentage: 41%; }
+.pct-165 { --percentage: 41.25%; }
+.pct-166 { --percentage: 41.5%; }
+.pct-167 { --percentage: 41.75%; }
+.pct-168 { --percentage: 42%; }
+.pct-169 { --percentage: 42.25%; }
+.pct-170 { --percentage: 42.5%; }
+.pct-171 { --percentage: 42.75%; }
+.pct-172 { --percentage: 43%; }
+.pct-173 { --percentage: 43.25%; }
+.pct-174 { --percentage: 43.5%; }
+.pct-175 { --percentage: 43.75%; }
+.pct-176 { --percentage: 44%; }
+.pct-177 { --percentage: 44.25%; }
+.pct-178 { --percentage: 44.5%; }
+.pct-179 { --percentage: 44.75%; }
+.pct-180 { --percentage: 45%; }
+.pct-181 { --percentage: 45.25%; }
+.pct-182 { --percentage: 45.5%; }
+.pct-183 { --percentage: 45.75%; }
+.pct-184 { --percentage: 46%; }
+.pct-185 { --percentage: 46.25%; }
+.pct-186 { --percentage: 46.5%; }
+.pct-187 { --percentage: 46.75%; }
+.pct-188 { --percentage: 47%; }
+.pct-189 { --percentage: 47.25%; }
+.pct-190 { --percentage: 47.5%; }
+.pct-191 { --percentage: 47.75%; }
+.pct-192 { --percentage: 48%; }
+.pct-193 { --percentage: 48.25%; }
+.pct-194 { --percentage: 48.5%; }
+.pct-195 { --percentage: 48.75%; }
+.pct-196 { --percentage: 49%; }
+.pct-197 { --percentage: 49.25%; }
+.pct-198 { --percentage: 49.5%; }
+.pct-199 { --percentage: 49.75%; }
+.pct-200 { --percentage: 50%; }
+.pct-201 { --percentage: 50.25%; }
+.pct-202 { --percentage: 50.5%; }
+.pct-203 { --percentage: 50.75%; }
+.pct-204 { --percentage: 51%; }
+.pct-205 { --percentage: 51.25%; }
+.pct-206 { --percentage: 51.5%; }
+.pct-207 { --percentage: 51.75%; }
+.pct-208 { --percentage: 52%; }
+.pct-209 { --percentage: 52.25%; }
+.pct-210 { --percentage: 52.5%; }
+.pct-211 { --percentage: 52.75%; }
+.pct-212 { --percentage: 53%; }
+.pct-213 { --percentage: 53.25%; }
+.pct-214 { --percentage: 53.5%; }
+.pct-215 { --percentage: 53.75%; }
+.pct-216 { --percentage: 54%; }
+.pct-217 { --percentage: 54.25%; }
+.pct-218 { --percentage: 54.5%; }
+.pct-219 { --percentage: 54.75%; }
+.pct-220 { --percentage: 55%; }
+.pct-221 { --percentage: 55.25%; }
+.pct-222 { --percentage: 55.5%; }
+.pct-223 { --percentage: 55.75%; }
+.pct-224 { --percentage: 56%; }
+.pct-225 { --percentage: 56.25%; }
+.pct-226 { --percentage: 56.5%; }
+.pct-227 { --percentage: 56.75%; }
+.pct-228 { --percentage: 57%; }
+.pct-229 { --percentage: 57.25%; }
+.pct-230 { --percentage: 57.5%; }
+.pct-231 { --percentage: 57.75%; }
+.pct-232 { --percentage: 58%; }
+.pct-233 { --percentage: 58.25%; }
+.pct-234 { --percentage: 58.5%; }
+.pct-235 { --percentage: 58.75%; }
+.pct-236 { --percentage: 59%; }
+.pct-237 { --percentage: 59.25%; }
+.pct-238 { --percentage: 59.5%; }
+.pct-239 { --percentage: 59.75%; }
+.pct-240 { --percentage: 60%; }
+.pct-241 { --percentage: 60.25%; }
+.pct-242 { --percentage: 60.5%; }
+.pct-243 { --percentage: 60.75%; }
+.pct-244 { --percentage: 61%; }
+.pct-245 { --percentage: 61.25%; }
+.pct-246 { --percentage: 61.5%; }
+.pct-247 { --percentage: 61.75%; }
+.pct-248 { --percentage: 62%; }
+.pct-249 { --percentage: 62.25%; }
+.pct-250 { --percentage: 62.5%; }
+.pct-251 { --percentage: 62.75%; }
+.pct-252 { --percentage: 63%; }
+.pct-253 { --percentage: 63.25%; }
+.pct-254 { --percentage: 63.5%; }
+.pct-255 { --percentage: 63.75%; }
+.pct-256 { --percentage: 64%; }
+.pct-257 { --percentage: 64.25%; }
+.pct-258 { --percentage: 64.5%; }
+.pct-259 { --percentage: 64.75%; }
+.pct-260 { --percentage: 65%; }
+.pct-261 { --percentage: 65.25%; }
+.pct-262 { --percentage: 65.5%; }
+.pct-263 { --percentage: 65.75%; }
+.pct-264 { --percentage: 66%; }
+.pct-265 { --percentage: 66.25%; }
+.pct-266 { --percentage: 66.5%; }
+.pct-267 { --percentage: 66.75%; }
+.pct-268 { --percentage: 67%; }
+.pct-269 { --percentage: 67.25%; }
+.pct-270 { --percentage: 67.5%; }
+.pct-271 { --percentage: 67.75%; }
+.pct-272 { --percentage: 68%; }
+.pct-273 { --percentage: 68.25%; }
+.pct-274 { --percentage: 68.5%; }
+.pct-275 { --percentage: 68.75%; }
+.pct-276 { --percentage: 69%; }
+.pct-277 { --percentage: 69.25%; }
+.pct-278 { --percentage: 69.5%; }
+.pct-279 { --percentage: 69.75%; }
+.pct-280 { --percentage: 70%; }
+.pct-281 { --percentage: 70.25%; }
+.pct-282 { --percentage: 70.5%; }
+.pct-283 { --percentage: 70.75%; }
+.pct-284 { --percentage: 71%; }
+.pct-285 { --percentage: 71.25%; }
+.pct-286 { --percentage: 71.5%; }
+.pct-287 { --percentage: 71.75%; }
+.pct-288 { --percentage: 72%; }
+.pct-289 { --percentage: 72.25%; }
+.pct-290 { --percentage: 72.5%; }
+.pct-291 { --percentage: 72.75%; }
+.pct-292 { --percentage: 73%; }
+.pct-293 { --percentage: 73.25%; }
+.pct-294 { --percentage: 73.5%; }
+.pct-295 { --percentage: 73.75%; }
+.pct-296 { --percentage: 74%; }
+.pct-297 { --percentage: 74.25%; }
+.pct-298 { --percentage: 74.5%; }
+.pct-299 { --percentage: 74.75%; }
+.pct-300 { --percentage: 75%; }
+.pct-301 { --percentage: 75.25%; }
+.pct-302 { --percentage: 75.5%; }
+.pct-303 { --percentage: 75.75%; }
+.pct-304 { --percentage: 76%; }
+.pct-305 { --percentage: 76.25%; }
+.pct-306 { --percentage: 76.5%; }
+.pct-307 { --percentage: 76.75%; }
+.pct-308 { --percentage: 77%; }
+.pct-309 { --percentage: 77.25%; }
+.pct-310 { --percentage: 77.5%; }
+.pct-311 { --percentage: 77.75%; }
+.pct-312 { --percentage: 78%; }
+.pct-313 { --percentage: 78.25%; }
+.pct-314 { --percentage: 78.5%; }
+.pct-315 { --percentage: 78.75%; }
+.pct-316 { --percentage: 79%; }
+.pct-317 { --percentage: 79.25%; }
+.pct-318 { --percentage: 79.5%; }
+.pct-319 { --percentage: 79.75%; }
+.pct-320 { --percentage: 80%; }
+.pct-321 { --percentage: 80.25%; }
+.pct-322 { --percentage: 80.5%; }
+.pct-323 { --percentage: 80.75%; }
+.pct-324 { --percentage: 81%; }
+.pct-325 { --percentage: 81.25%; }
+.pct-326 { --percentage: 81.5%; }
+.pct-327 { --percentage: 81.75%; }
+.pct-328 { --percentage: 82%; }
+.pct-329 { --percentage: 82.25%; }
+.pct-330 { --percentage: 82.5%; }
+.pct-331 { --percentage: 82.75%; }
+.pct-332 { --percentage: 83%; }
+.pct-333 { --percentage: 83.25%; }
+.pct-334 { --percentage: 83.5%; }
+.pct-335 { --percentage: 83.75%; }
+.pct-336 { --percentage: 84%; }
+.pct-337 { --percentage: 84.25%; }
+.pct-338 { --percentage: 84.5%; }
+.pct-339 { --percentage: 84.75%; }
+.pct-340 { --percentage: 85%; }
+.pct-341 { --percentage: 85.25%; }
+.pct-342 { --percentage: 85.5%; }
+.pct-343 { --percentage: 85.75%; }
+.pct-344 { --percentage: 86%; }
+.pct-345 { --percentage: 86.25%; }
+.pct-346 { --percentage: 86.5%; }
+.pct-347 { --percentage: 86.75%; }
+.pct-348 { --percentage: 87%; }
+.pct-349 { --percentage: 87.25%; }
+.pct-350 { --percentage: 87.5%; }
+.pct-351 { --percentage: 87.75%; }
+.pct-352 { --percentage: 88%; }
+.pct-353 { --percentage: 88.25%; }
+.pct-354 { --percentage: 88.5%; }
+.pct-355 { --percentage: 88.75%; }
+.pct-356 { --percentage: 89%; }
+.pct-357 { --percentage: 89.25%; }
+.pct-358 { --percentage: 89.5%; }
+.pct-359 { --percentage: 89.75%; }
+.pct-360 { --percentage: 90%; }
+.pct-361 { --percentage: 90.25%; }
+.pct-362 { --percentage: 90.5%; }
+.pct-363 { --percentage: 90.75%; }
+.pct-364 { --percentage: 91%; }
+.pct-365 { --percentage: 91.25%; }
+.pct-366 { --percentage: 91.5%; }
+.pct-367 { --percentage: 91.75%; }
+.pct-368 { --percentage: 92%; }
+.pct-369 { --percentage: 92.25%; }
+.pct-370 { --percentage: 92.5%; }
+.pct-371 { --percentage: 92.75%; }
+.pct-372 { --percentage: 93%; }
+.pct-373 { --percentage: 93.25%; }
+.pct-374 { --percentage: 93.5%; }
+.pct-375 { --percentage: 93.75%; }
+.pct-376 { --percentage: 94%; }
+.pct-377 { --percentage: 94.25%; }
+.pct-378 { --percentage: 94.5%; }
+.pct-379 { --percentage: 94.75%; }
+.pct-380 { --percentage: 95%; }
+.pct-381 { --percentage: 95.25%; }
+.pct-382 { --percentage: 95.5%; }
+.pct-383 { --percentage: 95.75%; }
+.pct-384 { --percentage: 96%; }
+.pct-385 { --percentage: 96.25%; }
+.pct-386 { --percentage: 96.5%; }
+.pct-387 { --percentage: 96.75%; }
+.pct-388 { --percentage: 97%; }
+.pct-389 { --percentage: 97.25%; }
+.pct-390 { --percentage: 97.5%; }
+.pct-391 { --percentage: 97.75%; }
+.pct-392 { --percentage: 98%; }
+.pct-393 { --percentage: 98.25%; }
+.pct-394 { --percentage: 98.5%; }
+.pct-395 { --percentage: 98.75%; }
+.pct-396 { --percentage: 99%; }
+.pct-397 { --percentage: 99.25%; }
+.pct-398 { --percentage: 99.5%; }
+.pct-399 { --percentage: 99.75%; }
+.pct-400 { --percentage: 100%; }
 .rail-caption {
   font-size: 12px;
   color: var(--mute);
@@ -351,7 +763,7 @@
 .tool-row {
   height: 36px;
   display: grid;
-  grid-template-columns: 8px 1fr 44px 36px;
+  grid-template-columns: 8px 1fr 44px;
   gap: 10px;
   align-items: center;
   border-bottom: 1px solid rgba(125, 135, 148, 0.28);
@@ -365,6 +777,11 @@
 }
 .tool-calls {
   text-align: right;
+}
+.session-tool-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 .switch {
   position: relative;
@@ -474,9 +891,6 @@
   overflow: hidden;
   padding: 0 12px;
   opacity: 0;
-  transition:
-    max-height 120ms ease-in-out,
-    opacity 120ms ease-in-out;
 }
 .expanded > .row-expansion {
   max-height: 2000px;
@@ -1157,7 +1571,8 @@
 .state-filters { display: none; }
 .state-head { grid-template-columns: 58px minmax(0, 1fr) 7ch; }
 .timeline-head {
-  grid-template-columns: minmax(64px, 1fr) 62px minmax(150px, auto) 72px;
+  grid-template-columns: minmax(70px, auto) 62px minmax(150px, 1fr) 72px;
+  column-gap: 12px;
 }
 .timeline-tool { margin-left: 18px; }
 .timeline-tool .timeline-head {

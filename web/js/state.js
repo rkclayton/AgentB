@@ -1,13 +1,13 @@
 import { store } from "./bus.js";
+import { createPanelState } from "./panel-state.js";
 
-const states = new Map();
+const states = createPanelState("state");
 let rendered = "";
 const list = document.getElementById("state-list");
 const count = document.getElementById("state-count");
 
 function view(id) {
-  if (!states.has(id)) states.set(id, { expanded: new Set(), scroll: 0, follow: true });
-  return states.get(id);
+  return states.view(id);
 }
 
 function save() {
@@ -66,7 +66,7 @@ function messageRow(session, message, state) {
   head.children[1].textContent = preview || "—";
   head.children[2].textContent = `${message.estimated ? "~" : ""}${formatNumber(message.tokens || 0)}`;
   head.onclick = () => {
-    state.expanded.has(message.id) ? state.expanded.delete(message.id) : state.expanded.add(message.id);
+    state.toggle(message.id);
     renderState();
   };
   row.append(head);

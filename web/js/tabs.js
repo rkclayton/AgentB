@@ -1,4 +1,5 @@
 import { api, setActive, store } from "./bus.js";
+import { percentClass } from "./percent.js";
 
 const root = document.getElementById("tabs");
 const armed = new Set();
@@ -16,7 +17,7 @@ export function renderTabs() {
     const select = document.createElement("button");
     select.type = "button";
     select.className = "tab-select";
-    select.innerHTML = `<span class="lamp"></span><span class="tab-label"></span><span class="tab-server"></span><span class="tab-status mono"></span><span class="tab-budget ${ratio > 0.85 ? "warn" : ""}" style="width:${Math.min(100, ratio * 100)}%"></span>`;
+    select.innerHTML = `<span class="lamp"></span><span class="tab-label"></span><span class="tab-server"></span><span class="tab-status mono"></span><span class="tab-budget ${percentClass(ratio * 100)} ${ratio > 0.85 ? "warn" : ""}"></span>`;
     tab.append(select);
     tab.querySelector(".tab-label").textContent = value.label;
     tab.querySelector(".tab-server").textContent = profile?.label || value.server_id;

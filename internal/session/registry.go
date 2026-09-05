@@ -66,7 +66,7 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 			return nil, err
 		}
 	}
-	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}}
+	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}}
 	session.Messages = []events.Message{}
 	session.Budget = initialBudget(profile)
 	r.sessions[id] = session
@@ -187,6 +187,7 @@ func (r *Registry) Reset(id string) (string, error) {
 	}
 	s.mu.Lock()
 	s.Messages = nil
+	s.ToolCalls = map[string]int{}
 	s.LogPath = path
 	s.Run = RunState{Status: "idle", MaxTurns: r.maxTurns}
 	if r.memory != nil {

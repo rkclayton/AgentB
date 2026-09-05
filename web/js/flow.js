@@ -1,4 +1,5 @@
 import { store } from "./bus.js";
+import { liveTelemetry, recordedTelemetry } from "./telemetry.js";
 
 const root = document.getElementById("flow");
 const count = document.getElementById("flow-count");
@@ -41,18 +42,36 @@ function stageRow(session, name) {
   label.textContent = labels[name] || friendly(name);
   const readout = document.createElement("span");
   readout.className = "activity-readout";
-  readout.textContent = active ? readoutFor(session, name) : "";
+  readout.textContent = active || (store.replay && name === "call_model")
+    ? readoutFor(session, name)
+    : "";
   row.append(lamp, label, readout);
   return row;
 }
 
 function readoutFor(session, name) {
   if (name !== "call_model") return "";
+  if (store.replay) {
+    const recorded = recordedTelemetry(session);
+    if (!recorded) return "recorded";
+    return `recorded · think ${number(recorded.reasoningTokens)}${recorded.rate === null ? "" : ` · ${recorded.rate} tok/s`}`;
+  }
+  const telemetry = liveTelemetry(session);
+  if (telemetry) {
+    if (!telemetry.hasChunk)
+      return `waiting ${telemetry.ageSeconds}s · think ~0 · rate —`;
+    const progress = session?._progress;
+    if (telemetry.rate === null && telemetry.reasoningTokens === 0 && progress?.total)
+      return `prefill ${number(progress.cache || progress.processed || 0)}/${number(progress.total)} · chunk ${telemetry.ageSeconds}s`;
+    const rate = telemetry.rate === null ? "rate —" : `~${telemetry.rate} tok/s`;
+    return `chunk ${telemetry.ageSeconds}s · think ~${number(telemetry.reasoningTokens)} · ${rate}`;
+  }
   const progress = session?._progress;
   if (progress?.total) return `${progress.cache || progress.processed || 0} / ${progress.total}`;
-  const rate = session?._timings?.predicted_per_second;
-  return rate ? `${Math.round(rate)} tok/s` : "";
+  return "";
 }
+
+const number = (value) => Number(value || 0).toLocaleString("en-US");
 
 function friendly(value) {
   const text = String(value || "").replaceAll("_", " ");

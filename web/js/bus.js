@@ -1,5 +1,6 @@
 import { createOperatorReconciler } from "./operator-reconcile.js";
 import { modelTurnKey, trimTimeline } from "./reasoning.js";
+import { applyStreamEvent, hydrateTelemetry } from "./telemetry.js";
 
 export const store = {
   sessions: {},
@@ -75,6 +76,7 @@ export function reduce(event) {
       if (target) {
         target.messages = [];
         target.timeline = [];
+        for (const tool of target.tools || []) tool.calls = 0;
         mergeRun(target, { status: "idle", turn: 0, partial: "" });
       }
       break;
@@ -151,7 +153,10 @@ export function reduce(event) {
       }
       break;
     case "model.request":
-      if (target) target._streamTurnKey = modelTurnKey(event);
+      if (target) {
+        target._streamTurnKey = modelTurnKey(event);
+        applyStreamEvent(target, event);
+      }
       break;
     case "stage":
       if (target) {
@@ -168,14 +173,21 @@ export function reduce(event) {
       }
       break;
     case "model.progress":
-      if (target) target._progress = data;
+      if (target) {
+        target._progress = data;
+        applyStreamEvent(target, event);
+      }
       break;
     case "model.delta":
-      if (target && data.kind === "content")
-        target.run.partial = (target.run.partial || "") + data.text;
+      if (target) {
+        applyStreamEvent(target, event);
+        if (data.kind === "content")
+          target.run.partial = (target.run.partial || "") + data.text;
+      }
       break;
     case "model.response":
       if (target) {
+        applyStreamEvent(target, event);
         target._timings = data.timings;
         target.run.partial = "";
       }
@@ -289,6 +301,7 @@ function hydrate(value) {
 	value._completedStages = [];
 	value._activeTool = "";
 	value._streamTurnKey = "";
+	value._streamTelemetry = null;
 	for (const event of value.timeline) {
 	  const data = event.data || {};
 	  if (event.type === "stage") {
@@ -310,6 +323,8 @@ function hydrate(value) {
 	  }
 	}
 	if (value.run.status === "idle" || value.run.status === "replay") value._streamTurnKey = "";
+	if (!store.replay) value.timeline = trimTimeline(value.timeline, value._streamTurnKey);
+	hydrateTelemetry(value);
 }
 export function setActive(id) {
   if (store.sessions[id]) {

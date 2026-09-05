@@ -49,3 +49,13 @@ func TestReplayPreservesHistoricalToolNamesWithoutLiveRegistry(t *testing.T) {
 		t.Fatalf("historical approval name = %q, want fetch", got)
 	}
 }
+
+func TestReplayResetClearsToolCounts(t *testing.T) {
+	sessions := map[string]ReplaySession{
+		"main": {ID: "main", Tools: []ReplayTool{{Name: "read_file", Calls: 3}}},
+	}
+	ReduceReplay(sessions, Event{SessionID: "main", Type: SessionReset})
+	if got := sessions["main"].Tools[0].Calls; got != 0 {
+		t.Fatalf("calls after reset=%d, want 0", got)
+	}
+}

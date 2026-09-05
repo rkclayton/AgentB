@@ -44,6 +44,7 @@ type Session struct {
 	Budget                         events.Budget
 	Run                            RunState
 	ToolsEnabled                   map[string]bool
+	ToolCalls                      map[string]int
 	LastSeen                       map[string]time.Time
 	CreatedAt                      time.Time
 	LogPath                        string
@@ -63,7 +64,7 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files"} {
 		enabled, ok := s.ToolsEnabled[name]
 		if ok {
-			tools = append(tools, ToolState{Name: name, Enabled: enabled, SchemaTokens: s.SchemaTokens[name]})
+			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name]})
 		}
 	}
 	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath}
@@ -93,6 +94,16 @@ func (s *Session) ToggleTool(name string, enabled bool) bool {
 	}
 	s.ToolsEnabled[name] = enabled
 	return true
+}
+func (s *Session) IncrementToolCall(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.ToolsEnabled[name]; ok {
+		if s.ToolCalls == nil {
+			s.ToolCalls = map[string]int{}
+		}
+		s.ToolCalls[name]++
+	}
 }
 func (s *Session) EnabledTools() map[string]bool {
 	s.mu.Lock()

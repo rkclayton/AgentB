@@ -83,6 +83,8 @@ export function initSettings() {
         "memory.noted",
         "run.started",
         "run.stopped",
+        "tool.result",
+        "tool.toggled",
       ].includes(event.type)
     )
       render();
@@ -311,7 +313,10 @@ function tools(active) {
   const costs = Object.fromEntries((active?.tools || []).map((tool) => [tool.name, tool.schema_tokens]));
   const head = (name) => `<div class="tool-setting-head"><code>${name}</code><span>${costs[name] ?? 0} tokens</span></div>`;
   const cfg = store.config;
-  return `${head("read_file")}
+  const availability = active
+    ? `<div class="settings-subhead">Current session</div>${active.tools.map((tool) => row(tool.name, `<span class="session-tool-control"><span class="number">${tool.calls || 0} calls</span><button class="switch ${tool.enabled ? "on" : ""}" type="button" data-action="session-tool-toggle" data-id="${attr(tool.name)}" data-enabled="${tool.enabled}" aria-label="Toggle ${attr(tool.name)}" aria-pressed="${tool.enabled}"></button></span>`)).join("")}`
+    : '<p class="settings-note">No active session.</p>';
+  return `${availability}<div class="settings-subhead">Configuration and schema cost</div>${head("read_file")}
     ${number("tools.read_file.default_limit", "default bytes", cfg.tools?.read_file?.default_limit)}
     ${number("tools.read_file.max_limit", "max bytes per call", cfg.tools?.read_file?.max_limit)}
     ${head("list_dir")}
@@ -611,6 +616,20 @@ async function click(event) {
   if (action === "new-session") return newSession();
   if (action === "close-session") return closeSession(id);
   if (action === "reset-session") return resetSession(id);
+  if (action === "session-tool-toggle") {
+    const active = store.sessions[store.active];
+    if (!active) return;
+    try {
+      await api(`/api/tools/${encodeURIComponent(id)}`, {
+        session_id: active.id,
+        enabled: button.dataset.enabled !== "true",
+      });
+    } catch (error) {
+      errors.set(`tools.${id}`, error.message);
+      render();
+    }
+    return;
+  }
 	if (action === "store-shell-credential") return storeShellCredential();
 	if (action === "test-shell-credential") return shellCredentialAction("test");
 	if (action === "clear-shell-credential") return shellCredentialAction("clear");

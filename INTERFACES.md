@@ -10,7 +10,7 @@ On SSE connection, `snapshot` [prompt 3] contains `{sessions:{<id>:SessionSnapsh
 
 ## Shared records
 
-`SessionSnapshot` is `{id,label,server_id,workspace,run:{status:idle|queued|running|paused|stopping|replay,run_id,turn,max_turns,queue_position,partial},tools:[{name,enabled,calls,schema_tokens}],messages:[Message],budget:Budget,timeline:[last 500 live rows or recorded replay rows],queued_messages,runnable,not_runnable_reason,memory_path,memory_content,log_path}`. `memory_content` is the read-only injected view for the settings sheet; `log_path` names the current session JSONL. `schema_tokens` and memory fields remain zero/empty until prompt 8.
+`SessionSnapshot` is `{id,label,server_id,workspace,run:{status:idle|queued|running|paused|stopping|replay,run_id,turn,max_turns,queue_position,partial},tools:[{name,enabled,calls,schema_tokens}],messages:[Message],budget:Budget,timeline:[last 500 operational live events plus the current model stream, or recorded replay events],queued_messages,runnable,not_runnable_reason,memory_path,memory_content,log_path}`. Completed `model.delta` and `model.progress` events remain in JSONL but are removed from the live recent-event projection once their response arrives, so token traffic cannot evict turns, tool results, or compactions. `memory_content` is the read-only injected view for the settings sheet; `log_path` names the current session JSONL. `schema_tokens` and memory fields remain zero/empty until prompt 8.
 
 `Message` is `{id,role:system|user|assistant|tool,content,reasoning?,tool_calls?,tool_call_id?,name?,category:system|memory|tools|history|files|results|fetched|summary,tokens,estimated,elided,turn}`. `fetched` content carries an unmistakable untrusted-data envelope in the model-visible text.
 
