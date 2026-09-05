@@ -37,3 +37,19 @@ test("browser reducer preserves authoritative aggregates through events and rese
   assert.equal(store.sessions.main.compaction_token_delta, 0);
   assert.equal(store.sessions.main.run.last_stop_reason, "");
 });
+
+test("browser reducer keeps server-owned todos through update and reset", () => {
+  reduce({
+    type: "snapshot",
+    data: {
+      sessions: { main: { id: "main", run: { status: "idle" }, tools: [], messages: [], timeline: [], todos: [{ text: "Inspect", status: "pending" }] } },
+      replay: false,
+      servers: [],
+      config: {},
+    },
+  });
+  reduce({ type: "todos.updated", session_id: "main", data: { todos: [{ text: "Inspect", status: "in progress" }] } });
+  assert.deepEqual(store.sessions.main.todos, [{ text: "Inspect", status: "in progress" }]);
+  reduce({ type: "session.reset", session_id: "main", data: { todos: [{ text: "Inspect", status: "in progress" }] } });
+  assert.deepEqual(store.sessions.main.todos, [{ text: "Inspect", status: "in progress" }]);
+});

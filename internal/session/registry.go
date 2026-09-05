@@ -58,7 +58,7 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 		return nil, err
 	}
 	runnable, reason := runnable(profile, r.config().Context.Accounting)
-	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "search_text": true, "shell": true, "remember": true, "recall": true, "fetch_url": true, "find_files": true}
+	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "search_text": true, "shell": true, "remember": true, "recall": true, "fetch_url": true, "find_files": true, "write_todos": true}
 	memoryBlock, memoryPath := "", ""
 	if r.memory != nil {
 		memoryBlock, memoryPath, err = r.memory(context.Background(), abs, serverID)
@@ -203,7 +203,7 @@ func (r *Registry) Reset(id string) (string, error) {
 		s.MemoryBlock, s.MemoryPath = block, memoryPath
 	}
 	s.mu.Unlock()
-	r.bus.Publish(events.New(events.SessionReset, id, "", map[string]any{"session_id": id, "log_path": path}))
+	r.bus.Publish(events.New(events.SessionReset, id, "", map[string]any{"session_id": id, "log_path": path, "todos": s.Snapshot(nil).Todos}))
 	return path, nil
 }
 func (r *Registry) Close(id string, force bool) error {

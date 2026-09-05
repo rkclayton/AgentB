@@ -81,6 +81,7 @@ export function reduce(event) {
         target.model_turns = 0;
         target.compaction_count = 0;
         target.compaction_token_delta = 0;
+		if (Array.isArray(data.todos)) target.todos = data.todos;
         mergeRun(target, { status: store.replay ? "replay" : "idle", turn: 0, partial: "", last_stop_reason: "" });
       }
       break;
@@ -284,8 +285,11 @@ export function reduce(event) {
 		target.memory_content = target.memory_content
 		  ? `${target.memory_content.trimEnd()}\n${line}\n`
 		  : `${line}\n`;
-	  }
+      }
       break;
+	case "todos.updated":
+	  if (target) target.todos = Array.isArray(data.todos) ? data.todos : [];
+	  break;
   }
   if (target) {
     target.timeline = target.timeline || [];
@@ -307,6 +311,7 @@ function hydrate(value) {
   value.messages = value.messages || [];
   value.timeline = value.timeline || [];
   value.tools = value.tools || [];
+	value.todos = value.todos || [];
 	value._stage = "";
 	value._completedStages = [];
 	value._activeTool = "";
@@ -416,6 +421,7 @@ for (const type of [
   "workspace.conflict",
   "compaction",
   "memory.noted",
+	"todos.updated",
 ]) {
   source.addEventListener(type, (event) => reduce(JSON.parse(event.data)));
 }

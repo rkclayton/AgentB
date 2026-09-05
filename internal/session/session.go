@@ -22,6 +22,10 @@ type ToolState struct {
 	Calls        int    `json:"calls"`
 	SchemaTokens int    `json:"schema_tokens"`
 }
+type Todo struct {
+	Text   string `json:"text"`
+	Status string `json:"status"`
+}
 type Snapshot struct {
 	ID                   string           `json:"id"`
 	Label                string           `json:"label"`
@@ -41,6 +45,7 @@ type Snapshot struct {
 	ModelTurns           int              `json:"model_turns"`
 	CompactionCount      int              `json:"compaction_count"`
 	CompactionTokenDelta int              `json:"compaction_token_delta"`
+	Todos                []Todo           `json:"todos"`
 }
 type Session struct {
 	ID, Label, ServerID, Workspace string
@@ -57,6 +62,7 @@ type Session struct {
 	MemoryBlock                    string
 	MemoryPath                     string
 	SchemaTokens                   map[string]int
+	Todos                          []Todo
 	queuedMessages                 int
 	modelTurns                     int
 	compactionCount                int
@@ -68,13 +74,13 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tools := make([]ToolState, 0, len(s.ToolsEnabled))
-	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files"} {
+	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "write_todos"} {
 		enabled, ok := s.ToolsEnabled[name]
 		if ok {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, Todos: append([]Todo{}, s.Todos...)}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
@@ -172,4 +178,24 @@ func (s *Session) SetMessageCounts(values map[string]MessageCount) {
 			s.Messages[index].Estimated = value.Estimated
 		}
 	}
+}
+
+func (s *Session) ReplaceTodos(texts []string) []Todo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Todos = make([]Todo, len(texts))
+	for index, text := range texts {
+		s.Todos[index] = Todo{Text: text, Status: "pending"}
+	}
+	return append([]Todo(nil), s.Todos...)
+}
+
+func (s *Session) UpdateTodo(index int, status string) ([]Todo, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if index < 1 || index > len(s.Todos) {
+		return append([]Todo(nil), s.Todos...), false
+	}
+	s.Todos[index-1].Status = status
+	return append([]Todo(nil), s.Todos...), true
 }

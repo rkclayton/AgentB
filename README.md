@@ -1,6 +1,6 @@
 # Agent_b
 
-Agent_b is a small Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, ten governed tools, exact-or-labeled context accounting, compaction, durable workspace notes, and a unified Chat, Console, and Settings interface. The browser remains dependency-free; the backend uses the listed TLS-fingerprinting and HTML parsing modules for `fetch_url`.
+Agent_b is a small Go coding agent for OpenAI-compatible model servers. It provides observable multi-session runs, eleven governed tools, exact-or-labeled context accounting, compaction, durable workspace notes, and a unified Chat, Console, and Settings interface. The browser remains dependency-free; the backend uses the listed TLS-fingerprinting and HTML parsing modules for `fetch_url`.
 
 Choose one serving path before you start.
 
@@ -54,6 +54,8 @@ go run ./cmd/harness -config harness.json -replay logs/main.jsonl,logs/s2.jsonl
 Profiles hold an endpoint, model, sampling, reasoning, context settings, and measured capabilities. The settings sheet can add, duplicate, edit, test, and remove profiles; full probes measure behavior while minimal/off modes label assumptions. A profile is runnable only with known context, streaming, structured tool calls, and non-truncating overflow behavior.
 
 Sessions are ephemeral views onto a workspace and may use different profiles. Point several sessions at one workspace for a swarm; file-write conflicts force a re-read instead of silently overwriting another session. Agent_b schedules two runs by default, but a llama.cpp server started with `--parallel 1` interleaves their slot work instead of decoding two requests simultaneously.
+
+For multi-step work with distinct stages, the model can use `write_todos` to set a session scratch list and update each item's status. The Console displays that run state and replay reconstructs it from JSONL; it is not a workspace file, does not cross sessions, and never constrains which tool the model may call next. Single-step tasks do not require a list.
 
 With the service-account split enabled, shell and built-in file tools use the `agentb-svc` Windows identity. File tools accept absolute paths when that account's Windows permissions allow them; with the split disabled, `internal/tools/jail.go` remains their sole workspace constraint and must not be removed. Shell is never workspace-confined: the workspace is only its initial working directory, so `cd ..` and absolute paths remain possible. One-off shell work must be passed inline: shell refuses execution-policy bypass, refuses commands that create executable script artifacts, and will not execute a script file written through an agent file tool during the current run. Pre-existing operator/repository scripts remain runnable. ACLs restrict what a service-account shell can reach, not what it can do with reachable resources, so every shell call requires a policy confirmation while the split is enabled regardless of `approval.mode`. A subsequent permission or identity failure pauses again and offers the distinct **Run once as operator** escape. The failed command or file call is never retried automatically. Escape approval reruns only the displayed operation once under the Windows account running Agent_b, is logged, and reports operator context. It does not grant lasting permission or run as Administrator.
 

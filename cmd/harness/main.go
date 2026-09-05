@@ -141,6 +141,7 @@ func main() {
 		tools.NewRecall(memoryManager),
 		tools.NewFetch(cfg.Tools.Fetch),
 		fileIdentity.Wrap(tools.NewGlob()),
+		tools.NewWriteTodos(bus),
 	)
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)

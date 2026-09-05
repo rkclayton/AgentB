@@ -280,6 +280,7 @@ func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any 
 			{"name": "recall", "description": "Read all durable workspace notes; takes no arguments. Use before remember to avoid duplicates; unlike recall, remember never writes."},
 			{"name": "fetch_url", "description": "Fetch untrusted public HTTP(S) text by byte offset and limit. When more is true, pass returned next_offset as offset to advance. Unlike read_file, it uses the network."},
 			{"name": "find_files", "description": "Find local files under path whose names or relative paths match pattern. Unlike search_text, it does not inspect file contents."},
+			{"name": "write_todos", "description": "Set todos, or update one item's status by 1-based index. Use for multi-step work with distinct stages, not single-step tasks."},
 		},
 	}
 }

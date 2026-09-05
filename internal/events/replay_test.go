@@ -61,6 +61,18 @@ func TestReplayResetClearsToolCounts(t *testing.T) {
 	}
 }
 
+func TestReplayReconstructsTodosAndCarriesThemAcrossReset(t *testing.T) {
+	sessions := map[string]ReplaySession{"main": {ID: "main"}}
+	ReduceReplay(sessions, Event{SessionID: "main", Type: TodosUpdated, Data: map[string]any{"todos": []map[string]any{{"text": "Build", "status": "in progress"}}}})
+	if got := sessions["main"].Todos; len(got) != 1 || got[0] != (ReplayTodo{Text: "Build", Status: "in progress"}) {
+		t.Fatalf("replayed todos=%+v", got)
+	}
+	ReduceReplay(sessions, Event{SessionID: "main", Type: SessionReset, Data: map[string]any{"todos": []map[string]any{{"text": "Build", "status": "in progress"}}}})
+	if got := sessions["main"].Todos; len(got) != 1 || got[0].Status != "in progress" {
+		t.Fatalf("todos after reset=%+v", got)
+	}
+}
+
 func TestReplayReconstructsRunAggregatesAndLastStop(t *testing.T) {
 	sessions := map[string]ReplaySession{"main": {ID: "main", Run: ReplayRun{Status: "replay"}}}
 	for _, event := range []Event{

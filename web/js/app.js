@@ -3,6 +3,7 @@ import { renderTabs } from "./tabs.js";
 import { renderRail } from "./rail.js";
 import { renderFlow } from "./flow.js";
 import { renderRack } from "./rack.js";
+import { renderTodos } from "./todos.js";
 import { renderState } from "./state.js";
 import { renderTimeline } from "./timeline.js";
 import { initSettings } from "./settings.js";
@@ -63,6 +64,7 @@ function renderConsole() {
   renderTabs();
   renderRail();
   renderFlow();
+  renderTodos();
   renderRack();
   renderState();
   renderTimeline();

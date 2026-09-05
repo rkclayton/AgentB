@@ -108,7 +108,7 @@ func TestSnapshotToolInventoryUsesPublicNames(t *testing.T) {
 			t.Errorf("tool %q has no description", item["name"])
 		}
 	}
-	want := []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files"}
+	want := []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "write_todos"}
 	if !reflect.DeepEqual(names, want) {
 		t.Fatalf("tool inventory = %v, want %v", names, want)
 	}
