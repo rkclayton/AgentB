@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -18,6 +19,7 @@ var fallbackOverhead = map[string]int{"system": 4, "user": 4, "assistant": 4, "a
 
 type budgetInput struct {
 	SystemBase, System string
+	WithoutToolSystems map[string]string
 	Schemas            []any
 	AllSchemas         map[string]any
 	Messages           []llm.Message
@@ -32,11 +34,20 @@ type budgetState struct {
 	hasMeasured, hasCached bool
 }
 type Budgeter struct {
-	mu     sync.Mutex
-	states map[string]*budgetState
+	mu        sync.Mutex
+	states    map[string]*budgetState
+	toolCosts map[string]cachedToolCosts
 }
 
-func NewBudgeter() *Budgeter { return &Budgeter{states: map[string]*budgetState{}} }
+type cachedToolCosts struct {
+	key      string
+	schema   map[string]int
+	marginal map[string]int
+}
+
+func NewBudgeter() *Budgeter {
+	return &Budgeter{states: map[string]*budgetState{}, toolCosts: map[string]cachedToolCosts{}}
+}
 func (b *Budgeter) state(id string) *budgetState {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -72,15 +83,42 @@ func (b *Budgeter) MarkRequest(id string, estimate int) {
 		state.lastChars = state.pendingChars
 	})
 }
+func (b *Budgeter) InvalidateToolCosts() {
+	b.mu.Lock()
+	b.toolCosts = map[string]cachedToolCosts{}
+	b.mu.Unlock()
+}
+func (b *Budgeter) cachedCosts(id, key string) (map[string]int, map[string]int, bool) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	entry, ok := b.toolCosts[id]
+	if !ok || entry.key != key {
+		return nil, nil, false
+	}
+	return cloneCounts(entry.schema), cloneCounts(entry.marginal), true
+}
+func (b *Budgeter) saveCosts(id, key string, schema, marginal map[string]int) {
+	b.mu.Lock()
+	b.toolCosts[id] = cachedToolCosts{key: key, schema: cloneCounts(schema), marginal: cloneCounts(marginal)}
+	b.mu.Unlock()
+}
 func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
 	state := b.state(s.ID)
 	categories := map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "fetched": 0, "summary": 0}
 	estimated := []string{}
 	messageCounts := map[string]session.MessageCount{}
-	schemaCounts := map[string]int{}
+	forceEstimate := global.Accounting == "estimated" || !profile.Capabilities.Tokenize
+	cacheCPT := 0.0
+	if forceEstimate {
+		cacheCPT = state.cpt
+	}
+	cacheKey := toolCostKey(profile, global, cacheCPT, in)
+	schemaCounts, marginalCounts, costsCached := b.cachedCosts(s.ID, cacheKey)
+	if !costsCached {
+		schemaCounts, marginalCounts = map[string]int{}, map[string]int{}
+	}
 	mode := "exact"
 	var effectiveChars float64
-	forceEstimate := global.Accounting == "estimated" || !profile.Capabilities.Tokenize
 	client := llm.New(profile)
 	if forceEstimate {
 		mode = "estimated"
@@ -105,9 +143,17 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			messageCounts[in.Records[index].ID] = session.MessageCount{Tokens: tokens, Estimated: true}
 			effectiveChars += chars
 		}
-		for name, schema := range in.AllSchemas {
-			data, _ := json.Marshal(schema)
-			schemaCounts[name] = estimateChars(float64(len([]rune(string(data))))*1.1, cpt)
+		if !costsCached {
+			for name, schema := range in.AllSchemas {
+				data, _ := json.Marshal(schema)
+				schemaCounts[name] = estimateChars(float64(len([]rune(string(data))))*1.1, cpt)
+			}
+			fullPrefix := estimateChars(fullChars+toolChars, cpt)
+			for name := range in.WithoutToolSystems {
+				withoutData, _ := json.Marshal(schemasWithout(in.Schemas, name))
+				withoutChars := float64(len([]rune(in.WithoutToolSystems[name]))) + float64(len([]rune(string(withoutData))))*1.1
+				marginalCounts[name] = max(0, fullPrefix-estimateChars(withoutChars, cpt))
+			}
 		}
 	} else if !profile.Capabilities.ApplyTemplate {
 		estimated = []string{"system", "memory", "tools", "history", "files", "results", "fetched", "summary"}
@@ -135,9 +181,17 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			categories[category] += tokens
 			messageCounts[in.Records[index].ID] = session.MessageCount{Tokens: tokens, Estimated: true}
 		}
-		for name, schema := range in.AllSchemas {
-			data, _ := json.Marshal(schema)
-			schemaCounts[name] = int(math.Ceil(float64(count(string(data))) * 1.1))
+		if !costsCached {
+			for name, schema := range in.AllSchemas {
+				data, _ := json.Marshal(schema)
+				schemaCounts[name] = int(math.Ceil(float64(count(string(data))) * 1.1))
+			}
+			fullPrefix := count(in.System) + categories["tools"]
+			for name, withoutSystem := range in.WithoutToolSystems {
+				withoutData, _ := json.Marshal(schemasWithout(in.Schemas, name))
+				withoutTools := int(math.Ceil(float64(count(string(withoutData))) * 1.1))
+				marginalCounts[name] = max(0, fullPrefix-count(withoutSystem)-withoutTools)
+			}
 		}
 	} else {
 		render := func(messages []llm.Message, tools []any) (int, error) {
@@ -166,12 +220,21 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			}
 			categories["tools"] = max(0, withTools-withMemory)
 			previous = withTools
-			for name, schema := range in.AllSchemas {
-				one, err := render([]llm.Message{{Role: "system", Content: in.System}}, []any{schema})
-				if err != nil {
-					return events.Budget{}, fmt.Errorf("count schema %s: %w", name, err)
+			if !costsCached {
+				for name, schema := range in.AllSchemas {
+					one, err := render([]llm.Message{{Role: "system", Content: in.System}}, []any{schema})
+					if err != nil {
+						return events.Budget{}, fmt.Errorf("count schema %s: %w", name, err)
+					}
+					schemaCounts[name] = max(0, one-withMemory)
 				}
-				schemaCounts[name] = max(0, one-withMemory)
+				for name, withoutSystem := range in.WithoutToolSystems {
+					without, err := render([]llm.Message{{Role: "system", Content: withoutSystem}}, schemasWithout(in.Schemas, name))
+					if err != nil {
+						return events.Budget{}, fmt.Errorf("count marginal %s: %w", name, err)
+					}
+					marginalCounts[name] = max(0, withTools-without)
+				}
 			}
 		} else {
 			estimated = append(estimated, "tools")
@@ -182,13 +245,28 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			}
 			categories["tools"] = int(math.Ceil(float64(value) * 1.1))
 			previous += categories["tools"]
-			for name, schema := range in.AllSchemas {
-				raw, _ := json.Marshal(schema)
-				value, err := client.Tokenize(ctx, string(raw), false)
-				if err != nil {
-					return events.Budget{}, fmt.Errorf("count schema %s: %w", name, err)
+			if !costsCached {
+				for name, schema := range in.AllSchemas {
+					raw, _ := json.Marshal(schema)
+					value, err := client.Tokenize(ctx, string(raw), false)
+					if err != nil {
+						return events.Budget{}, fmt.Errorf("count schema %s: %w", name, err)
+					}
+					schemaCounts[name] = int(math.Ceil(float64(value) * 1.1))
 				}
-				schemaCounts[name] = int(math.Ceil(float64(value) * 1.1))
+				for name, withoutSystem := range in.WithoutToolSystems {
+					withoutBase, err := render([]llm.Message{{Role: "system", Content: withoutSystem}}, nil)
+					if err != nil {
+						return events.Budget{}, fmt.Errorf("count marginal system %s: %w", name, err)
+					}
+					withoutData, _ := json.Marshal(schemasWithout(in.Schemas, name))
+					value, err := client.Tokenize(ctx, string(withoutData), false)
+					if err != nil {
+						return events.Budget{}, fmt.Errorf("count marginal schema %s: %w", name, err)
+					}
+					withoutTools := int(math.Ceil(float64(value) * 1.1))
+					marginalCounts[name] = max(0, withMemory+categories["tools"]-withoutBase-withoutTools)
+				}
 			}
 		}
 		prefix := []llm.Message{{Role: "system", Content: in.System}}
@@ -245,8 +323,11 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			index = groupEnd
 		}
 	}
+	if !costsCached {
+		b.saveCosts(s.ID, cacheKey, schemaCounts, marginalCounts)
+	}
 	s.SetMessageCounts(messageCounts)
-	s.SetSchemaTokens(schemaCounts)
+	s.SetToolTokens(schemaCounts, marginalCounts)
 	used := 0
 	for _, value := range categories {
 		used += value
@@ -255,7 +336,7 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 	if profile.Context.NCtxOverride > 0 {
 		nctx = profile.Context.NCtxOverride
 	}
-	budget := events.Budget{NCtx: nctx, Reserve: profile.Context.ReserveOutput, Ceiling: max(0, nctx-profile.Context.ReserveOutput), UsedEst: used, Mode: mode, Estimated: len(estimated) > 0, EstimatedCategories: estimated, Categories: categories}
+	budget := events.Budget{NCtx: nctx, Reserve: profile.Context.ReserveOutput, Ceiling: max(0, nctx-profile.Context.ReserveOutput), UsedEst: used, Mode: mode, Estimated: len(estimated) > 0, EstimatedCategories: estimated, Categories: categories, ToolSchemaTokens: cloneCounts(schemaCounts), ToolMarginalTokens: cloneCounts(marginalCounts)}
 	if state.hasMeasured {
 		budget.UsedMeasured = state.measured
 		budget.Drift = state.measured - state.requestEstimate
@@ -273,6 +354,39 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 	})
 	s.SetBudget(budget)
 	return budget, nil
+}
+func toolCostKey(profile *config.Profile, global config.GlobalContext, cpt float64, in budgetInput) string {
+	value := struct {
+		Profile            *config.Profile
+		Accounting         string
+		CharactersPerToken float64
+		System             string
+		Schemas            []any
+		AllSchemas         map[string]any
+		WithoutToolSystems map[string]string
+	}{profile, global.Accounting, cpt, in.System, in.Schemas, in.AllSchemas, in.WithoutToolSystems}
+	data, _ := json.Marshal(value)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum)
+}
+func schemasWithout(schemas []any, excluded string) []any {
+	out := make([]any, 0, max(0, len(schemas)-1))
+	for _, schema := range schemas {
+		wrapper, _ := schema.(map[string]any)
+		function, _ := wrapper["function"].(map[string]any)
+		name, _ := function["name"].(string)
+		if name != excluded {
+			out = append(out, schema)
+		}
+	}
+	return out
+}
+func cloneCounts(values map[string]int) map[string]int {
+	out := make(map[string]int, len(values))
+	for name, value := range values {
+		out[name] = value
+	}
+	return out
 }
 func estimateChars(chars, cpt float64) int {
 	if chars <= 0 {

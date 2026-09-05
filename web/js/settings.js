@@ -85,6 +85,7 @@ export function initSettings() {
         "run.stopped",
         "tool.result",
         "tool.toggled",
+		"budget",
       ].includes(event.type)
     )
       render();
@@ -310,13 +311,21 @@ function sessions() {
 }
 
 function tools(active) {
-  const costs = Object.fromEntries((active?.tools || []).map((tool) => [tool.name, tool.schema_tokens]));
-  const head = (name) => `<div class="tool-setting-head"><code>${name}</code><span>${costs[name] ?? 0} tokens</span></div>`;
+  const toolState = Object.fromEntries((active?.tools || []).map((tool) => [tool.name, tool]));
+  const tokenCount = (value) => Number(value || 0).toLocaleString("en-US");
+  const head = (name) => {
+    const tool = toolState[name] || {};
+    return `<div class="tool-setting-head"><code>${name}</code><span class="tool-cost"><span class="tool-cost-primary">${tokenCount(tool.marginal_tokens)} marginal</span><span>schema ${tokenCount(tool.schema_tokens)}</span></span></div>`;
+  };
   const cfg = store.config;
   const availability = active
     ? `<div class="settings-subhead">Current session</div>${active.tools.map((tool) => row(tool.name, `<span class="session-tool-control"><span class="number">${tool.calls || 0} calls</span><button class="switch ${tool.enabled ? "on" : ""}" type="button" data-action="session-tool-toggle" data-id="${attr(tool.name)}" data-enabled="${tool.enabled}" aria-label="Toggle ${attr(tool.name)}" aria-pressed="${tool.enabled}"></button></span>`)).join("")}`
     : '<p class="settings-note">No active session.</p>';
-  return `${availability}<div class="settings-subhead">Configuration and schema cost</div>${head("read_file")}
+  const blockTokens = active?.budget?.categories?.tools;
+  const block = row("enabled tools block", `<span class="number">${blockTokens == null ? "not measured" : `${tokenCount(blockTokens)} tokens`}</span>`);
+  return `${availability}<div class="settings-subhead">Configuration and request cost</div>${block}
+    <p class="settings-note">Marginals include the tool-name prompt; neither marginals nor schema sizes sum to the block because shared scaffolding is counted once.</p>
+    ${head("read_file")}
     ${number("tools.read_file.default_limit", "default bytes", cfg.tools?.read_file?.default_limit)}
     ${number("tools.read_file.max_limit", "max bytes per call", cfg.tools?.read_file?.max_limit)}
     ${head("list_dir")}

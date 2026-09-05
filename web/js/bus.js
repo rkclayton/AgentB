@@ -234,7 +234,15 @@ export function reduce(event) {
       if (target) target.queued_messages = (target.queued_messages || 0) + 1;
       break;
     case "budget":
-      if (target) target.budget = data;
+      if (target) {
+        target.budget = data;
+        for (const tool of target.tools || []) {
+          if (Object.hasOwn(data.tool_schema_tokens || {}, tool.name))
+            tool.schema_tokens = data.tool_schema_tokens[tool.name];
+          if (Object.hasOwn(data.tool_marginal_tokens || {}, tool.name))
+            tool.marginal_tokens = data.tool_marginal_tokens[tool.name];
+        }
+      }
       break;
     case "approval.required":
       if (target) mergeRun(target, { status: "paused" });

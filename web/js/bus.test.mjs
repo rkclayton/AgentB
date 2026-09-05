@@ -53,3 +53,23 @@ test("browser reducer keeps server-owned todos through update and reset", () => 
   reduce({ type: "session.reset", session_id: "main", data: { todos: [{ text: "Inspect", status: "in progress" }] } });
   assert.deepEqual(store.sessions.main.todos, [{ text: "Inspect", status: "in progress" }]);
 });
+
+test("browser reducer applies budget tool costs to session tools", () => {
+  reduce({
+    type: "snapshot",
+    data: {
+      sessions: { main: { id: "main", run: { status: "idle" }, tools: [{ name: "read_file", schema_tokens: 0, marginal_tokens: 0 }], messages: [], timeline: [] } },
+      replay: false,
+      servers: [],
+      config: {},
+    },
+  });
+  reduce({
+    type: "budget",
+    session_id: "main",
+    data: { categories: { tools: 100 }, tool_schema_tokens: { read_file: 60 }, tool_marginal_tokens: { read_file: 20 } },
+  });
+  assert.equal(store.sessions.main.budget.categories.tools, 100);
+  assert.equal(store.sessions.main.tools[0].schema_tokens, 60);
+  assert.equal(store.sessions.main.tools[0].marginal_tokens, 20);
+});

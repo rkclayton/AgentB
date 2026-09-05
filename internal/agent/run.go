@@ -34,7 +34,10 @@ type Runner struct {
 func NewRunner(bus *events.Bus, registry *tools.Registry, prompt *PromptRenderer, profile func(string) (*config.Profile, bool), cfg func() config.Config) *Runner {
 	return &Runner{bus: bus, tools: registry, prompt: prompt, profile: profile, cfg: cfg, gate: NewGate(bus, cfg), budget: NewBudgeter(), compact: contextmgr.New(bus)}
 }
-func (r *Runner) Configure(cfg config.Config)     { r.tools.Configure(cfg) }
+func (r *Runner) Configure(cfg config.Config) {
+	r.tools.Configure(cfg)
+	r.budget.InvalidateToolCosts()
+}
 func (r *Runner) Gate() *Gate                     { return r.gate }
 func (r *Runner) SetToolActivity(fn func(string)) { r.toolActivity = fn }
 func (r *Runner) id(prefix string) string         { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
@@ -114,7 +117,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			}
 			request = llm.Request{Messages: messages, Tools: schemas, ToolChoice: "auto", MaxTokens: profile.Context.ReserveOutput, Thinking: profile.Reasoning.Enabled}
 			body = llm.BuildRequest(profile, request, true)
-			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, System: system, Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false)
+			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, System: system, WithoutToolSystems: r.withoutToolSystems(profile, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false)
 			if budgetErr != nil {
 				return
 			}
@@ -416,7 +419,20 @@ func (r *Runner) measureSession(ctx context.Context, p *config.Profile, s *sessi
 		}
 		messages = append(messages, converted)
 	}
-	return r.budget.Measure(ctx, p, s, r.cfg().Context, budgetInput{SystemBase: base, System: system, Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages, Records: records}, mark)
+	return r.budget.Measure(ctx, p, s, r.cfg().Context, budgetInput{SystemBase: base, System: system, WithoutToolSystems: r.withoutToolSystems(p, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages, Records: records}, mark)
+}
+
+func (r *Runner) withoutToolSystems(p *config.Profile, s *session.Session, enabled map[string]bool, memory string) map[string]string {
+	out := map[string]string{}
+	for _, name := range r.tools.Names(enabled) {
+		without := make(map[string]bool, len(enabled))
+		for candidate, value := range enabled {
+			without[candidate] = value
+		}
+		without[name] = false
+		out[name] = r.prompt.Render(p, s, r.tools.Names(without), memory)
+	}
+	return out
 }
 
 func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID string, turn int, p *config.Profile, current map[string]bool) {

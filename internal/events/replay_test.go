@@ -61,6 +61,22 @@ func TestReplayResetClearsToolCounts(t *testing.T) {
 	}
 }
 
+func TestReplayBudgetUpdatesToolCosts(t *testing.T) {
+	sessions := map[string]ReplaySession{
+		"main": {ID: "main", Tools: []ReplayTool{{Name: "read_file"}, {Name: "shell"}}},
+	}
+	budget := Budget{
+		Categories:         map[string]int{"tools": 100},
+		ToolSchemaTokens:   map[string]int{"read_file": 60, "shell": 70},
+		ToolMarginalTokens: map[string]int{"read_file": 20, "shell": 30},
+	}
+	ReduceReplay(sessions, Event{SessionID: "main", Type: BudgetEvent, Data: budget})
+	item := sessions["main"]
+	if item.Budget.Categories["tools"] != 100 || item.Tools[0].SchemaTokens != 60 || item.Tools[0].MarginalTokens != 20 || item.Tools[1].MarginalTokens != 30 {
+		t.Fatalf("replayed budget costs=%+v tools=%+v", item.Budget, item.Tools)
+	}
+}
+
 func TestReplayReconstructsTodosAndCarriesThemAcrossReset(t *testing.T) {
 	sessions := map[string]ReplaySession{"main": {ID: "main"}}
 	ReduceReplay(sessions, Event{SessionID: "main", Type: TodosUpdated, Data: map[string]any{"todos": []map[string]any{{"text": "Build", "status": "in progress"}}}})

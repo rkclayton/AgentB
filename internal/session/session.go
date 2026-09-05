@@ -17,10 +17,11 @@ type RunState struct {
 	LastStopReason string `json:"last_stop_reason"`
 }
 type ToolState struct {
-	Name         string `json:"name"`
-	Enabled      bool   `json:"enabled"`
-	Calls        int    `json:"calls"`
-	SchemaTokens int    `json:"schema_tokens"`
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	Calls          int    `json:"calls"`
+	SchemaTokens   int    `json:"schema_tokens"`
+	MarginalTokens int    `json:"marginal_tokens"`
 }
 type Todo struct {
 	Text   string `json:"text"`
@@ -62,6 +63,7 @@ type Session struct {
 	MemoryBlock                    string
 	MemoryPath                     string
 	SchemaTokens                   map[string]int
+	MarginalTokens                 map[string]int
 	Todos                          []Todo
 	queuedMessages                 int
 	modelTurns                     int
@@ -77,7 +79,7 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "write_todos"} {
 		enabled, ok := s.ToolsEnabled[name]
 		if ok {
-			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name]})
+			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name], MarginalTokens: s.MarginalTokens[name]})
 		}
 	}
 	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, Todos: append([]Todo{}, s.Todos...)}
@@ -143,9 +145,10 @@ func (s *Session) RecordCompaction(delta int) {
 	s.compactionTokenDelta += delta
 	s.mu.Unlock()
 }
-func (s *Session) SetSchemaTokens(values map[string]int) {
+func (s *Session) SetToolTokens(schema, marginal map[string]int) {
 	s.mu.Lock()
-	s.SchemaTokens = values
+	s.SchemaTokens = schema
+	s.MarginalTokens = marginal
 	s.mu.Unlock()
 }
 func (s *Session) SetRunnable(ok bool, reason string) {

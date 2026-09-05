@@ -12,10 +12,11 @@ import (
 )
 
 type ReplayTool struct {
-	Name         string `json:"name"`
-	Enabled      bool   `json:"enabled"`
-	Calls        int    `json:"calls"`
-	SchemaTokens int    `json:"schema_tokens"`
+	Name           string `json:"name"`
+	Enabled        bool   `json:"enabled"`
+	Calls          int    `json:"calls"`
+	SchemaTokens   int    `json:"schema_tokens"`
+	MarginalTokens int    `json:"marginal_tokens"`
 }
 
 type ReplayTodo struct {
@@ -273,6 +274,14 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 		item.QueuedMessages++
 	case BudgetEvent:
 		_ = decodeReplay(event.Data, &item.Budget)
+		for index := range item.Tools {
+			if value, found := item.Budget.ToolSchemaTokens[item.Tools[index].Name]; found {
+				item.Tools[index].SchemaTokens = value
+			}
+			if value, found := item.Budget.ToolMarginalTokens[item.Tools[index].Name]; found {
+				item.Tools[index].MarginalTokens = value
+			}
+		}
 	case Compaction:
 		item.CompactionCount++
 		item.CompactionTokenDelta += replayInt(data["after"]) - replayInt(data["before"])

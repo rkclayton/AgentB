@@ -1412,6 +1412,15 @@
   color: var(--mute);
   font: 12px/16px var(--mono);
 }
+.tool-setting-head .tool-cost {
+  display: flex;
+  gap: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.tool-setting-head .tool-cost-primary {
+  color: var(--ink);
+  font-weight: 500;
+}
 .memory-content {
   max-height: 240px;
   overflow: auto;

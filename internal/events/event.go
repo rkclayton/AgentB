@@ -85,6 +85,8 @@ type Budget struct {
 	Estimated           bool           `json:"estimated"`
 	EstimatedCategories []string       `json:"estimated_categories"`
 	Categories          map[string]int `json:"categories"`
+	ToolSchemaTokens    map[string]int `json:"tool_schema_tokens"`
+	ToolMarginalTokens  map[string]int `json:"tool_marginal_tokens"`
 }
 
 func New(eventType, sessionID, runID string, data any) Event {

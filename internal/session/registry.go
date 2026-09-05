@@ -66,7 +66,7 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 			return nil, err
 		}
 	}
-	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}}
+	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
 	session.Messages = []events.Message{}
 	session.Budget = initialBudget(profile)
 	r.sessions[id] = session
@@ -261,7 +261,8 @@ func initialBudget(profile *config.Profile) events.Budget {
 	return events.Budget{
 		NCtx: nctx, Reserve: profile.Context.ReserveOutput, Ceiling: ceiling,
 		Mode: "estimated", Estimated: true, EstimatedCategories: []string{},
-		Categories: map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "fetched": 0, "summary": 0},
+		Categories:       map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "fetched": 0, "summary": 0},
+		ToolSchemaTokens: map[string]int{}, ToolMarginalTokens: map[string]int{},
 	}
 }
 
