@@ -81,6 +81,9 @@ export function reduce(event) {
         target.model_turns = 0;
         target.compaction_count = 0;
         target.compaction_token_delta = 0;
+        target.compaction_model_calls = 0;
+        target.compaction_prompt_tokens = 0;
+        target.compaction_completion_tokens = 0;
         mergeRun(target, { status: store.replay ? "replay" : "idle", turn: 0, partial: "", last_stop_reason: "" });
       }
       break;
@@ -294,6 +297,13 @@ export function reduce(event) {
 		  : `${line}\n`;
       }
       break;
+    case "compaction.summary":
+      if (target && data.dispatched) {
+        target.compaction_model_calls = (target.compaction_model_calls || 0) + 1;
+        target.compaction_prompt_tokens = (target.compaction_prompt_tokens || 0) + (data.usage?.prompt_tokens || 0);
+        target.compaction_completion_tokens = (target.compaction_completion_tokens || 0) + (data.usage?.completion_tokens || 0);
+      }
+      break;
   }
   if (target) {
     target.timeline = target.timeline || [];
@@ -423,6 +433,7 @@ for (const type of [
   "cycle.detected",
   "workspace.conflict",
   "compaction",
+  "compaction.summary",
   "memory.noted",
 ]) {
   source.addEventListener(type, (event) => reduce(JSON.parse(event.data)));

@@ -550,7 +550,7 @@ function noticeContent(session, entry) {
     if (data.reason !== "done") content.classList.add("alarm");
   } else if (event.type === "run.queued") content.textContent = `waiting for a slot (position ${data.position})`;
   else if (event.type === "message.queued") content.textContent = `queued (${data.position})`;
-  else if (event.type === "compaction") content.textContent = `compacted ${signed((data.after || 0) - (data.before || 0))} tokens`;
+  else if (event.type === "compaction") content.textContent = `compacted ${signed((data.after || 0) - (data.before || 0))} tokens${data.profile_id ? ` via ${data.profile_id}` : ""}`;
   else if (event.type === "workspace.conflict") {
     content.textContent = `conflict: ${data.path} written by ${data.other_label} ${data.age_s} s ago`;
     content.classList.add("alarm");

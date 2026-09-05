@@ -23,8 +23,9 @@ func TestSnapshotCarriesRunAggregates(t *testing.T) {
 	s.RecordModelTurn()
 	s.RecordModelTurn()
 	s.RecordCompaction(-123)
+	s.RecordCompactionModel(400, 50)
 	snapshot := s.Snapshot(nil)
-	if snapshot.ModelTurns != 2 || snapshot.CompactionCount != 1 || snapshot.CompactionTokenDelta != -123 {
+	if snapshot.ModelTurns != 2 || snapshot.CompactionCount != 1 || snapshot.CompactionTokenDelta != -123 || snapshot.CompactionModelCalls != 1 || snapshot.CompactionPrompt != 400 || snapshot.CompactionCompletion != 50 {
 		t.Fatalf("snapshot aggregates=%+v", snapshot)
 	}
 }

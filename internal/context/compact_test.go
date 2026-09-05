@@ -27,7 +27,7 @@ func TestSummarizeRejectsContextGrowth(t *testing.T) {
 		item.Append(events.Message{ID: fmt.Sprintf("m%d", index), Tokens: 10})
 	}
 	before := item.MessagesCopy()
-	if New(bus).Summarize(item, "run", events.Message{ID: "summary", Tokens: 100}) {
+	if New(bus).Summarize(item, "run", events.Message{ID: "summary", Tokens: 100}, events.CompactionSummaryData{}) {
 		t.Fatal("growing summary was accepted")
 	}
 	after := item.MessagesCopy()
@@ -41,7 +41,7 @@ func TestSummarizeRecordsReduction(t *testing.T) {
 	for index := 0; index < 10; index++ {
 		item.Append(events.Message{ID: fmt.Sprintf("m%d", index), Tokens: 10})
 	}
-	if !New(events.NewBus()).Summarize(item, "run", events.Message{ID: "summary", Tokens: 1}) {
+	if !New(events.NewBus()).Summarize(item, "run", events.Message{ID: "summary", Tokens: 1}, events.CompactionSummaryData{}) {
 		t.Fatal("reducing summary was rejected")
 	}
 	snapshot := item.Snapshot(nil)

@@ -48,6 +48,9 @@ type ReplaySession struct {
 	ModelTurns           int          `json:"model_turns"`
 	CompactionCount      int          `json:"compaction_count"`
 	CompactionTokenDelta int          `json:"compaction_token_delta"`
+	CompactionModelCalls int          `json:"compaction_model_calls"`
+	CompactionPrompt     int          `json:"compaction_prompt_tokens"`
+	CompactionCompletion int          `json:"compaction_completion_tokens"`
 }
 
 type Replay struct {
@@ -196,6 +199,9 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 		item.ModelTurns = 0
 		item.CompactionCount = 0
 		item.CompactionTokenDelta = 0
+		item.CompactionModelCalls = 0
+		item.CompactionPrompt = 0
+		item.CompactionCompletion = 0
 		item.Run = ReplayRun{Status: "replay", MaxTurns: item.Run.MaxTurns}
 	case RunQueued:
 		item.Run.RunID = event.RunID
@@ -288,6 +294,13 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 				}
 			}
 			item.Messages = kept
+		}
+	case CompactionSummary:
+		var attempt CompactionSummaryData
+		if decodeReplay(event.Data, &attempt) == nil && attempt.Dispatched {
+			item.CompactionModelCalls++
+			item.CompactionPrompt += attempt.Usage.PromptTokens
+			item.CompactionCompletion += attempt.Usage.CompletionTokens
 		}
 	case MemoryNoted:
 		item.MemoryPath = replayString(data["path"])

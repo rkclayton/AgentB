@@ -87,7 +87,7 @@ func (c *Compactor) ElideOld(s *session.Session, runID string, used, target, rea
 	return true, used
 }
 
-func (c *Compactor) Summarize(s *session.Session, runID string, summary events.Message) bool {
+func (c *Compactor) Summarize(s *session.Session, runID string, summary events.Message, source events.CompactionSummaryData) bool {
 	messages := s.MessagesCopy()
 	if len(messages) <= 7 {
 		return false
@@ -107,11 +107,16 @@ func (c *Compactor) Summarize(s *session.Session, runID string, summary events.M
 	}
 	before, after := tokenSum(messages), tokenSum(out)
 	if after >= before {
+		source.Outcome = "rejected"
+		source.Reason = "summary did not reduce session context"
+		c.bus.Publish(events.New(events.CompactionSummary, s.ID, runID, source))
 		return false
 	}
 	s.ReplaceMessages(out)
 	s.RecordCompaction(after - before)
-	c.bus.Publish(events.New(events.Compaction, s.ID, runID, map[string]any{"kind": "summarize", "before": before, "after": after, "affected_ids": affected, "summary_message_id": summary.ID}))
+	source.Outcome = "accepted"
+	c.bus.Publish(events.New(events.CompactionSummary, s.ID, runID, source))
+	c.bus.Publish(events.New(events.Compaction, s.ID, runID, map[string]any{"kind": "summarize", "before": before, "after": after, "affected_ids": affected, "summary_message_id": summary.ID, "role": source.Role, "profile_id": source.ProfileID, "model": source.Model, "fallback_reason": source.FallbackReason, "usage": source.Usage}))
 	return true
 }
 

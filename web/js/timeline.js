@@ -27,8 +27,11 @@ export function renderTimeline() {
     events = session.timeline || [],
     turns = session.model_turns || 0,
     compactions = session.compaction_count || 0,
-    compactedTokens = session.compaction_token_delta || 0;
-  count.textContent = `${turns} turns${compactions ? ` · ${compactions} compact · ${formatSigned(compactedTokens)} tokens` : ""}`;
+    compactedTokens = session.compaction_token_delta || 0,
+    summaryCalls = session.compaction_model_calls || 0,
+    summaryPrompt = session.compaction_prompt_tokens || 0,
+    summaryCompletion = session.compaction_completion_tokens || 0;
+  count.textContent = `${turns} turns${compactions ? ` · ${compactions} compact · ${formatSigned(compactedTokens)} context` : ""}${summaryCalls ? ` · ${summaryCalls} summary ${formatNumber(summaryPrompt)} in/${formatNumber(summaryCompletion)} out` : ""}`;
   const calls = new Map(),
     results = new Map(),
     decisions = new Map();
@@ -41,6 +44,8 @@ export function renderTimeline() {
   const entries = [];
   for (const event of events) {
     if (event.type === "model.response") entries.push({ kind: "model", event });
+    else if (event.type === "compaction.summary" && event.data?.outcome !== "accepted")
+      entries.push({ kind: event.type, event });
     else if (
       [
         "approval.required",
@@ -222,8 +227,14 @@ function inlineRow(session, event, decisions, state) {
     if (data.enabled) row.node.classList.add("fault");
   } else if (event.type === "compaction") {
     const affected = data.affected_ids?.length || "",
-      delta = (data.after || 0) - (data.before || 0);
-    text.textContent = `Compacted · ${friendly(data.kind)} · ${formatNumber(data.before)} → ${formatNumber(data.after)} · ${formatSigned(delta)} tokens${affected ? ` · ${affected} items` : ""}`;
+      delta = (data.after || 0) - (data.before || 0),
+      served = data.profile_id ? ` · ${friendly(data.role)} ${data.profile_id}${data.model ? `/${data.model}` : ""}` : "",
+      usage = data.usage ? ` · ${formatNumber(data.usage.prompt_tokens)} in/${formatNumber(data.usage.completion_tokens)} out` : "",
+      fallback = data.fallback_reason ? ` · fallback ${friendly(data.fallback_reason)}` : "";
+    text.textContent = `Compacted · ${friendly(data.kind)} · ${formatNumber(data.before)} → ${formatNumber(data.after)} · ${formatSigned(delta)} tokens${affected ? ` · ${affected} items` : ""}${served}${usage}${fallback}`;
+  } else if (event.type === "compaction.summary") {
+    text.textContent = `Summary ${friendly(data.outcome)} · ${friendly(data.role)} ${data.profile_id || "unknown"}${data.model ? `/${data.model}` : ""}${data.reason ? ` · ${data.reason}` : ""}`;
+    if (data.outcome === "error") row.node.classList.add("fault");
   } else if (event.type === "run.stopped") {
     const label = (data.reason || "").replaceAll("_", " ");
     text.textContent = `Stopped · ${label}${data.detail ? ` · ${data.detail}` : ""}`;

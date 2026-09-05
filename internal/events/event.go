@@ -46,6 +46,7 @@ const (
 	WorkspaceConflict = "workspace.conflict"
 	MemoryNoted       = "memory.noted"
 	Compaction        = "compaction"
+	CompactionSummary = "compaction.summary"
 	BudgetEvent       = "budget"
 )
 
@@ -86,6 +87,27 @@ type Budget struct {
 	Categories          map[string]int `json:"categories"`
 	ToolSchemaTokens    map[string]int `json:"tool_schema_tokens"`
 	ToolMarginalTokens  map[string]int `json:"tool_marginal_tokens"`
+}
+
+type ModelUsage struct {
+	PromptTokens     int  `json:"prompt_tokens"`
+	CompletionTokens int  `json:"completion_tokens"`
+	CachedTokens     *int `json:"cached_tokens"`
+}
+
+type CompactionSummaryData struct {
+	Role                  string     `json:"role"`
+	ProfileID             string     `json:"profile_id"`
+	Model                 string     `json:"model"`
+	Outcome               string     `json:"outcome"`
+	Reason                string     `json:"reason,omitempty"`
+	FallbackReason        string     `json:"fallback_reason,omitempty"`
+	Dispatched            bool       `json:"dispatched"`
+	EstimatedPromptTokens int        `json:"estimated_prompt_tokens"`
+	Estimated             bool       `json:"estimated"`
+	NCtx                  int        `json:"n_ctx"`
+	Usage                 ModelUsage `json:"usage"`
+	DurationMS            int64      `json:"duration_ms"`
 }
 
 func New(eventType, sessionID, runID string, data any) Event {

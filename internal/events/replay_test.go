@@ -111,13 +111,15 @@ func TestReplayReconstructsRunAggregatesAndLastStop(t *testing.T) {
 	for _, event := range []Event{
 		{SessionID: "main", Type: ModelResponse},
 		{SessionID: "main", Type: ModelResponse},
+		{SessionID: "main", Type: CompactionSummary, Data: CompactionSummaryData{Dispatched: true, Usage: ModelUsage{PromptTokens: 400, CompletionTokens: 50}}},
+		{SessionID: "main", Type: CompactionSummary, Data: CompactionSummaryData{Dispatched: false, EstimatedPromptTokens: 900}},
 		{SessionID: "main", Type: Compaction, Data: map[string]any{"kind": "elide", "before": 100, "after": 60}},
 		{SessionID: "main", Type: RunStopped, Data: map[string]any{"reason": "tool_errors"}},
 	} {
 		ReduceReplay(sessions, event)
 	}
 	item := sessions["main"]
-	if item.ModelTurns != 2 || item.CompactionCount != 1 || item.CompactionTokenDelta != -40 || item.Run.LastStopReason != "tool_errors" {
+	if item.ModelTurns != 2 || item.CompactionCount != 1 || item.CompactionTokenDelta != -40 || item.CompactionModelCalls != 1 || item.CompactionPrompt != 400 || item.CompactionCompletion != 50 || item.Run.LastStopReason != "tool_errors" {
 		t.Fatalf("replayed aggregates=%+v run=%+v", item, item.Run)
 	}
 }

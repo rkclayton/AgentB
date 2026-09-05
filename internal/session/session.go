@@ -42,6 +42,9 @@ type Snapshot struct {
 	ModelTurns           int              `json:"model_turns"`
 	CompactionCount      int              `json:"compaction_count"`
 	CompactionTokenDelta int              `json:"compaction_token_delta"`
+	CompactionModelCalls int              `json:"compaction_model_calls"`
+	CompactionPrompt     int              `json:"compaction_prompt_tokens"`
+	CompactionCompletion int              `json:"compaction_completion_tokens"`
 }
 type Session struct {
 	ID, Label, ServerID, Workspace string
@@ -63,6 +66,9 @@ type Session struct {
 	modelTurns                     int
 	compactionCount                int
 	compactionTokenDelta           int
+	compactionModelCalls           int
+	compactionPrompt               int
+	compactionCompletion           int
 	mu                             sync.Mutex
 }
 
@@ -76,7 +82,7 @@ func (s *Session) Snapshot(timeline []events.Event) Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name], MarginalTokens: s.MarginalTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, Timeline: timeline, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
@@ -137,6 +143,13 @@ func (s *Session) RecordCompaction(delta int) {
 	s.mu.Lock()
 	s.compactionCount++
 	s.compactionTokenDelta += delta
+	s.mu.Unlock()
+}
+func (s *Session) RecordCompactionModel(prompt, completion int) {
+	s.mu.Lock()
+	s.compactionModelCalls++
+	s.compactionPrompt += prompt
+	s.compactionCompletion += completion
 	s.mu.Unlock()
 }
 func (s *Session) SetToolTokens(schema, marginal map[string]int) {

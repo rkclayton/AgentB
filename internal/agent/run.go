@@ -491,37 +491,6 @@ func (r *Runner) compactToFit(ctx context.Context, s *session.Session, runID str
 	}
 	return changed
 }
-func (r *Runner) summarize(ctx context.Context, s *session.Session, runID string, p *config.Profile) bool {
-	records := s.MessagesCopy()
-	if len(records) <= 7 {
-		return false
-	}
-	messages := []llm.Message{{Role: "system", Content: r.prompt.Render(p, s, r.tools.Names(s.EnabledTools()), s.MemoryBlock)}}
-	for _, message := range records {
-		if message.Elided || (message.Category != "history" && message.Category != "summary") {
-			continue
-		}
-		messages = append(messages, llm.Message{Role: message.Role, Content: message.Content})
-	}
-	messages = append(messages, llm.Message{Role: "user", Content: "Summarize the work so far for your own future reference: the task, files touched and what changed in each, decisions made, and what remains. Under 300 words. No preamble."})
-	summaryProfile := *p
-	summaryProfile.Sampling.Thinking.Temperature = .3
-	summaryProfile.Sampling.Nonthinking.Temperature = .3
-	if len(summaryProfile.Reasoning.ValidEfforts) > 0 {
-		summaryProfile.Reasoning.Effort = summaryProfile.Reasoning.ValidEfforts[0]
-	}
-	response, err := llm.New(&summaryProfile).Chat(ctx, llm.Request{Messages: messages, MaxTokens: 800, Thinking: summaryProfile.Reasoning.Enabled})
-	if err != nil {
-		r.operationalError(s, runID, "compaction_summary", err)
-		return false
-	}
-	message, _ := r.makeMessage(ctx, p, "user", "Progress note (auto-summary of earlier turns):\n"+response.Content, "summary", 0)
-	if !r.compact.Summarize(s, runID, message) {
-		return false
-	}
-	r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
-	return true
-}
 func (r *Runner) operationalError(s *session.Session, runID, where string, err error) {
 	r.bus.Publish(events.New(events.Error, s.ID, runID, map[string]any{"where": where, "message": err.Error()}))
 }

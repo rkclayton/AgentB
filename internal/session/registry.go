@@ -192,6 +192,9 @@ func (r *Registry) Reset(id string) (string, error) {
 	s.modelTurns = 0
 	s.compactionCount = 0
 	s.compactionTokenDelta = 0
+	s.compactionModelCalls = 0
+	s.compactionPrompt = 0
+	s.compactionCompletion = 0
 	s.LogPath = path
 	s.Run = RunState{Status: "idle", MaxTurns: r.maxTurns}
 	if r.memory != nil {
