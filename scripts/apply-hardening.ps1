@@ -39,7 +39,7 @@ function Test-IsAdministrator {
 function Invoke-HardeningScript {
     param([string]$Path, [string[]]$Arguments)
     $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
-    $all = @('-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', $Path) + $Arguments
+    $all = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File', $Path) + $Arguments
     $output = @(& $powershell @all 2>&1 | ForEach-Object { [string]$_ })
     $exitCode = $LASTEXITCODE
     foreach ($line in $output) { Write-Host $line }

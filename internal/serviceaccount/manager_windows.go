@@ -31,7 +31,7 @@ func New(scriptPath string) Manager {
 
 func (m *windowsManager) Status(ctx context.Context, account string) (Status, error) {
 	output, err := exec.CommandContext(ctx, m.powershell,
-		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+		"-NoLogo", "-NoProfile", "-NonInteractive",
 		"-File", m.scriptPath, "-Inspect", "-AccountName", account,
 	).CombinedOutput()
 	if err != nil {
@@ -66,7 +66,7 @@ func (m *windowsManager) Setup(ctx context.Context, account, credentialPath stri
 		return SetupResult{}, fmt.Errorf("service-account credential store is unavailable: %w", err)
 	}
 	arguments := []string{
-		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+		"-NoLogo", "-NoProfile", "-NonInteractive",
 		"-File", scriptPath, "-AccountName", account, "-CredentialStore", credentialPath,
 		"-NoPrompt",
 	}

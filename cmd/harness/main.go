@@ -113,6 +113,7 @@ func main() {
 	fileIdentity := tools.NewFileIdentity(credentialStore)
 	fileIdentity.Configure(*cfg)
 	shellTool := tools.NewShell(cfg.Shell)
+	shellTool.SetFileCoordinator(coordinator)
 	shellTool.Configure(*cfg)
 	shellTool.SetCredentialStore(credentialStore)
 	shellTool.SetIdentityReporter(func(status tools.ShellIdentityStatus) {

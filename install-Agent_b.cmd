@@ -2,7 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\install-Agent_b.ps1"
+powershell.exe -NoLogo -NoProfile -File "%~dp0scripts\install-Agent_b.ps1"
 set "AGENT_B_EXIT=%ERRORLEVEL%"
 echo.
 if "%AGENT_B_EXIT%"=="0" (

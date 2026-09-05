@@ -7,7 +7,7 @@ for %%A in (%*) do (
   if /i "%%~A"=="-Detached" set "AGENT_B_AUTO_CLOSE=1"
 )
 
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\launch-Agent_b.ps1" %*
+powershell.exe -NoLogo -NoProfile -File "%~dp0scripts\launch-Agent_b.ps1" %*
 set "AGENT_B_EXIT=%ERRORLEVEL%"
 if not "%AGENT_B_EXIT%"=="0" (
   echo.

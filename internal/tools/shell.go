@@ -26,6 +26,7 @@ type Shell struct {
 	mu               sync.RWMutex
 	cfg              config.Shell
 	workspace        string
+	fileCoordinator  *FileCoordinator
 	credential       shellCredentialReader
 	startService     serviceProcessStarter
 	identityMu       sync.RWMutex
@@ -55,7 +56,7 @@ func NewShell(cfg config.Shell) *Shell {
 }
 func (*Shell) Name() string { return "shell" }
 func (*Shell) Description() string {
-	return "Run an unconfined command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation."
+	return "Run an unconfined inline command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation. Script artifacts written by an agent cannot be executed."
 }
 func (s *Shell) Schema() map[string]any {
 	cfg := s.config()
@@ -83,6 +84,9 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 	command, ok := args["command"].(string)
 	if !ok || strings.TrimSpace(command) == "" {
 		return CallDetail{Err: fmt.Errorf("command is required")}
+	}
+	if reason := forbiddenShellCommand(command, item, s.fileCoordinatorSnapshot()); reason != "" {
+		return CallDetail{Err: fmt.Errorf("command blocked: %s", reason)}
 	}
 	if cfg.FileRoutingGuardEnabled() {
 		refusal, ambiguous := inspectShellFileRouting(command)
@@ -286,6 +290,18 @@ func (s *Shell) SetCredentialStore(reader shellCredentialReader) {
 	s.mu.Lock()
 	s.credential = reader
 	s.mu.Unlock()
+}
+
+func (s *Shell) SetFileCoordinator(coordinator *FileCoordinator) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fileCoordinator = coordinator
+}
+
+func (s *Shell) fileCoordinatorSnapshot() *FileCoordinator {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.fileCoordinator
 }
 
 func (s *Shell) SetIdentityReporter(reporter func(ShellIdentityStatus)) {
@@ -511,6 +527,259 @@ func classifyShellSegment(words []string) shellSegmentKind {
 
 func shellCommandName(value string) string {
 	return strings.ToLower(strings.TrimSuffix(pathpkg.Base(strings.ReplaceAll(value, `\`, "/")), ".exe"))
+}
+
+func forbiddenShellCommand(command string, item *session.Session, coordinator *FileCoordinator) string {
+	if requestsExecutionPolicyBypass(command) {
+		return "PowerShell execution-policy bypass is forbidden"
+	}
+	if shellWritesScriptArtifact(command) {
+		return "writing executable script artifacts through shell is forbidden; use write_file or edit_file"
+	}
+	for _, candidate := range shellScriptExecutions(command) {
+		if item == nil {
+			return "script-file execution without session provenance is forbidden; pass the command body inline"
+		}
+		resolved, ok := literalShellPath(item.Workspace, candidate)
+		if !ok {
+			return "script-file execution with a non-literal path is forbidden; pass the command body inline"
+		}
+		if coordinator == nil || coordinator.wasAgentWritten(item, resolved) {
+			return "an agent-written script file cannot be executed; pass the command body inline"
+		}
+	}
+	return ""
+}
+
+func requestsExecutionPolicyBypass(command string) bool {
+	normalized := strings.NewReplacer(
+		"\"", " ", "'", " ", "`", " ", ":", " ", "=", " ",
+		"(", " ", ")", " ", "{", " ", "}", " ", "[", " ", "]", " ",
+		";", " ", "|", " ", "&", " ", ",", " ",
+	).Replace(strings.ToLower(command))
+	tokens := strings.Fields(normalized)
+	options := map[string]bool{
+		"-executionpolicy": true, "/executionpolicy": true,
+		"-ep": true, "/ep": true, "-exec": true, "/exec": true,
+	}
+	for index, token := range tokens {
+		if options[token] && index+1 < len(tokens) && tokens[index+1] == "bypass" {
+			return true
+		}
+	}
+	return false
+}
+
+func shellWritesScriptArtifact(command string) bool {
+	lower := strings.ToLower(command)
+	if !containsScriptSuffix(lower) {
+		return false
+	}
+	for _, marker := range []string{
+		"set-content", "add-content", "out-file", "writealltext", "writeallbytes",
+		"new-item", "copy-item", "move-item", "invoke-webrequest", "curl ", "curl.exe",
+		"wget ", "wget.exe", " -outfile", "tee ",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return redirectsToScriptArtifact(command)
+}
+
+func redirectsToScriptArtifact(command string) bool {
+	words := shellPolicyTokens(command)
+	for index, word := range words {
+		redirect := strings.LastIndex(word, ">")
+		if redirect < 0 {
+			continue
+		}
+		target := strings.TrimLeft(word[redirect+1:], ">")
+		if target == "" && index+1 < len(words) {
+			target = words[index+1]
+		}
+		if hasScriptSuffix(target, ".ps1", ".psm1", ".cmd", ".bat", ".vbs", ".wsf", ".sh") {
+			return true
+		}
+	}
+	return false
+}
+
+func containsScriptSuffix(value string) bool {
+	for _, suffix := range []string{".ps1", ".psm1", ".bat", ".cmd", ".vbs", ".wsf", ".sh"} {
+		if strings.Contains(value, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func shellScriptExecutions(command string) []string {
+	return shellScriptExecutionsDepth(command, 0)
+}
+
+func shellScriptExecutionsDepth(command string, depth int) []string {
+	if depth > 2 {
+		return nil
+	}
+	var candidates []string
+	lower := strings.ToLower(command)
+	if strings.Contains(lower, "invoke-expression") || strings.Contains(lower, "iex ") ||
+		strings.Contains(lower, "[scriptblock]::create") {
+		for _, word := range shellPolicyTokens(command) {
+			word = cleanShellScriptToken(word)
+			if hasScriptSuffix(word, ".ps1", ".psm1", ".cmd", ".bat", ".vbs", ".wsf", ".sh") {
+				candidates = append(candidates, word)
+			}
+		}
+	}
+	for _, segment := range splitShellCommands(command) {
+		words := shellWords(segment)
+		if len(words) == 0 {
+			continue
+		}
+		for len(words) > 0 && (words[0] == "&" || words[0] == "." || strings.EqualFold(words[0], "call")) {
+			words = words[1:]
+		}
+		if len(words) == 0 {
+			continue
+		}
+		name := shellCommandName(words[0])
+		if scriptSuffixForInterpreter(name, words[0]) {
+			candidates = append(candidates, cleanShellScriptToken(words[0]))
+			continue
+		}
+		switch name {
+		case "powershell", "pwsh":
+			for index := 1; index < len(words); index++ {
+				word := cleanShellScriptToken(words[index])
+				if strings.EqualFold(word, "-command") || strings.EqualFold(word, "/command") || strings.EqualFold(word, "-c") {
+					if index+1 < len(words) {
+						candidates = append(candidates, shellScriptExecutionsDepth(strings.Join(words[index+1:], " "), depth+1)...)
+					}
+					break
+				}
+				if strings.EqualFold(word, "-file") || strings.EqualFold(word, "/file") || strings.EqualFold(word, "-f") {
+					if index+1 < len(words) {
+						candidates = append(candidates, cleanShellScriptToken(words[index+1]))
+					}
+					break
+				}
+				if hasScriptSuffix(word, ".ps1", ".psm1") {
+					candidates = append(candidates, word)
+					break
+				}
+			}
+		case "cmd":
+			for index, word := range words[1:] {
+				word = cleanShellScriptToken(word)
+				if (strings.EqualFold(word, "/c") || strings.EqualFold(word, "/k")) && index+2 < len(words) {
+					candidates = append(candidates, shellScriptExecutionsDepth(strings.Join(words[index+2:], " "), depth+1)...)
+					break
+				}
+				if hasScriptSuffix(word, ".cmd", ".bat") {
+					candidates = append(candidates, word)
+					break
+				}
+			}
+		case "wscript", "cscript":
+			for _, word := range words[1:] {
+				word = cleanShellScriptToken(word)
+				if hasScriptSuffix(word, ".vbs", ".wsf") {
+					candidates = append(candidates, word)
+					break
+				}
+			}
+		case "sh", "bash", "zsh":
+			for _, word := range words[1:] {
+				word = cleanShellScriptToken(word)
+				if hasScriptSuffix(word, ".sh") {
+					candidates = append(candidates, word)
+					break
+				}
+			}
+		case "start-process":
+			for _, word := range words[1:] {
+				word = cleanShellScriptToken(word)
+				if hasScriptSuffix(word, ".ps1", ".psm1", ".cmd", ".bat", ".vbs", ".wsf", ".sh") {
+					candidates = append(candidates, word)
+					break
+				}
+			}
+		}
+	}
+	return candidates
+}
+
+func splitShellCommands(command string) []string {
+	var segments []string
+	var current strings.Builder
+	var quote rune
+	for _, char := range command {
+		switch {
+		case quote != 0 && char == quote:
+			quote = 0
+			current.WriteRune(char)
+		case quote != 0:
+			current.WriteRune(char)
+		case char == '\'' || char == '"':
+			quote = char
+			current.WriteRune(char)
+		case char == ';' || char == '|' || char == '&' || char == '\n' || char == '\r':
+			if strings.TrimSpace(current.String()) != "" {
+				segments = append(segments, current.String())
+			}
+			current.Reset()
+		default:
+			current.WriteRune(char)
+		}
+	}
+	if strings.TrimSpace(current.String()) != "" {
+		segments = append(segments, current.String())
+	}
+	return segments
+}
+
+func shellPolicyTokens(command string) []string {
+	var tokens []string
+	for _, segment := range splitShellCommands(command) {
+		tokens = append(tokens, shellWords(segment)...)
+	}
+	return tokens
+}
+
+func cleanShellScriptToken(value string) string {
+	return strings.Trim(value, "'\"`(){}[],;")
+}
+
+func hasScriptSuffix(value string, suffixes ...string) bool {
+	lower := strings.ToLower(cleanShellScriptToken(value))
+	for _, suffix := range suffixes {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func scriptSuffixForInterpreter(name, value string) bool {
+	return hasScriptSuffix(value, ".ps1", ".psm1", ".cmd", ".bat", ".vbs", ".wsf", ".sh") && name != ""
+}
+
+func literalShellPath(workspace, value string) (string, bool) {
+	value = cleanShellScriptToken(value)
+	if value == "" || strings.ContainsAny(value, "$%*?`") {
+		return "", false
+	}
+	value = filepath.FromSlash(value)
+	if !filepath.IsAbs(value) {
+		value = filepath.Join(workspace, value)
+	}
+	absolute, err := filepath.Abs(value)
+	if err != nil {
+		return "", false
+	}
+	return filepath.Clean(absolute), true
 }
 
 // shellWords only separates a pipeline segment into quote-aware words. It does

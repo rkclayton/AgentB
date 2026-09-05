@@ -188,7 +188,7 @@ if (-not $TestMode) {
 
 if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $TestMode) {
     $arguments = @(
-        '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
+        '-NoLogo', '-NoProfile', '-File', $PSCommandPath,
         '-SourceDirectory', $sourceRoot,
         '-ApplicationDirectory', $applicationRoot,
         '-DataDirectory', $dataRoot,
@@ -288,7 +288,7 @@ $shortcut.Save()
 $uninstallScript = Join-Path $applicationRoot 'scripts\uninstall-Agent_b.ps1'
 $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 $uninstallArguments = @(
-    '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $uninstallScript,
+    '-NoLogo', '-NoProfile', '-File', $uninstallScript,
     '-ApplicationDirectory', $applicationRoot,
     '-DataDirectory', $dataRoot,
     '-WorkspaceDirectory', $workspaceRoot,

@@ -52,6 +52,14 @@ func (c *FileCoordinator) record(s *session.Session, resolved string) {
 	c.workspaces.RecordWrite(s.Workspace, rel, s.ID)
 }
 
+func (c *FileCoordinator) wasAgentWritten(s *session.Session, resolved string) bool {
+	if c == nil || s == nil {
+		return false
+	}
+	_, ok := c.workspaces.LastWriter(s.Workspace, workspaceRel(s.Workspace, resolved))
+	return ok
+}
+
 type WriteFile struct{ coordinator *FileCoordinator }
 
 func NewWriteFile(c *FileCoordinator) *WriteFile { return &WriteFile{coordinator: c} }

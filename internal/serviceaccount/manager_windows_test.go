@@ -50,7 +50,7 @@ func TestPowerShellReadsGoDPAPICredentialWithoutExposingIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	powershell := New(script).(*windowsManager).powershell
-	output, err := exec.Command(powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-ValidateCredentialStore", "-CredentialStore", store.Path()).CombinedOutput()
+	output, err := exec.Command(powershell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", script, "-ValidateCredentialStore", "-CredentialStore", store.Path()).CombinedOutput()
 	if err != nil {
 		t.Fatalf("credential bridge failed: %v: %s", err, output)
 	}

@@ -63,16 +63,16 @@ func ToolDefinitions() []ToolDefinition {
 		tool("list_dir", "List a workspace directory, one entry per line, directories end with /. Skips .git and build folders.", map[string]any{
 			"path": map[string]any{"type": "string", "default": "."}, "depth": map[string]any{"type": "integer", "default": 1, "maximum": 3},
 		}, nil),
-		tool("write_file", "Create or overwrite a file with the given content, creating parent folders. For changes inside an existing file use edit_file.", map[string]any{
+		tool("write_file", "Create or overwrite a non-script file with the given content, creating parent folders. Executable script artifacts are refused. For changes inside an existing file use edit_file.", map[string]any{
 			"path": stringValue(), "content": stringValue(),
 		}, []string{"path", "content"}),
-		tool("edit_file", "Replace exactly one occurrence of old_string with new_string. old_string must match the file text exactly, including indentation, and must be unique; include surrounding lines if needed. Returns what changed, or an error naming the closest match.", map[string]any{
+		tool("edit_file", "Replace exactly one occurrence in a non-script file. Executable script artifacts are refused. old_string must match exactly and uniquely.", map[string]any{
 			"path": stringValue(), "old_string": stringValue(), "new_string": stringValue(),
 		}, []string{"path", "old_string", "new_string"}),
 		tool("search_text", "Search local file contents under path for pattern, optionally filtering filenames with glob. Unlike find_files, it returns matching text lines.", map[string]any{
 			"pattern": stringValue(), "path": map[string]any{"type": "string", "default": "."}, "glob": stringValue(),
 		}, []string{"pattern"}),
-		tool("shell", "Run a non-interactive shell command from the workspace root with a timeout. Returns the exit code and combined output, cut to head and tail if long.", map[string]any{
+		tool("shell", "Run an inline non-interactive shell command from the workspace root with a timeout. Execution-policy bypass and script-artifact creation are refused.", map[string]any{
 			"command": stringValue(), "timeout_s": map[string]any{"type": "integer", "default": 60},
 		}, []string{"command"}),
 	}
@@ -250,6 +250,9 @@ func (e *ToolExecutor) writeFile(args map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if isExecutableScriptPath(path) {
+		return "", fmt.Errorf("writing executable script artifacts is forbidden")
+	}
 	content, err := requiredString(args, "content")
 	if err != nil {
 		return "", err
@@ -271,6 +274,9 @@ func (e *ToolExecutor) editFile(args map[string]any) (string, error) {
 	path, err := requiredString(args, "path")
 	if err != nil {
 		return "", err
+	}
+	if isExecutableScriptPath(path) {
+		return "", fmt.Errorf("editing executable script artifacts is forbidden")
 	}
 	oldText, err := requiredString(args, "old_string")
 	if err != nil {
@@ -426,6 +432,12 @@ func (e *ToolExecutor) shell(ctx context.Context, args map[string]any) (string, 
 	if err != nil {
 		return "", err
 	}
+	if commandRequestsExecutionPolicyBypass(command) {
+		return "", fmt.Errorf("PowerShell execution-policy bypass is forbidden")
+	}
+	if commandWritesScriptArtifact(command) {
+		return "", fmt.Errorf("writing executable script artifacts through shell is forbidden")
+	}
 	timeoutSeconds := intArg(args, "timeout_s", 60)
 	if timeoutSeconds < 1 || timeoutSeconds > 600 {
 		return "", fmt.Errorf("timeout_s must be between 1 and 600")
@@ -465,6 +477,59 @@ func (e *ToolExecutor) shell(ctx context.Context, args map[string]any) (string, 
 		}
 	}
 	return fmt.Sprintf("exit=%d\n%s", exitCode, boundedOutput(output.String())), nil
+}
+
+func isExecutableScriptPath(path string) bool {
+	lower := strings.ToLower(strings.TrimSpace(path))
+	for _, suffix := range []string{".ps1", ".psm1", ".cmd", ".bat", ".vbs", ".wsf", ".sh"} {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandRequestsExecutionPolicyBypass(command string) bool {
+	normalized := strings.NewReplacer(
+		"\"", " ", "'", " ", "`", " ", ":", " ", "=", " ",
+		"(", " ", ")", " ", "{", " ", "}", " ", "[", " ", "]", " ",
+		";", " ", "|", " ", "&", " ", ",", " ",
+	).Replace(strings.ToLower(command))
+	tokens := strings.Fields(normalized)
+	options := map[string]bool{
+		"-executionpolicy": true, "/executionpolicy": true,
+		"-ep": true, "/ep": true, "-exec": true, "/exec": true,
+	}
+	for index, token := range tokens {
+		if options[token] && index+1 < len(tokens) && tokens[index+1] == "bypass" {
+			return true
+		}
+	}
+	return false
+}
+
+func commandWritesScriptArtifact(command string) bool {
+	lower := strings.ToLower(command)
+	hasScript := false
+	for _, suffix := range []string{".ps1", ".psm1", ".cmd", ".bat", ".vbs", ".wsf", ".sh"} {
+		if strings.Contains(lower, suffix) {
+			hasScript = true
+			break
+		}
+	}
+	if !hasScript {
+		return false
+	}
+	for _, marker := range []string{
+		"set-content", "add-content", "out-file", "writealltext", "writeallbytes",
+		"new-item", "copy-item", "move-item", "invoke-webrequest", "curl ", "curl.exe",
+		"wget ", "wget.exe", " -outfile", "tee ", "cp ", "mv ", ">",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func boundedOutput(value string) string {

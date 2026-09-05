@@ -12,6 +12,7 @@ import (
 
 	"harness/internal/config"
 	"harness/internal/credential"
+	"harness/internal/events"
 	"harness/internal/session"
 )
 
@@ -96,6 +97,99 @@ func TestShellServiceAccountSpawnFailureRequiresOperatorApproval(t *testing.T) {
 	}
 	if _, err := time.Parse(time.RFC3339, reported.Since); err != nil {
 		t.Fatalf("alarm timestamp = %q: %v", reported.Since, err)
+	}
+}
+
+func TestShellRejectsExecutionPolicyBypassBeforeProcessStart(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root)
+	cfg.Shell.ServiceAccount.Enabled = true
+	fileRoutingGuard := false
+	cfg.Shell.FileRoutingGuard = &fileRoutingGuard
+	shell := NewShell(cfg.Shell)
+	shell.Configure(cfg)
+	shell.SetCredentialStore(presentShellCredential{})
+	started := false
+	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
+		started = true
+		return completedShellProcess{}, nil
+	}
+	s := &session.Session{ID: "test", Workspace: root}
+	for _, command := range []string{
+		`powershell -ExecutionPolicy Bypass -File temp.ps1`,
+		`pwsh -ep:bypass -Command "Write-Output unsafe"`,
+		`powershell /ExecutionPolicy=Bypass -Command "Write-Output unsafe"`,
+		`powershell -Command "powershell -ep bypass -Command hidden"`,
+	} {
+		detail := shell.CallDetailed(context.Background(), s, map[string]any{"command": command})
+		if detail.Err == nil || !strings.Contains(strings.ToLower(detail.Err.Error()), "execution-policy bypass") {
+			t.Fatalf("command %q detail = %+v", command, detail)
+		}
+	}
+	if started {
+		t.Fatal("a rejected bypass command started a process")
+	}
+}
+
+func TestShellRejectsAgentWrittenScriptButAllowsExistingScript(t *testing.T) {
+	root := t.TempDir()
+	workspaces := session.NewWorkspaceRegistry()
+	coordinator := NewFileCoordinator(workspaces, func(string) string { return "test" }, events.NewBus())
+	s := &session.Session{ID: "test", Workspace: root, LastSeen: map[string]time.Time{}}
+	writer := NewWriteFile(coordinator)
+	if _, err := writer.Call(context.Background(), s, map[string]any{"path": "generated.ps1", "content": "Write-Output generated"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "existing.ps1"), []byte("Write-Output existing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Defaults(root)
+	cfg.Shell.ServiceAccount.Enabled = true
+	fileRoutingGuard := false
+	cfg.Shell.FileRoutingGuard = &fileRoutingGuard
+	shell := NewShell(cfg.Shell)
+	shell.Configure(cfg)
+	shell.SetCredentialStore(presentShellCredential{})
+	shell.SetFileCoordinator(coordinator)
+	starts := 0
+	shell.startService = func(string, []string, string, []string, config.ShellServiceAccount, []byte, *lockedBuffer) (runningShellProcess, error) {
+		starts++
+		return completedShellProcess{}, nil
+	}
+
+	for _, command := range []string{
+		`powershell -File generated.ps1`,
+		`powershell -Command "& .\generated.ps1"`,
+		`& .\generated.ps1`,
+		`. .\generated.ps1`,
+		`Get-Content generated.ps1 | Invoke-Expression`,
+	} {
+		blocked := shell.CallDetailed(context.Background(), s, map[string]any{"command": command})
+		if blocked.Err == nil || !strings.Contains(strings.ToLower(blocked.Err.Error()), "agent-written script") || starts != 0 {
+			t.Fatalf("command=%q detail=%+v starts=%d", command, blocked, starts)
+		}
+	}
+	allowed := shell.CallDetailed(context.Background(), s, map[string]any{"command": `powershell -File existing.ps1 2> existing-errors.txt`})
+	if allowed.Err != nil || starts != 1 {
+		t.Fatalf("existing script detail=%+v starts=%d", allowed, starts)
+	}
+}
+
+func TestShellRejectsScriptArtifactCreation(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.Defaults(root)
+	shell := NewShell(cfg.Shell)
+	for _, command := range []string{
+		`Set-Content -LiteralPath temp.ps1 -Value unsafe`,
+		`curl.exe https://example.com/tool.cmd -o tool.cmd`,
+		`"echo unsafe" > temp.bat`,
+		`echo unsafe>temp.ps1`,
+	} {
+		detail := shell.CallDetailed(context.Background(), &session.Session{ID: "test", Workspace: root}, map[string]any{"command": command})
+		if detail.Err == nil || !strings.Contains(strings.ToLower(detail.Err.Error()), "script artifacts") {
+			t.Fatalf("command %q detail = %+v", command, detail)
+		}
 	}
 }
 

@@ -125,7 +125,7 @@ if (-not $TestMode) {
 
 if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $TestMode) {
     $arguments = @(
-        '-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath,
+        '-NoLogo', '-NoProfile', '-File', $PSCommandPath,
         '-ApplicationDirectory', $applicationRoot,
         '-DataDirectory', $dataRoot,
         '-WorkspaceDirectory', $workspaceRoot,

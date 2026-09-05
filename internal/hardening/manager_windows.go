@@ -71,7 +71,7 @@ func inspectComponent(ctx context.Context, powershell, script, marker string, ar
 	if err != nil {
 		return ComponentStatus{}, err
 	}
-	args := []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", absolute}
+	args := []string{"-NoLogo", "-NoProfile", "-NonInteractive", "-File", absolute}
 	args = append(args, arguments...)
 	command := exec.CommandContext(ctx, powershell, args...)
 	command.Env = systemPowerShellEnvironment(os.Environ(), powershell)
@@ -107,7 +107,7 @@ func (m *windowsManager) Run(ctx context.Context, action string, request Request
 		return RunResult{}, fmt.Errorf("resolve hardening script: %w", err)
 	}
 	arguments := []string{
-		"-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+		"-NoLogo", "-NoProfile", "-NonInteractive",
 		"-File", script,
 		"-Mode", mode,
 		"-AccountName", request.AccountName,

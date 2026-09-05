@@ -34,7 +34,7 @@ if (-not (Test-Path -LiteralPath $startScript -PathType Leaf)) {
 $logDirectory = Split-Path -Parent $LogFile
 if ($logDirectory) { New-Item -ItemType Directory -Force -Path $logDirectory | Out-Null }
 
-$arguments = '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "{0}" -BIND_ADDRESS "{1}" -PORT {2} -LOG_FILE "{3}"' -f `
+$arguments = '-NoProfile -NonInteractive -File "{0}" -BIND_ADDRESS "{1}" -PORT {2} -LOG_FILE "{3}"' -f `
     $startScript, $BindAddress, $Port, $LogFile
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument $arguments -WorkingDirectory $RepoRoot
 $trigger = New-ScheduledTaskTrigger -AtStartup

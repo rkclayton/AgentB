@@ -47,7 +47,7 @@ function Start-CanaryServer {
     Stop-CanaryServer
     $log = Join-Path $runsRoot "$Name-server.log"
     $arguments = @(
-        '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+        '-NoProfile', '-NonInteractive',
         '-File', $startScript,
         '-MODEL_PATH', $Model,
         '-CTX', [string]$Context,

@@ -22,7 +22,7 @@ function Assert-TemporaryTestPath {
 }
 
 try {
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
+    & powershell.exe -NoLogo -NoProfile -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
     if ($LASTEXITCODE -ne 0) { throw "First install exited $LASTEXITCODE." }
     foreach ($path in @(
         (Join-Path $testApplication 'Agent_b.exe'),
@@ -33,7 +33,7 @@ try {
     )) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing installed file: $path" }
     }
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $testApplication 'scripts\launch-Agent_b.ps1') -ApplicationDirectory $testApplication -DataDirectory $testData -ConfigPath (Join-Path $testData 'harness.json') -Check
+    & powershell.exe -NoLogo -NoProfile -File (Join-Path $testApplication 'scripts\launch-Agent_b.ps1') -ApplicationDirectory $testApplication -DataDirectory $testData -ConfigPath (Join-Path $testData 'harness.json') -Check
     if ($LASTEXITCODE -ne 0) { throw "Installed launcher check exited $LASTEXITCODE." }
 
     $launcherSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'scripts\launch-Agent_b.ps1')
@@ -131,7 +131,7 @@ try {
 
     $savedErrorAction = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $uninstaller -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -ExpectedOperatorSid 'S-1-5-18' -ExpectedOperatorLocalAppData ([Environment]::GetFolderPath('LocalApplicationData')) -Quiet -PurgeData -TestMode 2>$null
+    & powershell.exe -NoLogo -NoProfile -File $uninstaller -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -ExpectedOperatorSid 'S-1-5-18' -ExpectedOperatorLocalAppData ([Environment]::GetFolderPath('LocalApplicationData')) -Quiet -PurgeData -TestMode 2>$null
     $wrongPurgeExit = $LASTEXITCODE
     $ErrorActionPreference = $savedErrorAction
     if ($wrongPurgeExit -eq 0 -or -not (Test-Path -LiteralPath $configPath -PathType Leaf) -or -not (Test-Path -LiteralPath $workspaceMarker -PathType Leaf)) {
@@ -153,7 +153,7 @@ try {
     $staleFile = Join-Path $webDirectory 'stale-upgrade-test.txt'
     Set-Content -LiteralPath $staleFile -Value 'removed by upgrade'
 
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
+    & powershell.exe -NoLogo -NoProfile -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
     if ($LASTEXITCODE -ne 0) { throw "Upgrade exited $LASTEXITCODE." }
     if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -ne $configHash) {
         throw 'Upgrade changed the installed connection configuration.'
@@ -168,7 +168,7 @@ try {
         throw 'Upgrade retained a stale program file.'
     }
 
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $uninstaller -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -ExpectedOperatorSid ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) -ExpectedOperatorLocalAppData ([Environment]::GetFolderPath('LocalApplicationData')) -Quiet -TestMode
+    & powershell.exe -NoLogo -NoProfile -File $uninstaller -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -ExpectedOperatorSid ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) -ExpectedOperatorLocalAppData ([Environment]::GetFolderPath('LocalApplicationData')) -Quiet -TestMode
     if ($LASTEXITCODE -ne 0) { throw "Preserving uninstall exited $LASTEXITCODE." }
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf) -or
         -not (Test-Path -LiteralPath $credentialPath -PathType Leaf) -or
@@ -179,13 +179,13 @@ try {
         throw 'Preserving uninstall did not keep only local data.'
     }
 
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
+    & powershell.exe -NoLogo -NoProfile -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
     if ($LASTEXITCODE -ne 0) { throw "Reinstall exited $LASTEXITCODE." }
     if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -ne $configHash) {
         throw 'Reinstall changed preserved connection configuration.'
     }
 
-    & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File $uninstaller -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -ExpectedOperatorSid ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) -ExpectedOperatorLocalAppData ([Environment]::GetFolderPath('LocalApplicationData')) -Quiet -PurgeData -TestMode
+    & powershell.exe -NoLogo -NoProfile -File $uninstaller -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -ExpectedOperatorSid ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) -ExpectedOperatorLocalAppData ([Environment]::GetFolderPath('LocalApplicationData')) -Quiet -PurgeData -TestMode
     if ($LASTEXITCODE -ne 0) { throw "Purging uninstall exited $LASTEXITCODE." }
     if ((Test-Path -LiteralPath $testApplication) -or
         (Test-Path -LiteralPath $testData) -or

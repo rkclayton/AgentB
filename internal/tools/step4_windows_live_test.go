@@ -6,6 +6,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -43,7 +44,10 @@ func TestStep4LiveThreeRootShell(t *testing.T) {
 
 	workspaceMarker := filepath.Join(workspaceRoot, "service-write.txt")
 	detail := shell.CallDetailed(context.Background(), s, map[string]any{
-		"command": "whoami; Set-Content -LiteralPath " + quotePowerShell(workspaceMarker) + " -Value verified -ErrorAction Stop; (Get-Location).Path",
+		"command": "$self = Get-CimInstance Win32_Process -Filter (\"ProcessId=$PID\"); " +
+			"Write-Output (\"child_pid=$PID\"); Write-Output (\"parent_pid=\" + $self.ParentProcessId); " +
+			"Write-Output (\"child_name=\" + $self.Name); whoami; Set-Content -LiteralPath " +
+			quotePowerShell(workspaceMarker) + " -Value verified -ErrorAction Stop; (Get-Location).Path",
 	})
 	if detail.Err != nil || detail.OperatorOverrideReason != "" {
 		t.Fatalf("service shell in relocated workspace failed: %+v", detail)
@@ -51,6 +55,10 @@ func TestStep4LiveThreeRootShell(t *testing.T) {
 	if !strings.Contains(strings.ToLower(detail.Content), "\\"+strings.ToLower(account)) || !strings.Contains(detail.Content, workspaceRoot) {
 		t.Fatalf("service shell did not report expected identity/workspace: %q", detail.Content)
 	}
+	if !strings.Contains(detail.Content, "parent_pid="+strconv.Itoa(os.Getpid())) || !strings.Contains(strings.ToLower(detail.Content), "child_name=powershell.exe") {
+		t.Fatalf("service shell was not a direct PowerShell child of the harness process: %q", detail.Content)
+	}
+	t.Log(strings.TrimSpace(detail.Content))
 	if body, err := os.ReadFile(workspaceMarker); err != nil || strings.TrimSpace(string(body)) != "verified" {
 		t.Fatalf("workspace marker = %q, %v", body, err)
 	}
