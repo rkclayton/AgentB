@@ -19,11 +19,6 @@ type ReplayTool struct {
 	MarginalTokens int    `json:"marginal_tokens"`
 }
 
-type ReplayTodo struct {
-	Text   string `json:"text"`
-	Status string `json:"status"`
-}
-
 type ReplayRun struct {
 	Status         string `json:"status"`
 	RunID          string `json:"run_id"`
@@ -53,7 +48,6 @@ type ReplaySession struct {
 	ModelTurns           int          `json:"model_turns"`
 	CompactionCount      int          `json:"compaction_count"`
 	CompactionTokenDelta int          `json:"compaction_token_delta"`
-	Todos                []ReplayTodo `json:"todos"`
 }
 
 type Replay struct {
@@ -94,7 +88,7 @@ func LoadReplay(paths []string) (*Replay, error) {
 			id = fmt.Sprintf("%s-%d", base, suffix)
 		}
 		used[id] = true
-		initial := ReplaySession{ID: id, Label: id, Run: ReplayRun{Status: "replay"}, Runnable: true, LogPath: path, Messages: []Message{}, Tools: []ReplayTool{}, Timeline: []Event{}, Todos: []ReplayTodo{}}
+		initial := ReplaySession{ID: id, Label: id, Run: ReplayRun{Status: "replay"}, Runnable: true, LogPath: path, Messages: []Message{}, Tools: []ReplayTool{}, Timeline: []Event{}}
 		for index := range events {
 			if events[index].SessionID == oldID || events[index].SessionID == "" {
 				events[index].SessionID = id
@@ -203,9 +197,6 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 		item.CompactionCount = 0
 		item.CompactionTokenDelta = 0
 		item.Run = ReplayRun{Status: "replay", MaxTurns: item.Run.MaxTurns}
-		if _, recorded := data["todos"]; recorded {
-			_ = decodeReplay(data["todos"], &item.Todos)
-		}
 	case RunQueued:
 		item.Run.RunID = event.RunID
 		item.Run.QueuePosition = replayInt(data["position"])
@@ -301,8 +292,6 @@ func ReduceReplay(sessions map[string]ReplaySession, event Event) {
 	case MemoryNoted:
 		item.MemoryPath = replayString(data["path"])
 		item.MemoryContent = strings.TrimRight(item.MemoryContent, "\r\n") + "\n- " + replayString(data["note"]) + "\n"
-	case TodosUpdated:
-		_ = decodeReplay(data["todos"], &item.Todos)
 	}
 	item.Run.Status = "replay"
 	item.Timeline = append(item.Timeline, event)

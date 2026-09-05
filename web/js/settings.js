@@ -341,7 +341,7 @@ function tools(active) {
     ${number("shell.max_output_lines_head", "head lines", cfg.shell?.max_output_lines_head)}
     ${number("shell.max_output_lines_tail", "tail lines", cfg.shell?.max_output_lines_tail)}
     ${text("shell.deny", "deny", (cfg.shell?.deny || []).join(", "), "list")}
-    ${head("remember")}${head("recall")}${head("fetch_url")}${head("find_files")}${head("write_todos")}`;
+    ${head("remember")}${head("recall")}${head("fetch_url")}${head("find_files")}`;
 }
 
 function memory(active) {

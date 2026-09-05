@@ -45,7 +45,6 @@ const (
 	ApprovalDecided   = "approval.decided"
 	WorkspaceConflict = "workspace.conflict"
 	MemoryNoted       = "memory.noted"
-	TodosUpdated      = "todos.updated"
 	Compaction        = "compaction"
 	BudgetEvent       = "budget"
 )

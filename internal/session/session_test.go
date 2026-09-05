@@ -28,17 +28,3 @@ func TestSnapshotCarriesRunAggregates(t *testing.T) {
 		t.Fatalf("snapshot aggregates=%+v", snapshot)
 	}
 }
-
-func TestSnapshotCarriesIndependentTodoCopy(t *testing.T) {
-	s := &Session{}
-	s.ReplaceTodos([]string{"Inspect", "Verify"})
-	todos, ok := s.UpdateTodo(1, "in progress")
-	if !ok {
-		t.Fatal("todo update failed")
-	}
-	todos[0].Text = "mutated copy"
-	snapshot := s.Snapshot(nil)
-	if len(snapshot.Todos) != 2 || snapshot.Todos[0] != (Todo{Text: "Inspect", Status: "in progress"}) {
-		t.Fatalf("snapshot todos=%+v", snapshot.Todos)
-	}
-}

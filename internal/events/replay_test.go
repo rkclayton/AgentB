@@ -77,15 +77,32 @@ func TestReplayBudgetUpdatesToolCosts(t *testing.T) {
 	}
 }
 
-func TestReplayReconstructsTodosAndCarriesThemAcrossReset(t *testing.T) {
-	sessions := map[string]ReplaySession{"main": {ID: "main"}}
-	ReduceReplay(sessions, Event{SessionID: "main", Type: TodosUpdated, Data: map[string]any{"todos": []map[string]any{{"text": "Build", "status": "in progress"}}}})
-	if got := sessions["main"].Todos; len(got) != 1 || got[0] != (ReplayTodo{Text: "Build", Status: "in progress"}) {
-		t.Fatalf("replayed todos=%+v", got)
+func TestReplayToleratesUnknownEvent(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "removed-event.jsonl")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	ReduceReplay(sessions, Event{SessionID: "main", Type: SessionReset, Data: map[string]any{"todos": []map[string]any{{"text": "Build", "status": "in progress"}}}})
-	if got := sessions["main"].Todos; len(got) != 1 || got[0].Status != "in progress" {
-		t.Fatalf("todos after reset=%+v", got)
+	historicalType := "removed.feature.updated"
+	for _, event := range []Event{
+		{TS: "2026-09-04T00:00:00Z", SessionID: "main", Type: SessionCreated, Data: map[string]any{"session": ReplaySession{ID: "main", Label: "historical", Run: ReplayRun{Status: "idle"}, Runnable: true}}},
+		{TS: "2026-09-04T00:00:01Z", SessionID: "main", Type: historicalType, Data: map[string]any{"items": []map[string]any{{"text": "historical state"}}}},
+	} {
+		if err := json.NewEncoder(file).Encode(event); err != nil {
+			file.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	replay, err := LoadReplay([]string{path})
+	if err != nil {
+		t.Fatalf("historical removed event rejected: %v", err)
+	}
+	item := replay.Sessions["main"]
+	if len(item.Timeline) != 2 || item.Timeline[1].Type != historicalType || item.Label != "historical" {
+		t.Fatalf("historical event replay=%+v", item)
 	}
 }
 

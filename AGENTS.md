@@ -12,7 +12,7 @@
 
 ## Implementation constraints
 - Go 1.24+. Standard library by default; third-party dependencies require an explicit decision recorded in `NOTES.md`. Currently approved: a TLS-fingerprinting HTTP client for the `fetch_url` tool. One process, one binary. Browser code dependency-free.
-- Preserve the contracts in `INTERFACES.md`. Keep tool registration order stable: `read_file`, `list_dir`, `write_file`, `edit_file`, `search_text`, `shell`, `remember`, `recall`, `fetch_url`, `find_files`, `write_todos`.
+- Preserve the contracts in `INTERFACES.md`. Keep tool registration order stable: `read_file`, `list_dir`, `write_file`, `edit_file`, `search_text`, `shell`, `remember`, `recall`, `fetch_url`, `find_files`.
 - Keep model-dependent behavior in server profiles. Degrade honestly from probed capabilities. Never allow silent prompt truncation.
 - Follow the six-color industrial-console design system; avoid cards, decorative motion, extra colors, and unsupported readouts.
 
