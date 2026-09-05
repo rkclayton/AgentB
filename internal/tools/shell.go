@@ -55,8 +55,13 @@ func NewShell(cfg config.Shell) *Shell {
 	return &Shell{cfg: cfg, startService: startServiceAccountProcess}
 }
 func (*Shell) Name() string { return "shell" }
-func (*Shell) Description() string {
-	return "Run an unconfined inline command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation. Script artifacts written by an agent cannot be executed."
+func (s *Shell) Description() string {
+	cfg := s.config()
+	dialect := "the configured shell"
+	if len(cfg.Command) > 0 {
+		dialect = shellDialect(cfg.Command[0])
+	}
+	return "Run an unconfined inline command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation. Script artifacts written by an agent cannot be executed. Use " + dialect + " syntax."
 }
 func (s *Shell) Schema() map[string]any {
 	cfg := s.config()
@@ -527,6 +532,19 @@ func classifyShellSegment(words []string) shellSegmentKind {
 
 func shellCommandName(value string) string {
 	return strings.ToLower(strings.TrimSuffix(pathpkg.Base(strings.ReplaceAll(value, `\`, "/")), ".exe"))
+}
+
+func shellDialect(executable string) string {
+	switch name := shellCommandName(executable); name {
+	case "powershell", "pwsh":
+		return "PowerShell"
+	case "cmd":
+		return "cmd.exe"
+	case "":
+		return "the configured shell"
+	default:
+		return name
+	}
 }
 
 func forbiddenShellCommand(command string, item *session.Session, coordinator *FileCoordinator) string {

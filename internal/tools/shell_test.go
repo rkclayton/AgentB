@@ -34,6 +34,18 @@ type exitedShellProcess struct{ code int }
 func (p exitedShellProcess) Wait() (int, error) { return p.code, nil }
 func (exitedShellProcess) KillTree()            {}
 
+func TestShellDescriptionNamesConfiguredDialect(t *testing.T) {
+	shell := NewShell(config.Shell{Command: []string{`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`}})
+	if got := shell.Description(); !strings.HasSuffix(got, "Use PowerShell syntax.") {
+		t.Fatalf("PowerShell description = %q", got)
+	}
+
+	shell.Configure(config.Config{Shell: config.Shell{Command: []string{"bash", "-c"}}})
+	if got := shell.Description(); !strings.HasSuffix(got, "Use bash syntax.") {
+		t.Fatalf("configured description = %q", got)
+	}
+}
+
 func TestShellFileRoutingRefusals(t *testing.T) {
 	discovery := []string{
 		"ls .", "dir .", "Get-ChildItem .", "gci .", `find . -name "*.go"`,

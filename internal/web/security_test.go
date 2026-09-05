@@ -107,6 +107,9 @@ func TestSnapshotToolInventoryUsesPublicNames(t *testing.T) {
 		if item["description"] == "" {
 			t.Errorf("tool %q has no description", item["name"])
 		}
+		if item["name"] == "shell" && !strings.HasSuffix(item["description"], "Use PowerShell syntax.") {
+			t.Errorf("shell description = %q", item["description"])
+		}
 	}
 	want := []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files"}
 	if !reflect.DeepEqual(names, want) {

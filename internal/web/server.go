@@ -256,6 +256,7 @@ func (s *Server) snapshot() map[string]any {
 }
 func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any {
 	masked := s.ConfigSnapshot().Masked()
+	shellDescription := tools.NewShell(masked.Shell).Description()
 	credentialStatus := credential.Status{}
 	identityStatus := tools.ShellIdentityStatus{}
 	if s.credential != nil {
@@ -275,7 +276,7 @@ func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any 
 			{"name": "write_file", "description": "Create or fully replace the file at path with content, creating parent directories. Unlike edit_file, it writes the whole file."},
 			{"name": "edit_file", "description": "Replace one exact, unique old_string in path with new_string. Unlike write_file, it avoids reproducing the whole file."},
 			{"name": "search_text", "description": "Search local file contents under path for pattern, optionally filtering filenames with glob. Unlike find_files, it returns matching text lines."},
-			{"name": "shell", "description": "Run an unconfined inline command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation. Script artifacts written by an agent cannot be executed."},
+			{"name": "shell", "description": shellDescription},
 			{"name": "remember", "description": "Save note as durable workspace memory for future sessions. Call recall first to avoid duplicates; unlike recall, remember writes."},
 			{"name": "recall", "description": "Read all durable workspace notes; takes no arguments. Use before remember to avoid duplicates; unlike recall, remember never writes."},
 			{"name": "fetch_url", "description": "Fetch untrusted public HTTP(S) text by byte offset and limit. When more is true, pass returned next_offset as offset to advance. Unlike read_file, it uses the network."},
