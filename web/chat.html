@@ -10,26 +10,7 @@
   <link rel="stylesheet" href="/static/css/chat.css">
 </head>
 <body class="chat-page">
-  <header class="chat-header window-titlebar">
-    <div id="chat-binding"></div>
-    <button id="chat-close" class="chat-title-close" type="button" aria-label="Close chat" title="Close chat">×</button>
-    <div class="chat-new-wrap"><button id="chat-new" class="chat-new" type="button" aria-label="New chat" title="New chat">+</button><div id="chat-new-menu" class="chat-new-menu" hidden></div></div>
-    <div class="chat-list-wrap">
-      <button id="chat-list-toggle" class="chat-list-toggle" type="button" aria-expanded="false">▸ chats (0)</button>
-      <div id="chat-list" class="chat-list" hidden></div>
-    </div>
-    <span id="chat-status"></span>
-    <span class="build-identity"><span id="chat-build" title="Build identity"></span><span id="chat-signature-state" class="signature-state" role="img" aria-label="Signature state"></span></span>
-    <span id="connection" role="status"></span>
-    <span id="chat-identity-alarm" class="identity-status" role="status" hidden></span>
-    <nav class="chat-nav" aria-label="Application">
-      <button id="chat-stop" class="stop-sign" type="button" aria-label="Stop" title="Stop"><span aria-hidden="true"></span></button>
-      <button id="chat-operator-status" class="operator-status" type="button" aria-label="Operator mode off" aria-pressed="false" title="Operator mode off"><img src="/static/assets/operator-off-24.png" srcset="/static/assets/operator-off-48.png 2x" width="24" height="24" alt=""></button>
-      <a id="chat-current" class="chat-header-action selected" href="/chat" aria-current="page">Chat</a>
-      <a id="chat-console" class="chat-header-action" href="/">Console</a>
-      <a id="chat-settings" class="chat-icon-button" href="/#settings/servers" aria-label="Settings" title="Settings">⚙</a>
-    </nav>
-  </header>
+  <header id="app-shell" class="app-shell window-titlebar" data-page="chat"></header>
   <div id="chat-budget" class="chat-budget" aria-label="Context budget"><span class="chat-budget-fill"></span><span class="chat-budget-tip"></span></div>
   <main id="chat-log" class="chat-log" tabindex="0" aria-live="polite"></main>
 	<footer class="chat-composer">
@@ -37,7 +18,7 @@
 		<div class="chat-composer-row">
       <input id="chat-file-picker" type="file" multiple hidden>
       <div class="chat-attach-wrap">
-        <button id="chat-attach" class="chat-attach" type="button" aria-label="Attach" title="Attach">📎</button>
+        <button id="chat-attach" class="chat-attach" type="button" aria-label="Attach">📎</button>
         <div id="chat-attach-menu" class="chat-attach-menu" hidden>
           <button id="chat-attach-browse" type="button">Browse…</button>
           <button id="chat-attach-exchange" type="button">From exchange folder</button>
@@ -45,8 +26,9 @@
         </div>
       </div>
       <div id="chat-attachments" class="chat-pending-attachments" aria-live="polite"></div>
-      <textarea id="chat-task" rows="1" aria-label="Task" placeholder="Send a task"></textarea>
-      <button id="chat-send" type="button">Send</button>
+      <textarea id="chat-task" rows="5" aria-label="Task"></textarea>
+      <button id="chat-expand" type="button" aria-label="Expand composer">↥</button>
+      <button id="chat-send" type="button" title="Send · Enter sends · Shift+Enter newline">Send</button>
     </div>
     <div id="chat-notice" class="chat-notice" role="status"></div>
   </footer>

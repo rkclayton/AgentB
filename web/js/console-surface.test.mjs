@@ -5,12 +5,14 @@ import test from "node:test";
 const index = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
 const script = fs.readFileSync(new URL("app.js", import.meta.url), "utf8");
 const styles = fs.readFileSync(new URL("../css/app.css", import.meta.url), "utf8");
+const shell = fs.readFileSync(new URL("shell.js", import.meta.url), "utf8");
+const settings = fs.readFileSync(new URL("settings.js", import.meta.url), "utf8");
 
-test("Console launches Chat without retaining a task composer", () => {
-  assert.match(index, /<a id="chat-launch"[^>]+href="\/chat"/);
+test("Console uses the shared shell without retaining a task composer", () => {
+  assert.match(index, /id="app-shell"[^>]+data-page="console"/);
   assert.doesNotMatch(index, /id="(?:composer|task)"/);
   assert.doesNotMatch(script, /getElementById\("(?:composer|task)"\)/);
-  assert.match(script, /chatLaunch\.href = `\/chat\$\{suffix\}`/);
+  assert.match(shell, /\["chat", "Chat", "\/chat"\]/);
 });
 
 test("Activity uses the full panel height after composer removal", () => {
@@ -20,11 +22,11 @@ test("Activity uses the full panel height after composer removal", () => {
   assert.doesNotMatch(styles, /\.composer(?:\s|\{|\.)/);
 });
 
-test("Console renders the release tag, commit, and signature from the state snapshot", () => {
-  assert.match(index, /id="build-id" class="build-id"/);
-  assert.match(index, /id="signature-state" class="signature-state"/);
-  assert.match(script, /renderBuildHeader\([^;]+store\.build, store\.signature\)/);
-  assert.match(styles, /\.build-id\s*\{[^}]*font-family:\s*"IBM Plex Mono"/s);
+test("Console header omits build identity and Settings owns About", () => {
+  assert.doesNotMatch(index, /build-id|signature-state/);
+  assert.doesNotMatch(script, /renderBuildHeader/);
+  assert.match(settings, /\["about", "About"\]/);
+  assert.match(settings, /function about\(\)/);
 });
 
 test("Console pins the current approval and shows waiting for you in state colour", () => {
@@ -34,4 +36,10 @@ test("Console pins the current approval and shows waiting for you in state colou
 	const flow = fs.readFileSync(new URL("flow.js", import.meta.url), "utf8");
 	assert.match(flow, /session\.pending_approval \? "waiting for you"/);
 	assert.match(flow, /classList\.toggle\("alarm"/);
+});
+
+test("Drop last message is relocated beside the latest History turn and Clear is absent", () => {
+  assert.match(index, /id="drop-last-message"/);
+  assert.match(script, /target\.append\(dropLastMessage\)/);
+  assert.doesNotMatch(index + script, /clear-conversation|Clear conversation|createSessionResetController/);
 });

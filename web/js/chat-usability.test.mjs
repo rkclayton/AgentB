@@ -5,10 +5,12 @@ import test from "node:test";
 const chat = await readFile(new URL("./chat.js", import.meta.url), "utf8");
 const css = await readFile(new URL("../css/chat.css", import.meta.url), "utf8");
 const html = await readFile(new URL("../chat.html", import.meta.url), "utf8");
+const shell = await readFile(new URL("./shell.js", import.meta.url), "utf8");
+const tokens = await readFile(new URL("../css/tokens.css", import.meta.url), "utf8");
 
 test("Chat has fence-only copy and documents composer keys", () => {
   assert.doesNotMatch(chat, /Copy message|messageCopy|assistantCopyText/);
-  assert.match(chat, /Enter sends · Shift\+Enter newline/);
+  assert.match(html, /title="Send · Enter sends · Shift\+Enter newline"/);
 });
 
 test("Chat selection excludes chrome while preserving message content", () => {
@@ -41,7 +43,7 @@ test("Pending approval is pinned above the composer with zero idle space", () =>
 	assert.match(chat, /session\?\.pending_approval \|\| session\?\.pending_repo_policy \? "waiting for you"/);
 	assert.match(chat, /pendingApproval\.hidden = !\(session\?\.pending_approval \|\| session\?\.pending_repo_policy\)/);
 	assert.match(css, /\.pending-approval\[hidden\]\s*\{\s*display:\s*none/);
-	assert.match(css, /#chat-status\.waiting\s*\{\s*color:\s*var\(--alarm\)/);
+	assert.match(tokens, /\.shell-state\.waiting\{color:var\(--alarm\)/);
 });
 
 test("Composer sends during an active run and reports projected queue count", () => {
@@ -50,20 +52,29 @@ test("Composer sends during an active run and reports projected queue count", ()
 	assert.match(chat, /queued \? `queued \(\$\{queued\}\)`/);
 });
 
-test("New, list, and close are Chat lifecycle controls while Clear is absent", () => {
-  assert.match(html, /id="chat-new"/);
-  assert.match(html, /id="chat-list-toggle"/);
-  assert.match(html, /id="chat-close"/);
+test("New, list, close, and rename live in the shared agent-tab shell", () => {
+  assert.match(html, /id="app-shell"[^>]+data-page="chat"/);
+  assert.match(shell, /className = "shell-add"|"shell-add"/);
+  assert.match(shell, /oncontextmenu/);
+  assert.match(shell, /agent-chat-rename/);
   assert.doesNotMatch(html, /chat-clear-conversation|Clear conversation/);
-  assert.match(chat, /source_session_id: source\.id, workspace/);
-  assert.match(chat, /Stop it before closing the chat/);
+  assert.match(shell, /source_session_id: source\.id, workspace/);
+  assert.match(shell, /Stop it before closing the chat/);
 });
 
 test("New chat binds a default, recent, or operator-picked directory", () => {
-  assert.match(html, /id="chat-new-menu"[^>]*hidden/);
-  assert.match(chat, /api\("\/api\/pick-folder",undefined,"GET"\)/);
-  assert.match(chat, /api\("\/api\/pick-folder",\{default:choices\.default\}\)/);
-  assert.match(chat, /session\.workspace_dir \|\| session\.workspace/);
+  assert.match(shell, /addMenu\.hidden = true/);
+  assert.match(shell, /api\("\/api\/pick-folder", undefined, "GET"\)/);
+  assert.match(shell, /api\("\/api\/pick-folder", \{ default: choices\.default \}\)/);
+  assert.match(shell, /session\.workspace_dir \|\| session\.workspace/);
+});
+
+test("Composer is five lines with no placeholder and expands upward", () => {
+  assert.match(html, /textarea id="chat-task" rows="5" aria-label="Task"><\/textarea>/);
+  assert.doesNotMatch(html, /placeholder=/);
+  assert.match(css, /height:\s*112px/);
+  assert.match(css, /\.chat-composer\.expanded textarea[\s\S]*height:\s*min\(50vh, 520px\)/);
+  assert.match(css, /grid-template-columns:\s*24px auto minmax\(0, 1fr\) 24px 72px/);
 });
 
 test("Repository policy is a pinned full-content trust decision", () => {

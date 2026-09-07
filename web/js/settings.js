@@ -1,8 +1,8 @@
 import { api, reduce, setActive, store, subscribe } from "./bus.js";
 
 const sheet = document.getElementById("settings-page");
-const gear = document.getElementById("settings");
-const consoleLaunch = document.getElementById("console-launch");
+let gear;
+let consoleLaunch;
 const expanded = new Set();
 const armed = new Set();
 const drafts = new Map();
@@ -42,11 +42,17 @@ const sectionLabels = [
   ["run", "Run & approval"],
   ["delivery", "Delivery"],
   ["shell", "Security"],
+  ["about", "About"],
   ["session", "Current session"],
 ];
 
 export function initSettings() {
-  gear.addEventListener("click", () => (open ? closeSettings() : openSettings()));
+  gear = document.querySelector(".shell-settings");
+  consoleLaunch = document.querySelector('.shell-page[data-page="console"]');
+  gear.addEventListener("click", (event) => {
+    event.preventDefault();
+    open ? closeSettings() : openSettings();
+  });
   consoleLaunch.addEventListener("click", (event) => {
     event.preventDefault();
     if (open) closeSettings();
@@ -150,6 +156,7 @@ function render() {
     run: () => run(),
     delivery: () => delivery(),
     shell: () => shell(active),
+    about: () => about(),
     session: () => sessionControls(active),
   };
   const label = sectionLabels.find(([id]) => id === activeSection)?.[1] || "Settings";
@@ -394,7 +401,8 @@ function context(active) {
 
 function run() {
   const cfg = store.config;
-  return `${number("run.max_turns", "max turns", cfg.run?.max_turns)}
+  return `${toggle("chat.auto_rename", "auto-name chats every 20 turns", cfg.chat?.auto_rename !== false)}
+    ${number("run.max_turns", "max turns", cfg.run?.max_turns)}
     ${number("run.cycle_window", "cycle window", cfg.run?.cycle_window)}
     <p class="settings-note">0 = off</p>
     ${number("run.max_consecutive_tool_errors", "max tool errors", cfg.run?.max_consecutive_tool_errors)}
@@ -402,6 +410,14 @@ function run() {
     ${approvalChoices(cfg.approval?.mode)}
     <p class="settings-note">With the service identity enabled, run_script still requires confirmation. Shell follows the approval mode; boundary-only runs in-workspace commands silently, while boundary escapes and configured operator commands still ask.</p>
 	${number("run.queue_depth", "queue depth (0 = unbounded)", cfg.run?.queue_depth)}`;
+}
+
+function about() {
+  const build = store.build || {};
+  const tag = build.tag ? (String(build.tag).startsWith("v") ? build.tag : `v${build.tag}`) : "version unknown";
+  const commit = String(build.commit || "unknown").slice(0, 7);
+  return `${row("version", `<code>${html(`${tag} · ${commit}${build.dirty ? " · dirty" : ""}`)}</code>`)}
+    <p class="settings-note">Build and signing details are kept in Settings so the shared application shell stays focused on selection and run state.</p>`;
 }
 
 function workspaces() {

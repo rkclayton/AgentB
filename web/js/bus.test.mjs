@@ -3,8 +3,10 @@ import test from "node:test";
 
 globalThis.document = { hidden: false, getElementById: () => null, addEventListener: () => {} };
 globalThis.window = { addEventListener: () => {} };
+const stored = new Map();
+globalThis.sessionStorage = { getItem: (key) => stored.get(key) || null, setItem: (key, value) => stored.set(key, value) };
 globalThis.EventSource = class { addEventListener() {} };
-const { reduce, store } = await import("./bus.js");
+const { reduce, setSelection, store } = await import("./bus.js");
 
 function snapshot(session = {}) {
   reduce({ type: "snapshot", data: { sessions: { main: { id: "main", cursor: { generation: "g", offset: 10 }, run: { status: "idle" }, tools: [], messages: [], timeline: [], ...session } }, replay: false, servers: [], config: {} } });
@@ -76,4 +78,13 @@ test("queued count reconstructs from projected state", () => {
 	snapshot({ queued_messages: 0 });
 	patch(11, [{ op: "replace", path: "/queued_messages", value: 2 }], 10);
 	assert.equal(store.sessions.main.queued_messages, 2);
+});
+
+test("one agent and chat selection object persists across page loads", () => {
+  snapshot();
+  setSelection("agent_b", "main");
+  assert.deepEqual(store.selection, { agent_id: "agent_b", session_id: "main" });
+  assert.equal(stored.get("agentb.selection"), JSON.stringify(store.selection));
+  reduce({ type: "snapshot", data: { sessions: store.sessions, replay: false, servers: [], config: {} } });
+  assert.deepEqual(store.selection, { agent_id: "agent_b", session_id: "main" });
 });

@@ -12,7 +12,7 @@ export function firstUserLine(session) {
 export function sessionTitle(session) {
   if (!session) return "";
   const profile = session.main_profile || session.server_id || "profile";
-  return `${session.agent_name || profile} · ${profile}`;
+  return session.agent_name || profile;
 }
 
 export function agentAuthor(session, role = "main") {

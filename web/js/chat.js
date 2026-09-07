@@ -1,30 +1,19 @@
-import { api, reduce, setActive, store, subscribe } from "./bus.js";
+import { api, reduce, setSelection, store, subscribe } from "./bus.js";
+import { initShell } from "./shell.js";
 import { renderMarkdown } from "./markdown.js";
 import { operatorLogEntry } from "./operator-log.js";
-import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
 import { createThinkingRenderer } from "./reasoning.js";
-import { renderBuildHeader } from "./build-header.js";
 import { formatDuration } from "./duration.js";
-import { renderStopState } from "./stop-state.js";
 import { createFileChip, fileURL, filesFromResponse, probeFile } from "./deliverables.js";
 import { createApprovalCard } from "./approval.js";
 import { callServiceKey, callServiceStatus } from "./call-service-display.js";
 import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, uploadAttachment } from "./attachment-upload.js";
-import { agentAuthor, chatRowText, closeConfirmText, firstUserLine, isRunning, openSessions, sessionTitle } from "./chat-lifecycle.js";
+import { agentAuthor, openSessions } from "./chat-lifecycle.js";
 
-const binding = document.getElementById("chat-binding");
-const closeCurrent = document.getElementById("chat-close");
-const newChatButton = document.getElementById("chat-new");
-const newChatMenu = document.getElementById("chat-new-menu");
-const chatListToggle = document.getElementById("chat-list-toggle");
-const chatList = document.getElementById("chat-list");
-const status = document.getElementById("chat-status");
-const buildID = document.getElementById("chat-build");
-const stop = document.getElementById("chat-stop");
-const operatorStatus = document.getElementById("chat-operator-status");
 const budget = document.getElementById("chat-budget");
 const log = document.getElementById("chat-log");
 const input = document.getElementById("chat-task");
+const expandComposer = document.getElementById("chat-expand");
 const send = document.getElementById("chat-send");
 const notice = document.getElementById("chat-notice");
 const pendingApproval = document.getElementById("chat-pending-approval");
@@ -36,13 +25,9 @@ const attachExchange = document.getElementById("chat-attach-exchange");
 const exchangeFileList = document.getElementById("chat-exchange-files");
 const filePicker = document.getElementById("chat-file-picker");
 const pendingFiles = document.getElementById("chat-attachments");
-const identityAlarm = document.getElementById("chat-identity-alarm");
-const chatCurrent = document.getElementById("chat-current");
-const consoleButton = document.getElementById("chat-console");
-const settingsButton = document.getElementById("chat-settings");
-const requested = new URLSearchParams(location.search).get("session");
+let requested = new URLSearchParams(location.search).get("session");
+const selectedID = () => store.selection.session_id;
 const expanded = new Set();
-let bound = requested || "";
 let follow = true;
 let page = 0;
 let localNotice = "";
@@ -50,9 +35,9 @@ let localAlarm = false;
 let frame = 0;
 let renderTimer = 0;
 let attachmentsBusy = false;
-let chatListExpanded = false;
 let dragDepth = 0;
 let queuedAttachments = [];
+let composerExpanded = false;
 const attachmentQueues = new Map();
 let lastRender = 0;
 const renderIntervalMS = 50;
@@ -72,7 +57,7 @@ earlierButton.className = "chat-earlier";
 earlierButton.onclick = () => {
   page++;
   follow = false;
-  renderLog(store.sessions[bound]);
+  renderLog(store.sessions[selectedID()]);
 };
 const jumpButton = document.createElement("button");
 jumpButton.type = "button";
@@ -81,34 +66,22 @@ jumpButton.textContent = "Jump to latest";
 jumpButton.onclick = () => {
   follow = true;
   page = 0;
-  renderLog(store.sessions[bound]);
+  renderLog(store.sessions[selectedID()]);
 };
-const operatorControl = createOperatorStatusController(operatorStatus, {
-  identity: () => store.shell_identity,
-  interactive: () => !store.replay,
-  setOperatorContext: (enabled) => api("/api/config", { shell: { operator_context: enabled } }),
-  reportError: (message) => {
-    localNotice = message;
-    localAlarm = true;
-    renderComposer(store.sessions[bound]);
-  },
-});
-chatCurrent.addEventListener("click", (event) => event.preventDefault());
-
-function consoleURL() {
-  const query = new URLSearchParams();
-  if (bound) query.set("session", bound);
-  return `/${query.size ? `?${query}` : ""}`;
-}
+initShell({ page: "chat", reportError: (message) => {
+  localNotice = message;
+  localAlarm = true;
+  renderComposer(store.sessions[selectedID()]);
+} });
 
 subscribe((_state, event) => {
-  if (isOperatorStateEvent(event)) operatorControl.render();
   if (event.type === "snapshot") {
     const open = newestOpenSessions();
-    if (!store.sessions[bound] || store.sessions[bound].closed) changeBound(requested && store.sessions[requested] && !store.sessions[requested].closed ? requested : open[0]?.id || "");
+    if (requested && store.sessions[requested] && !store.sessions[requested].closed) { changeBound(requested); requested = ""; }
+    else if (store.selection.agent_id === "agent_b" && (!store.sessions[selectedID()] || store.sessions[selectedID()].closed)) changeBound(open[0]?.id || "");
   }
-  if (store.sessions[bound]?.closed) changeBound(newestOpenSessions()[0]?.id || "");
-  if (event.session_id && bound && event.session_id !== bound) return;
+  if (store.selection.agent_id === "agent_b" && store.sessions[selectedID()]?.closed) changeBound(newestOpenSessions()[0]?.id || "");
+  if (event.session_id && selectedID() && event.session_id !== selectedID()) return;
   schedule();
 });
 
@@ -126,95 +99,14 @@ function schedule() {
 }
 
 function render() {
-  const session = store.sessions[bound];
-  const query = new URLSearchParams();
-  if (bound) query.set("session", bound);
-  chatCurrent.href = `/chat${query.size ? `?${query}` : ""}`;
-  consoleButton.href = consoleURL();
-  settingsButton.href = `${consoleURL()}#settings/servers`;
-  renderIdentityAlarm();
-  renderBinding(session);
-  renderChatList();
-  renderHeader(session);
+  const session = store.sessions[selectedID()];
   renderBudget(session);
   renderLog(session);
   renderComposer(session);
 }
 
-function renderIdentityAlarm() {
-  const unavailable = store.shell_identity?.operator_approval_required || store.shell_identity?.fallback;
-  operatorControl.render();
-  identityAlarm.hidden = !unavailable;
-  identityAlarm.textContent = unavailable
-    ? `Service identity unavailable · tools require operator approval · ${store.shell_identity.reason}`
-    : "";
-}
-
-function renderBinding(session) {
-	binding.replaceChildren();
-	if (session) {
-		const title = document.createElement("span"); title.textContent = sessionTitle(session);
-		const path = document.createElement("span"); path.className = `chat-workspace ${session.workspace_missing ? "missing" : ""}`; path.textContent = `${session.workspace_dir || session.workspace}${session.workspace_missing ? " · missing" : ""}`;
-		binding.append(title, path);
-	}
-  binding.title = session ? firstUserLine(session) : "";
-  closeCurrent.hidden = !session;
-  closeCurrent.disabled = !session || !!store.replay;
-}
-
 function newestOpenSessions() {
   return openSessions(store.sessions).sort((left, right) => Date.parse(right.created_at || 0) - Date.parse(left.created_at || 0));
-}
-
-function renderChatList() {
-  const sessions = newestOpenSessions();
-  chatListToggle.hidden = sessions.length === 0;
-  chatListToggle.textContent = `${chatListExpanded ? "▾" : "▸"} chats (${sessions.length})`;
-  chatListToggle.setAttribute("aria-expanded", String(chatListExpanded));
-  chatList.hidden = !chatListExpanded;
-  if (!chatListExpanded) {
-    chatList.replaceChildren();
-    return;
-  }
-  chatList.replaceChildren(...sessions.map((session) => {
-    const row = document.createElement("div");
-    row.className = `chat-list-row ${session.id === bound ? "current" : ""}`;
-    const select = document.createElement("button");
-    select.type = "button";
-    select.className = "chat-list-select";
-    const text = chatRowText(session);
-    select.append(document.createTextNode(text.slice(0, -1)));
-    const glyph = document.createElement("span");
-    glyph.className = `chat-state-glyph ${session.run?.status || "idle"}`;
-    glyph.textContent = text.slice(-1);
-    select.append(glyph);
-    select.title = `${firstUserLine(session)} · ${session.run?.status || "idle"}`;
-    select.onclick = () => {
-      chatListExpanded = false;
-      changeBound(session.id);
-      follow = true;
-      page = 0;
-      render();
-    };
-    const close = document.createElement("button");
-    close.type = "button";
-    close.className = "chat-list-close";
-    close.textContent = "×";
-    close.title = "Close chat";
-    close.setAttribute("aria-label", `Close ${firstUserLine(session)}`);
-    close.disabled = !!store.replay;
-    close.onclick = () => void closeChat(session);
-    row.append(select, close);
-    return row;
-  }));
-}
-
-function renderHeader(session) {
-	const waiting = !!(session?.pending_approval || session?.pending_repo_policy);
-	status.textContent = store.replay ? "replay" : waiting ? "waiting for you" : session?.run?.status || "idle";
-	status.classList.toggle("waiting", !store.replay && waiting);
-  renderBuildHeader(buildID, document.getElementById("chat-signature-state"), store.build, store.signature);
-  renderStopState(stop, session, store.replay);
 }
 
 function renderBudget(session) {
@@ -282,13 +174,10 @@ function buildEntries(session) {
 }
 
 function changeBound(value) {
-  if (bound) attachmentQueues.set(bound, queuedAttachments);
-  bound = value;
-  if (bound) setActive(bound);
-  queuedAttachments = attachmentQueues.get(bound) || [];
-  const query = new URLSearchParams(location.search);
-  if (bound) query.set("session", bound); else query.delete("session");
-  history.replaceState(null, "", `/chat${query.size ? `?${query}` : ""}`);
+  const previous = selectedID();
+  if (previous) attachmentQueues.set(previous, queuedAttachments);
+  setSelection("agent_b", value);
+  queuedAttachments = attachmentQueues.get(value) || [];
 }
 
 function groupResponses(entries) {
@@ -589,9 +478,7 @@ function renderComposer(session) {
   send.disabled = !session || !!store.replay;
   input.disabled = !session || !!store.replay;
   attachButton.disabled = !session || !!store.replay || attachmentsBusy;
-  if (store.replay) input.placeholder = "Replay";
-  else if (session?.run.status === "paused") input.placeholder = "paused — waiting for approval";
-  else input.placeholder = "Send a task · Enter sends · Shift+Enter newline";
+  input.removeAttribute("placeholder");
   const queued = session?.queued_messages || 0;
   const message = localNotice || (session && !session.runnable ? session.not_runnable_reason : queued ? `queued (${queued})` : session?.pending_approval || session?.pending_repo_policy ? "waiting for you" : "");
   notice.textContent = message;
@@ -627,73 +514,11 @@ function createPolicyCard(session) {
 async function decidePolicy(session, action) {
 	const policy=session.pending_repo_policy; if(!policy||store.replay)return;
 	try { await api(`/api/workspaces/${action}`,{dir:session.workspace_dir||session.workspace,hash:policy.hash,session_id:session.id}); reduce({type:"snapshot",data:await api("/api/state",undefined,"GET")}); localNotice="";localAlarm=false;render() }
-	catch(error){localNotice=error.message||String(error);localAlarm=true;renderComposer(store.sessions[bound])}
-}
-
-async function createNewChat(workspace) {
-  if (store.replay) return;
-  const source = store.sessions[bound] || Object.values(store.sessions).sort((left, right) => Date.parse(right.created_at || 0) - Date.parse(left.created_at || 0))[0];
-  if (!source) {
-    localNotice = "No session template is available.";
-    localAlarm = true;
-    return renderComposer(undefined);
-  }
-  try {
-    const result = await api("/api/sessions", { source_session_id: source.id, workspace });
-    reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
-    changeBound(result.session.id);
-    chatListExpanded = false;
-    localNotice = "";
-    localAlarm = false;
-    follow = true;
-    page = 0;
-    render();
-    input.focus();
-  } catch (error) {
-    localNotice = error.message || String(error);
-    localAlarm = true;
-    renderComposer(store.sessions[bound]);
-  }
-}
-
-async function newChat() {
-	if(store.replay)return;
-	try {
-		const choices=await api("/api/pick-folder",undefined,"GET");
-		newChatMenu.replaceChildren();
-		const add=(label,path)=>{const button=document.createElement("button");button.type="button";button.textContent=label;button.title=path;button.onclick=()=>{newChatMenu.hidden=true;void createNewChat(path)};newChatMenu.append(button)};
-		add(`Default · ${choices.default}`,choices.default);
-		for(const item of (choices.recent||[]).filter(item=>item.dir&&item.dir.toLowerCase()!==String(choices.default).toLowerCase()).slice(0,6))add(item.dir,item.dir);
-		const browse=document.createElement("button");browse.type="button";browse.textContent="Browse…";browse.onclick=async()=>{newChatMenu.hidden=true;try{const selected=await api("/api/pick-folder",{default:choices.default});await createNewChat(selected.workspace_dir)}catch(error){if(!String(error.message).includes("canceled")){localNotice=error.message;localAlarm=true;renderComposer(store.sessions[bound])}}};newChatMenu.append(browse);
-		newChatMenu.hidden=false;
-	}catch(error){localNotice=error.message||String(error);localAlarm=true;renderComposer(store.sessions[bound])}
-}
-
-async function closeChat(session) {
-  if (!session || store.replay) return;
-  if (isRunning(session)) {
-    localNotice = "This chat has a running run. Stop it before closing the chat.";
-    localAlarm = true;
-    return renderComposer(store.sessions[bound]);
-  }
-  if (!window.confirm(closeConfirmText(session))) return;
-  try {
-    await api(`/api/sessions/${encodeURIComponent(session.id)}`, undefined, "DELETE");
-    reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
-    if (bound === session.id) changeBound(newestOpenSessions()[0]?.id || "");
-    chatListExpanded = false;
-    localNotice = "";
-    localAlarm = false;
-    render();
-  } catch (error) {
-    localNotice = error.message || String(error);
-    localAlarm = true;
-    renderComposer(store.sessions[bound]);
-  }
+	catch(error){localNotice=error.message||String(error);localAlarm=true;renderComposer(store.sessions[selectedID()])}
 }
 
 async function submit() {
-  const session = store.sessions[bound];
+  const session = store.sessions[selectedID()];
   if (!session || store.replay) return;
   const text = input.value.trim();
   if (!text && !queuedAttachments.length) return;
@@ -701,7 +526,7 @@ async function submit() {
 		await api("/api/message", { session_id: session.id, text, attachments: queuedAttachments.map(attachmentMetadata) });
     input.value = "";
     queuedAttachments = [];
-    attachmentQueues.set(bound, queuedAttachments);
+    attachmentQueues.set(selectedID(), queuedAttachments);
     resize();
 		localNotice = "";
     localAlarm = false;
@@ -713,7 +538,7 @@ async function submit() {
 }
 
 async function queueFiles(files) {
-  const session = store.sessions[bound];
+  const session = store.sessions[selectedID()];
   if (!session || store.replay || !files.length) return;
   attachmentsBusy = true;
   localNotice = "Uploading attachment…";
@@ -735,7 +560,7 @@ async function queueFiles(files) {
 }
 
 async function refreshExchangeFiles() {
-  if (store.replay || !store.sessions[bound]) return;
+  if (store.replay || !store.sessions[selectedID()]) return;
   try {
     const files = await exchangeFiles();
     exchangeFileList.replaceChildren(...files.map((file) => {
@@ -753,12 +578,12 @@ async function refreshExchangeFiles() {
   } catch (error) {
     localNotice = error.message || String(error);
     localAlarm = true;
-    renderComposer(store.sessions[bound]);
+    renderComposer(store.sessions[selectedID()]);
   }
 }
 
 async function queueExchangeFile(item) {
-  const session = store.sessions[bound];
+  const session = store.sessions[selectedID()];
   if (!session || !item) return;
   attachmentsBusy = true;
   localNotice = "Copying from exchange folder…";
@@ -778,27 +603,7 @@ async function queueExchangeFile(item) {
   }
 }
 
-async function stopRun() {
-  if (!bound || store.replay) return;
-  try {
-    await api("/api/stop", { session_id: bound });
-    localNotice = "";
-    localAlarm = false;
-  } catch (error) {
-    localNotice = error.message;
-    localAlarm = true;
-  }
-  renderComposer(store.sessions[bound]);
-}
-
 send.onclick = submit;
-stop.onclick = stopRun;
-newChatButton.onclick = () => void newChat();
-closeCurrent.onclick = () => void closeChat(store.sessions[bound]);
-chatListToggle.onclick = () => {
-  chatListExpanded = !chatListExpanded;
-  renderChatList();
-};
 attachButton.onclick = () => { attachMenu.hidden = !attachMenu.hidden; };
 attachBrowse.onclick = () => { attachMenu.hidden = true; filePicker.click(); };
 attachExchange.onclick = () => void refreshExchangeFiles();
@@ -828,7 +633,11 @@ document.body.addEventListener("drop", (event) => {
     void queueFiles([...event.dataTransfer.files]);
   }
 });
-input.addEventListener("input", resize);
+expandComposer.onclick = () => {
+  composerExpanded = !composerExpanded;
+  resize();
+  input.focus();
+};
 input.addEventListener("paste", (event) => {
   const files = [...(event.clipboardData?.files || [])];
   if (files.length) {
@@ -851,7 +660,7 @@ log.addEventListener("scroll", () => {
 document.addEventListener("keydown", (event) => {
   if (event.ctrlKey && event.key === ".") {
     event.preventDefault();
-    stopRun();
+    document.getElementById("shell-stop")?.click();
   } else if (event.key === "/" && !/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName || "")) {
     event.preventDefault();
     input.focus();
@@ -859,8 +668,9 @@ document.addEventListener("keydown", (event) => {
 });
 
 function resize() {
-  input.style.height = "auto";
-  input.style.height = `${Math.min(input.scrollHeight, 120)}px`;
+  composer.classList.toggle("expanded", composerExpanded);
+  expandComposer.textContent = composerExpanded ? "↧" : "↥";
+  expandComposer.setAttribute("aria-label", composerExpanded ? "Collapse composer" : "Expand composer");
 }
 function busy(session) {
   return !!session && ["running", "queued", "paused", "stopping"].includes(session.run.status);

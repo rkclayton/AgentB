@@ -149,6 +149,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.page)
 	mux.HandleFunc("/chat", s.page)
+	mux.HandleFunc("/plan", s.page)
 	mux.HandleFunc("/setup", s.page)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(s.webDir))))
 	mux.HandleFunc("/api/events", s.sse)
@@ -550,6 +551,8 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 		name = "setup.html"
 	} else if r.URL.Path == "/chat" {
 		name = "chat.html"
+	} else if r.URL.Path == "/plan" {
+		name = "plan.html"
 	} else if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return

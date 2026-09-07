@@ -4,6 +4,7 @@ import (
 	"image/png"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -12,17 +13,14 @@ import (
 	"harness/internal/events"
 )
 
-func TestOperatorControlIsServedInBothHeaders(t *testing.T) {
+func TestSharedShellIsServedOnAllThreePages(t *testing.T) {
 	webDir := filepath.Join("..", "..", "web")
 	cfg := config.Defaults(t.TempDir())
 	root := t.TempDir()
 	server := New(&cfg, filepath.Join(root, "harness.json"), webDir, RuntimeRoots{Application: webDir, Data: root, Workspace: cfg.Workspace}, events.NewBus())
 
-	for _, item := range []struct {
-		path, stopID, operatorID string
-	}{
-		{"/", `id="stop"`, `id="operator-status"`},
-		{"/chat", `id="chat-stop"`, `id="chat-operator-status"`},
+	for _, item := range []struct{ path, page string }{
+		{"/", "console"}, {"/chat", "chat"}, {"/plan", "plan"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, item.path, nil)
 		response := httptest.NewRecorder()
@@ -31,19 +29,18 @@ func TestOperatorControlIsServedInBothHeaders(t *testing.T) {
 		if response.Code != http.StatusOK {
 			t.Fatalf("GET %s status=%d", item.path, response.Code)
 		}
-		stopAt := strings.Index(body, item.stopID)
-		operatorAt := strings.Index(body, item.operatorID)
-		if stopAt < 0 || operatorAt < stopAt {
-			t.Fatalf("GET %s does not place %s after %s", item.path, item.operatorID, item.stopID)
+		if !strings.Contains(body, `id="app-shell"`) || !strings.Contains(body, `data-page="`+item.page+`"`) {
+			t.Fatalf("GET %s does not contain the %s shared shell", item.path, item.page)
 		}
-		buttonEnd := strings.Index(body[operatorAt:], "</button>")
-		if buttonEnd < 0 {
-			t.Fatalf("GET %s operator button is incomplete", item.path)
-		}
-		button := body[operatorAt : operatorAt+buttonEnd]
-		if strings.Contains(button, " disabled") || !strings.Contains(button, `operator-off-24.png`) {
-			t.Fatalf("GET %s operator button=%q", item.path, button)
-		}
+	}
+	source, err := os.ReadFile(filepath.Join(webDir, "js", "shell.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	stopAt, stateAt, operatorAt, pagesAt, settingsAt := strings.Index(text, "right.append(stop"), strings.Index(text, "stop, state"), strings.Index(text, "state, operator"), strings.Index(text, "connection, pages"), strings.Index(text, "pages, settings")
+	if stopAt < 0 || stateAt < stopAt || operatorAt < stateAt || pagesAt < operatorAt || settingsAt < pagesAt {
+		t.Fatalf("shared shell right slot order is not Stop/state/operator/pages/Settings")
 	}
 }
 

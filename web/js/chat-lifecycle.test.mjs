@@ -34,7 +34,7 @@ test("Open chat list excludes durable closed sessions", () => {
 test("Agent and title labels use the persisted main-profile display name", () => {
   assert.equal(agentAuthor(idle), "agent_b · Coder");
   assert.equal(agentAuthor(idle, "aux"), "agent_c · Coder");
-  assert.equal(sessionTitle(idle), "Coder · Home API");
+  assert.equal(sessionTitle(idle), "Coder");
 });
 
 test("Close confirmation counts changed files and memory entries without deleting either", () => {

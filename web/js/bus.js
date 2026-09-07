@@ -1,7 +1,7 @@
 import { createOperatorReconciler } from "./operator-reconcile.js";
 
 export const store = {
-  sessions: {}, active: "", servers: [], config: {}, flow: { stages: [], edges: [] }, tools: [], serving_facts: {},
+  sessions: {}, active: "", selection: readSelection(), servers: [], config: {}, flow: { stages: [], edges: [] }, tools: [], serving_facts: {},
   build: { tag: "", commit: "unknown", dirty: false, known: false, source: "unknown", display: "unknown" }, signature: {},
   mutation_token: "", shell_credential: { stored: false, stored_at: "" },
   shell_identity: { fallback: false, operator_approval_required: false, operator_context: false, reason: "", since: "" }, replay: false,
@@ -24,8 +24,15 @@ export function reduce(event) {
   const data = event.data || {};
   if (event.type === "snapshot") {
     const active = store.active;
+    const selection = store.selection;
     Object.assign(store, data);
-    store.active = store.sessions[active] && !store.sessions[active].closed ? active : firstOpenSessionID();
+    store.selection = selection;
+    const selected = selection.session_id || active;
+    store.active = selection.agent_id === "agent_b"
+      ? (store.sessions[selected] && !store.sessions[selected].closed ? selected : firstOpenSessionID())
+      : "";
+    store.selection.session_id = store.active;
+    persistSelection();
     operatorReconciler.observed();
     notify(event);
     return;
@@ -67,8 +74,15 @@ function applyProjectionPatch(patch) {
     if (!applyOperation(target, operation)) { void resync(); return; }
   }
   target.cursor = patch.cursor;
-  if (target.closed && store.active === patch.session_id) store.active = firstOpenSessionID();
-  else if (!store.active && !target.closed) store.active = patch.session_id;
+  if (target.closed && store.active === patch.session_id) {
+    store.active = store.selection.agent_id === "agent_b" ? firstOpenSessionID() : "";
+    store.selection.session_id = store.active;
+    persistSelection();
+  } else if (!store.active && !target.closed && store.selection.agent_id === "agent_b") {
+    store.active = patch.session_id;
+    store.selection.session_id = patch.session_id;
+    persistSelection();
+  }
 }
 function applyOperation(target, operation) {
   const parts = String(operation.path || "").split("/").slice(1).map((value) => value.replaceAll("~1", "/").replaceAll("~0", "~"));
@@ -114,7 +128,25 @@ async function resync() {
 function firstOpenSessionID() {
   return Object.values(store.sessions).find((session) => !session.closed)?.id || "";
 }
-export function setActive(id) { if (store.sessions[id] && !store.sessions[id].closed) { store.active = id; notify({ type: "active.changed", data: { id } }); } }
+export function setActive(id) { setSelection(store.selection.agent_id || "agent_b", id); }
+export function setSelection(agentID, sessionID = "") {
+  const nextAgent = agentID || "agent_b";
+  const nextSession = sessionID && store.sessions[sessionID] && !store.sessions[sessionID].closed ? sessionID : "";
+  store.selection = { agent_id: nextAgent, session_id: nextSession };
+  store.active = nextSession;
+  persistSelection();
+  notify({ type: "selection.changed", data: { ...store.selection } });
+}
+function readSelection() {
+  try {
+    const value = JSON.parse(globalThis.sessionStorage?.getItem("agentb.selection") || "null");
+    if (value && typeof value.agent_id === "string" && typeof value.session_id === "string") return value;
+  } catch {}
+  return { agent_id: "agent_b", session_id: "" };
+}
+function persistSelection() {
+  try { globalThis.sessionStorage?.setItem("agentb.selection", JSON.stringify(store.selection)); } catch {}
+}
 export async function api(path, body, method = "POST") {
   const options = { method, headers: {} };
   if (method !== "GET" && method !== "HEAD") options.headers["X-AgentB-Mutation-Token"] = store.mutation_token;
@@ -125,17 +157,17 @@ export async function api(path, body, method = "POST") {
   return data;
 }
 
-const connection = document.getElementById("connection");
 let reconnected = false;
 const eventSearch = typeof location === "undefined" ? "" : location.search;
 const eventURL = new URLSearchParams(eventSearch).get("instant") === "1" ? "/api/events?instant=1" : "/api/events";
 const source = new EventSource(eventURL);
 source.onopen = () => {
+  const connection = document.getElementById("connection");
   if (reconnected && connection) { connection.textContent = "reconnected"; connection.className = ""; setTimeout(() => { connection.textContent = ""; }, 3000); }
   reconnected = true;
   void operatorReconciler.reconcile().catch(() => {});
 };
-source.onerror = () => { if (connection) { connection.textContent = "connection lost — retrying"; connection.className = "alarm"; } };
+source.onerror = () => { const connection = document.getElementById("connection"); if (connection) { connection.textContent = "connection lost — retrying"; connection.className = "alarm"; } };
 source.onmessage = (event) => reduce(JSON.parse(event.data));
 for (const type of ["snapshot", "projection.patch", "server.probed", "config.changed", "shell.identity", "shell.credential", "operator.context", "error"])
   source.addEventListener(type, (event) => reduce(JSON.parse(event.data)));

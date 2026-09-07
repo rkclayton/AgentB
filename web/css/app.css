@@ -945,6 +945,14 @@
 .timeline-inline.run-stopped.fault .timeline-head {
   color: var(--alarm);
 }
+.timeline-head #drop-last-message {
+  min-height: 20px;
+  margin-left: 6px;
+  padding: 0 5px;
+  color: var(--mute);
+  background: transparent;
+  font-size: 12px;
+}
 .pending-approval {
 	min-height: 0;
 	padding: 5px 7px;
