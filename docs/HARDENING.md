@@ -14,6 +14,8 @@ For an installed copy, open **Agent_b** from Start. For a source checkout, doubl
 
 Agent_b gives alternate-identity shell children only Windows system paths, a workspace-backed temporary directory, account identity names, and optional locale/`NO_COLOR` values. Git, compilers, and other non-system programs therefore need absolute executable paths unless the environment allowlist is deliberately extended.
 
+The setup guide's interpreter list reports the resolved executable path and whether its ACL is readable/executable by the service identity. It does not broaden the service `PATH`. Install an interpreter for all users under Program Files when both identities need it, then invoke it by absolute path and verify the real service-context command.
+
 ## 2. Create and verify the service identity
 
 In Settings → Security, enter a new password twice under **Service identity**, select **Create account**, and respond if Windows presents a UAC prompt. The default local account is `agentb-svc`; its advanced account and domain fields are available only when a different identity is intentional.

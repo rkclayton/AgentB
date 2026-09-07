@@ -477,9 +477,6 @@ func (c Config) Validate() error {
 	if c.Workspace == "" {
 		return fmt.Errorf("workspace: required")
 	}
-	if len(c.Servers) == 0 {
-		return fmt.Errorf("servers: at least one required")
-	}
 	seen := map[string]bool{}
 	for i, p := range c.Servers {
 		prefix := fmt.Sprintf("servers[%d]", i)
@@ -526,7 +523,10 @@ func (c Config) Validate() error {
 			return fmt.Errorf("%s.context.n_ctx: required when probe_mode is off", prefix)
 		}
 	}
-	if c.Roles.Main == "" || !seen[c.Roles.Main] {
+	if len(c.Servers) == 0 && (c.Roles.Main != "" || c.Roles.Aux != "") {
+		return fmt.Errorf("roles: must be empty until a profile is configured")
+	}
+	if len(c.Servers) > 0 && (c.Roles.Main == "" || !seen[c.Roles.Main]) {
 		return fmt.Errorf("roles.main: must name an existing profile")
 	}
 	if c.Roles.Aux != "" && !seen[c.Roles.Aux] {

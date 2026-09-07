@@ -227,6 +227,8 @@ func TestHarnessExampleShipsBoundaryOnlyIndependentlyOfDefaults(t *testing.T) {
 				SkipRoots []string `json:"skip_roots"`
 			} `json:"find_files"`
 		} `json:"tools"`
+		Servers []Profile `json:"servers"`
+		Roles   Roles     `json:"roles"`
 	}
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
@@ -248,6 +250,22 @@ func TestHarnessExampleShipsBoundaryOnlyIndependentlyOfDefaults(t *testing.T) {
 	}
 	if len(document.Tools.Fetch.DenyDomains) != 8 || len(document.Tools.FindFiles.SkipRoots) != 5 {
 		t.Fatalf("template policy defaults: deny_domains=%v skip_roots=%v", document.Tools.Fetch.DenyDomains, document.Tools.FindFiles.SkipRoots)
+	}
+	if len(document.Servers) != 0 || document.Roles.Main != "" || document.Roles.Aux != "" {
+		t.Fatalf("first-run template must have no configured profiles: servers=%d roles=%+v", len(document.Servers), document.Roles)
+	}
+}
+
+func TestEmptyServerListIsValidFirstRunState(t *testing.T) {
+	cfg := Defaults(t.TempDir())
+	cfg.Servers = []Profile{}
+	cfg.Roles = Roles{}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Roles.Main = "missing"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "roles") {
+		t.Fatalf("nonempty first-run role error=%v", err)
 	}
 }
 

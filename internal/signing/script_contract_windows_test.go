@@ -46,6 +46,9 @@ func TestPowerShellSigningScriptsUseHostCompatibleCodeSigningEKUCheck(t *testing
 	if !strings.Contains(string(installer), "$SigningThumbprint -eq 'auto'") {
 		t.Error("installer does not support first-install certificate bootstrap inside its existing elevation")
 	}
+	if !strings.Contains(string(installer), "-not $TestMode -and -not $SigningThumbprint") {
+		t.Error("isolated TestMode installs must not use or create the production signing key")
+	}
 	for _, required := range []string{
 		"Get-ChildItem -LiteralPath 'Cert:\\LocalMachine\\My'",
 		"REUSED: administrator-gated signing certificate",

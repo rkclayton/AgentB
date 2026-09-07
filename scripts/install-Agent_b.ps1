@@ -170,7 +170,8 @@ function Set-ApplicationDirectoryAcl {
     if ($TestMode) {
         $null = $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($Owner, [Security.AccessControl.FileSystemRights]::FullControl, $inherit, $propagate, $allow))
     }
-    $acl.SetOwner([Security.Principal.SecurityIdentifier]::new([Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null))
+    $applicationOwner = if ($TestMode) { $Owner } else { [Security.Principal.SecurityIdentifier]::new([Security.Principal.WellKnownSidType]::BuiltinAdministratorsSid, $null) }
+    $acl.SetOwner($applicationOwner)
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
@@ -337,7 +338,7 @@ if (-not $config.deliver) {
 if ([string]::IsNullOrWhiteSpace([string]$config.deliver.mode)) { $config.deliver.mode = 'both'; $writeConfig = $true }
 if ([string]::IsNullOrWhiteSpace([string]$config.deliver.exchange_folder)) { $config.deliver.exchange_folder = '%USERPROFILE%\Agent_b'; $writeConfig = $true }
 $exchangeRoot = Get-FullPath ([string]$config.deliver.exchange_folder)
-if (-not $SigningThumbprint -and (-not $config.signing -or [string]::IsNullOrWhiteSpace([string]$config.signing.thumbprint))) {
+if (-not $TestMode -and -not $SigningThumbprint -and (-not $config.signing -or [string]::IsNullOrWhiteSpace([string]$config.signing.thumbprint))) {
 	$SigningThumbprint = 'auto'
 }
 if ($SigningThumbprint -eq 'auto') {

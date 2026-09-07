@@ -230,7 +230,7 @@ function servers() {
       </div>`;
     })
     .join("");
-  return `${roles}<div class="settings-subhead">Profiles</div>${rows}<button type="button" class="text-action" data-action="add-server">Add server</button>`;
+  return `<div class="settings-actions"><button type="button" data-action="open-setup">Open setup guide</button></div>${roles}<div class="settings-subhead">Profiles</div>${rows}<button type="button" class="text-action" data-action="add-server">Add server</button>`;
 }
 
 function profileFields(profile, reason) {
@@ -641,6 +641,7 @@ async function click(event) {
     return render();
   }
   if (action === "save-settings") return saveSettings();
+  if (action === "open-setup") { location.href = "/setup?from=settings"; return; }
   if (action === "config-toggle" || action === "config-choice") {
     const path = button.dataset.path;
     const value = action === "config-toggle" ? button.dataset.value === "true" : button.dataset.value;

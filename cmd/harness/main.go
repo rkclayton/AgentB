@@ -169,17 +169,21 @@ func main() {
 	})
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)
 	web.SetRuntime(scheduler, runner, renderer)
-	mainServerID := cfg.Roles.Main
-	if ready, reason := registry.ProfileRunnable(mainServerID); ready {
-		log.Printf("startup profile %s ready from saved capabilities", mainServerID)
+	if len(cfg.Servers) == 0 {
+		log.Printf("first-run setup required: no model profiles are configured")
 	} else {
-		log.Printf("startup profile %s not runnable: %s; use Connections > Test", mainServerID, reason)
+		mainServerID := cfg.Roles.Main
+		if ready, reason := registry.ProfileRunnable(mainServerID); ready {
+			log.Printf("startup profile %s ready from saved capabilities", mainServerID)
+		} else {
+			log.Printf("startup profile %s not runnable: %s; use Connections > Test", mainServerID, reason)
+		}
+		mainSession, createErr := registry.Create("main", mainServerID, cfg.Workspace)
+		if createErr != nil {
+			log.Fatal(createErr)
+		}
+		runner.PublishBudget(context.Background(), mainSession)
 	}
-	mainSession, err := registry.Create("main", mainServerID, cfg.Workspace)
-	if err != nil {
-		log.Fatal(err)
-	}
-	runner.PublishBudget(context.Background(), mainSession)
 	publishPendingSigning(paths.Data, registry, bus)
 	if err := serve(cfg, web.Handler()); err != nil {
 		log.Fatal(err)

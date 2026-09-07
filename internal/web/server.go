@@ -20,6 +20,7 @@ import (
 	"harness/internal/buildinfo"
 	"harness/internal/config"
 	"harness/internal/credential"
+	"harness/internal/detection"
 	"harness/internal/events"
 	"harness/internal/hardening"
 	"harness/internal/probe"
@@ -67,6 +68,7 @@ type Server struct {
 	operatorAfter    func(time.Duration, func()) operatorTimer
 	openFolder       func(string) error
 	extractClient    *http.Client
+	detectLocal      func(context.Context, string) (any, error)
 }
 
 type RuntimeRoots struct {
@@ -91,6 +93,9 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 		},
 		openFolder:    openContainingFolder,
 		extractClient: &http.Client{},
+		detectLocal: func(ctx context.Context, account string) (any, error) {
+			return detection.Local(ctx, filepath.Join(roots.Application, "scripts", "detect-local-capabilities.ps1"), account)
+		},
 	}
 }
 func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry }
@@ -135,9 +140,11 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.page)
 	mux.HandleFunc("/chat", s.page)
+	mux.HandleFunc("/setup", s.page)
 	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir(s.webDir))))
 	mux.HandleFunc("/api/events", s.sse)
 	mux.HandleFunc("/api/state", s.state)
+	mux.HandleFunc("/api/local-detection", s.localDetection)
 	mux.HandleFunc("/api/files/", s.file)
 	mux.HandleFunc("/api/open-folder", s.openFileFolder)
 	mux.HandleFunc("/api/attachments", s.replayGuard(s.attachments))
@@ -527,11 +534,22 @@ func (s *Server) writeFrame(w http.ResponseWriter, event events.Event) {
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	name := "index.html"
-	if r.URL.Path == "/chat" {
+	if r.URL.Path == "/setup" {
+		name = "setup.html"
+	} else if r.URL.Path == "/chat" {
 		name = "chat.html"
 	} else if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
+	}
+	if r.URL.Path != "/setup" && s.replay == nil && r.URL.Query().Get("setup") != "skip" {
+		s.mu.RLock()
+		firstRun := len(s.cfg.Servers) == 0
+		s.mu.RUnlock()
+		if firstRun {
+			http.Redirect(w, r, "/setup", http.StatusTemporaryRedirect)
+			return
+		}
 	}
 	path := filepath.Join(s.webDir, name)
 	if data, err := os.ReadFile(path); err == nil {
@@ -541,6 +559,28 @@ func (s *Server) page(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	fmt.Fprint(w, "<!doctype html><title>Agent_b</title><p>Agent_b API is running.</p>")
+}
+
+func (s *Server) localDetection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		method(w)
+		return
+	}
+	if s.detectLocal == nil {
+		writeError(w, http.StatusNotImplemented, "local detection is unavailable", "detection")
+		return
+	}
+	s.mu.RLock()
+	account := s.cfg.Shell.ServiceAccount.Account
+	s.mu.RUnlock()
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	report, err := s.detectLocal(ctx, account)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "detection")
+		return
+	}
+	writeJSON(w, http.StatusOK, report)
 }
 func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
