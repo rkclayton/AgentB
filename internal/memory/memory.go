@@ -26,6 +26,13 @@ type Manager struct {
 func New(baseDir string, cfg func() config.Config, count Counter) *Manager {
 	return &Manager{baseDir: baseDir, cfg: cfg, count: count}
 }
+func (m *Manager) Dir() string {
+	dir := m.cfg().Memory.Dir
+	if !filepath.IsAbs(dir) {
+		dir = filepath.Join(m.baseDir, dir)
+	}
+	return filepath.Clean(dir)
+}
 func (m *Manager) Path(workspace string) string {
 	abs, _ := filepath.Abs(workspace)
 	clean := filepath.Clean(abs)
@@ -35,10 +42,7 @@ func (m *Manager) Path(workspace string) string {
 	}
 	sum := sha256.Sum256([]byte(canonical))
 	name := filepath.Base(abs) + "-" + hex.EncodeToString(sum[:4]) + ".md"
-	dir := m.cfg().Memory.Dir
-	if !filepath.IsAbs(dir) {
-		dir = filepath.Join(m.baseDir, dir)
-	}
+	dir := m.Dir()
 	path := filepath.Join(dir, name)
 	// v0.9 and earlier hashed the display spelling. Keep that existing file
 	// mapped to the default workspace instead of silently orphaning memory.

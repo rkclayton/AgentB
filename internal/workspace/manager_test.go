@@ -60,6 +60,9 @@ func TestPolicyTOFUChangeRevokeUnknownAndForbiddenKeys(t *testing.T) {
 		}
 	}
 	manager := New(data, func(string) string { return filepath.Join(data, "memory.md") })
+	if manager.path != filepath.Join(data, "workspace-state.json") {
+		t.Fatalf("policy trust state escaped memory root: %q", manager.path)
+	}
 	write(`{"version":1,"approval_mode":"mutating","shell":{"run_grant_defaults":["node --test"]}}`)
 	first, err := manager.Inspect(root)
 	if err != nil {

@@ -117,7 +117,7 @@ func main() {
 		}
 		return llm.New(profile).Tokenize(ctx, text, false)
 	})
-	workspaceManager := workspaceinfo.New(paths.Data, memoryManager.Path)
+	workspaceManager := workspaceinfo.New(memoryManager.Dir(), memoryManager.Path)
 	registry := session.NewRegistry(bus, writers, web.Profile, cfg.Run.MaxTurns, web.ConfigSnapshot)
 	registry.SetMemoryLoader(memoryManager.Load)
 	registry.SetWorkspaceManager(workspaceManager)

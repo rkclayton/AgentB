@@ -85,8 +85,8 @@ type Manager struct {
 	memoryPath func(string) string
 }
 
-func New(dataRoot string, memoryPath func(string) string) *Manager {
-	return &Manager{path: filepath.Join(dataRoot, "workspace-state.json"), memoryPath: memoryPath}
+func New(memoryRoot string, memoryPath func(string) string) *Manager {
+	return &Manager{path: filepath.Join(memoryRoot, "workspace-state.json"), memoryPath: memoryPath}
 }
 
 func Canonical(dir string) (string, string, error) {
