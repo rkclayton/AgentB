@@ -53,7 +53,9 @@ function fencedBlock(document, lines, start, indent) {
   const button = document.createElement("button");
   button.type = "button";
   button.className = "code-copy";
-  button.textContent = "Copy code";
+  button.textContent = "📎";
+  button.ariaLabel = "Copy code";
+  button.title = "Copy code";
   const value = code.join("\n");
   button.onclick = () => navigator.clipboard?.writeText(value);
   const pre = document.createElement("pre");

@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -27,6 +28,10 @@ type Snapshot struct {
 	ID                   string           `json:"id"`
 	Label                string           `json:"label"`
 	ServerID             string           `json:"server_id"`
+	AgentName            string           `json:"agent_name"`
+	MainProfile          string           `json:"main_profile"`
+	CreatedAt            string           `json:"created_at"`
+	Closed               bool             `json:"closed"`
 	Workspace            string           `json:"workspace"`
 	Run                  RunState         `json:"run"`
 	Tools                []ToolState      `json:"tools"`
@@ -47,6 +52,8 @@ type Snapshot struct {
 }
 type Session struct {
 	ID, Label, ServerID, Workspace string
+	AgentName, MainProfile         string
+	Closed                         bool
 	Messages                       []events.Message
 	Budget                         events.Budget
 	Run                            RunState
@@ -68,6 +75,7 @@ type Session struct {
 	compactionModelCalls           int
 	compactionPrompt               int
 	compactionCompletion           int
+	submitting                     int
 	mu                             sync.Mutex
 }
 
@@ -81,13 +89,39 @@ func (s *Session) Snapshot() Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name], MarginalTokens: s.MarginalTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, AgentName: s.AgentName, MainProfile: s.MainProfile, CreatedAt: s.CreatedAt.Format(time.RFC3339Nano), Closed: s.Closed, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.Run.Status == "running" || s.Run.Status == "queued" || s.Run.Status == "paused" || s.Run.Status == "stopping"
 }
+func (s *Session) IsClosed() bool { s.mu.Lock(); defer s.mu.Unlock(); return s.Closed }
+func (s *Session) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Closed {
+		return fmt.Errorf("session is already closed")
+	}
+	if s.Run.Status == "running" || s.Run.Status == "queued" || s.Run.Status == "paused" || s.Run.Status == "stopping" {
+		return fmt.Errorf("session is running; stop the run before closing")
+	}
+	if s.submitting > 0 {
+		return fmt.Errorf("session is running; stop the run before closing")
+	}
+	s.Closed = true
+	return nil
+}
+func (s *Session) BeginSubmission() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Closed {
+		return false
+	}
+	s.submitting++
+	return true
+}
+func (s *Session) EndSubmission()    { s.mu.Lock(); s.submitting--; s.mu.Unlock() }
 func (s *Session) Touch(path string) { s.mu.Lock(); s.LastSeen[path] = time.Now().UTC(); s.mu.Unlock() }
 func (s *Session) LastSeenAt(path string) (time.Time, bool) {
 	s.mu.Lock()
@@ -103,6 +137,9 @@ func (s *Session) ToolEnabled(name string) bool {
 func (s *Session) ToggleTool(name string, enabled bool) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.Closed {
+		return false
+	}
 	if _, ok := s.ToolsEnabled[name]; !ok {
 		return false
 	}

@@ -32,6 +32,21 @@ func (r *Registry) SetMemoryLoader(loader func(context.Context, string, string) 
 	r.memory = loader
 }
 func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
+	return r.create(label, serverID, workspace, nil)
+}
+func (r *Registry) CreateLike(sourceID string) (*Session, error) {
+	source, ok := r.Get(sourceID)
+	if !ok {
+		return nil, fmt.Errorf("source session not found")
+	}
+	snapshot := source.Snapshot()
+	enabled := make(map[string]bool, len(snapshot.Tools))
+	for _, tool := range snapshot.Tools {
+		enabled[tool.Name] = tool.Enabled
+	}
+	return r.create("", snapshot.ServerID, snapshot.Workspace, enabled)
+}
+func (r *Registry) create(label, serverID, workspace string, enabled map[string]bool) (*Session, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	profile, ok := r.profiles(serverID)
@@ -58,7 +73,10 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 		return nil, err
 	}
 	runnable, reason := runnable(profile, r.config().Context.Accounting)
-	tools := map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "search_text": true, "shell": true, "remember": true, "recall": true, "fetch_url": true, "find_files": true, "run_script": true, "call_service": true}
+	tools := enabled
+	if tools == nil {
+		tools = map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "search_text": true, "shell": true, "remember": true, "recall": true, "fetch_url": true, "find_files": true, "run_script": true, "call_service": true}
+	}
 	memoryBlock, memoryPath := "", ""
 	if r.memory != nil {
 		memoryBlock, memoryPath, err = r.memory(context.Background(), abs, serverID)
@@ -66,7 +84,7 @@ func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 			return nil, err
 		}
 	}
-	session := &Session{ID: id, Label: label, ServerID: serverID, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	session := &Session{ID: id, Label: label, ServerID: serverID, AgentName: profile.Label, MainProfile: profile.Label, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
 	session.Messages = []events.Message{}
 	session.Budget = initialBudget(profile)
 	r.sessions[id] = session
@@ -116,6 +134,10 @@ func (r *Registry) Rename(id, label string) error {
 		return fmt.Errorf("session not found")
 	}
 	s.mu.Lock()
+	if s.Closed {
+		s.mu.Unlock()
+		return fmt.Errorf("session is closed")
+	}
 	s.Label = label
 	s.mu.Unlock()
 	r.bus.Publish(events.New(events.SessionRenamed, id, "", map[string]any{"session_id": id, "label": label}))
@@ -136,6 +158,10 @@ func (r *Registry) SetServer(id, serverID string) error {
 	}
 
 	s.mu.Lock()
+	if s.Closed {
+		s.mu.Unlock()
+		return fmt.Errorf("session is closed")
+	}
 	if s.Run.Status != "idle" {
 		s.mu.Unlock()
 		return fmt.Errorf("session is running")
@@ -153,11 +179,16 @@ func (r *Registry) SetServer(id, serverID string) error {
 	}
 
 	s.mu.Lock()
+	if s.Closed {
+		s.mu.Unlock()
+		return fmt.Errorf("session is closed")
+	}
 	if s.Run.Status != "idle" {
 		s.mu.Unlock()
 		return fmt.Errorf("session is running")
 	}
 	s.ServerID = serverID
+	s.AgentName, s.MainProfile = profile.Label, profile.Label
 	s.Runnable, s.NotRunnableReason = true, ""
 	s.MemoryBlock, s.MemoryPath = memoryBlock, memoryPath
 	s.Budget = initialBudget(profile)
@@ -166,6 +197,8 @@ func (r *Registry) SetServer(id, serverID string) error {
 	r.bus.Publish(events.New(events.SessionUpdated, id, "", map[string]any{
 		"session_id":          id,
 		"server_id":           serverID,
+		"agent_name":          profile.Label,
+		"main_profile":        profile.Label,
 		"runnable":            true,
 		"not_runnable_reason": "",
 		"memory_path":         memoryPath,
@@ -180,6 +213,9 @@ func (r *Registry) Reset(id string) (string, error) {
 	}
 	if s.IsRunning() {
 		return "", fmt.Errorf("session is running")
+	}
+	if s.IsClosed() {
+		return "", fmt.Errorf("session is closed")
 	}
 	path, predecessor, err := r.writers.RotateSession(id)
 	if err != nil {
@@ -222,6 +258,9 @@ func (r *Registry) DropLastMessage(id string) (events.Message, error) {
 	if s.IsRunning() {
 		return events.Message{}, fmt.Errorf("session is running")
 	}
+	if s.IsClosed() {
+		return events.Message{}, fmt.Errorf("session is closed")
+	}
 	message, ok := s.DropLastMessage()
 	if !ok {
 		return events.Message{}, fmt.Errorf("session has no messages")
@@ -231,21 +270,16 @@ func (r *Registry) DropLastMessage(id string) (events.Message, error) {
 	}))
 	return message, nil
 }
-func (r *Registry) Close(id string, force bool) error {
-	r.mu.Lock()
-	s, ok := r.sessions[id]
+func (r *Registry) Close(id string) error {
+	s, ok := r.Get(id)
 	if !ok {
-		r.mu.Unlock()
 		return fmt.Errorf("session not found")
 	}
-	if s.IsRunning() && !force {
-		r.mu.Unlock()
-		return fmt.Errorf("session is running")
+	if err := s.Close(); err != nil {
+		return err
 	}
-	delete(r.sessions, id)
-	r.mu.Unlock()
 	r.bus.Publish(events.New(events.SessionClosed, id, "", map[string]any{"session_id": id}))
-	return r.writers.CloseSession(id)
+	return nil
 }
 func runnable(profile *config.Profile, accounting string) (bool, string) {
 	if reason := config.ProfileSetupReason(profile); reason != "" {

@@ -66,8 +66,11 @@ try {
         $indexSource -notmatch 'class="stop-sign"' -or $chatSource -notmatch 'class="stop-sign"') {
         throw 'Installed application is missing the consolidated tab header or leading stop-sign control.'
     }
-    foreach ($required in @('id="chat-console"', 'id="chat-settings"', 'id="chat-stop"', 'id="chat-clear-conversation"', 'class="identity-status"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
+    foreach ($required in @('id="chat-console"', 'id="chat-settings"', 'id="chat-stop"', 'id="chat-new"', 'id="chat-close"', 'id="chat-list-toggle"', 'id="chat-attach"', 'class="identity-status"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
         if ($chatSource -notmatch [regex]::Escape($required)) { throw "Installed Chat view is missing: $required" }
+    }
+    if ($chatSource -match 'chat-clear-conversation|chat-attachment-controls') {
+        throw 'Installed Chat view still contains removed Clear or attachment-pane chrome.'
     }
     foreach ($link in @(
         @{ Source = $indexSource; Pattern = '<a id="console-launch"[^>]+href="/"'; Name = 'Console selector' },

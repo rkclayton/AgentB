@@ -138,9 +138,7 @@ func (s *Store) snapshotLocked(sources map[string]events.LogCursor) (map[string]
 			state.Stale, state.StaleReason = true, reason
 			s.states[id] = state
 		}
-		if !state.Closed {
-			result[id] = state
-		}
+		result[id] = state
 	}
 	return cloneSnapshots(result), nil
 }

@@ -25,7 +25,7 @@ export function reduce(event) {
   if (event.type === "snapshot") {
     const active = store.active;
     Object.assign(store, data);
-    store.active = store.sessions[active] ? active : Object.keys(store.sessions)[0] || "";
+    store.active = store.sessions[active] && !store.sessions[active].closed ? active : firstOpenSessionID();
     operatorReconciler.observed();
     notify(event);
     return;
@@ -67,10 +67,8 @@ function applyProjectionPatch(patch) {
     if (!applyOperation(target, operation)) { void resync(); return; }
   }
   target.cursor = patch.cursor;
-  if (target.closed && !store.replay) {
-    delete store.sessions[patch.session_id];
-    if (store.active === patch.session_id) store.active = Object.keys(store.sessions)[0] || "";
-  } else if (!store.active) store.active = patch.session_id;
+  if (target.closed && store.active === patch.session_id) store.active = firstOpenSessionID();
+  else if (!store.active && !target.closed) store.active = patch.session_id;
 }
 function applyOperation(target, operation) {
   const parts = String(operation.path || "").split("/").slice(1).map((value) => value.replaceAll("~1", "/").replaceAll("~0", "~"));
@@ -113,7 +111,10 @@ async function resync() {
   finally { resyncing = false; }
 }
 
-export function setActive(id) { if (store.sessions[id]) { store.active = id; notify({ type: "active.changed", data: { id } }); } }
+function firstOpenSessionID() {
+  return Object.values(store.sessions).find((session) => !session.closed)?.id || "";
+}
+export function setActive(id) { if (store.sessions[id] && !store.sessions[id].closed) { store.active = id; notify({ type: "active.changed", data: { id } }); } }
 export async function api(path, body, method = "POST") {
   const options = { method, headers: {} };
   if (method !== "GET" && method !== "HEAD") options.headers["X-AgentB-Mutation-Token"] = store.mutation_token;

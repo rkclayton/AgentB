@@ -66,7 +66,17 @@ test("numbered lists retain fenced blocks and copy code without markdown chrome"
   assert.equal(root.children[0].children.length, 2);
   const block = root.children[0].children[0].children[1];
   assert.equal(block.className, "code-block");
+  assert.equal(block.children[0].textContent, "📎");
+  assert.equal(block.children[0].ariaLabel, "Copy code");
   assert.equal(block.children[1].textContent, "Get-Process");
   await block.children[0].onclick();
   assert.equal(copied, "Get-Process");
+});
+
+test("prose-only messages have no copy control", () => {
+  const document = new FakeDocument();
+  const root = new FakeNode(document, "div");
+  renderMarkdown(root, "Plain prose with `inline code`.");
+  assert.equal(root.children.length, 1);
+  assert.equal(root.children[0].tagName, "p");
 });

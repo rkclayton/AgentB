@@ -45,8 +45,15 @@ func (s *Scheduler) SubmitAttachments(ctx context.Context, sessionID, text strin
 	if !ok {
 		return SubmitResult{}, fmt.Errorf("session not found")
 	}
+	if item.IsClosed() {
+		return SubmitResult{}, fmt.Errorf("session is closed")
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !item.BeginSubmission() {
+		return SubmitResult{}, fmt.Errorf("session is closed")
+	}
+	defer item.EndSubmission()
 	if _, active := s.active[sessionID]; active || item.IsRunning() {
 		depth := s.cfg().Run.QueueDepth
 		if depth == 0 {

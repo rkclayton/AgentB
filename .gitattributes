@@ -2,3 +2,4 @@ internal/projection/testdata/pins/golden/** text eol=lf
 internal/projection/testdata/pins/manifest.json text eol=lf
 internal/projection/testdata/pins/README.md text eol=lf
 internal/projection/testdata/pins/sweep-baseline.json text eol=lf
+internal/projection/testdata/pins/sources/*.events text eol=lf

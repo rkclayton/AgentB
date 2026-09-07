@@ -599,11 +599,28 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, values)
 	case http.MethodPost:
 		var body struct {
-			Label     string `json:"label"`
-			ServerID  string `json:"server_id"`
-			Workspace string `json:"workspace"`
+			Label           string `json:"label"`
+			ServerID        string `json:"server_id"`
+			Workspace       string `json:"workspace"`
+			SourceSessionID string `json:"source_session_id"`
 		}
 		if !decode(w, r, &body) {
+			return
+		}
+		if body.SourceSessionID != "" {
+			if body.Label != "" || body.ServerID != "" || body.Workspace != "" {
+				writeError(w, 400, "source_session_id cannot be combined with overrides", "session")
+				return
+			}
+			item, err := s.registry.CreateLike(body.SourceSessionID)
+			if err != nil {
+				writeError(w, 400, err.Error(), "session")
+				return
+			}
+			if s.runner != nil {
+				s.runner.PublishBudget(r.Context(), item)
+			}
+			writeJSON(w, 201, map[string]any{"session": item.Snapshot()})
 			return
 		}
 		if body.Workspace == "" {
@@ -701,7 +718,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 				field := "server_id"
 				if strings.Contains(err.Error(), "not found") {
 					status, field = http.StatusNotFound, "session"
-				} else if strings.Contains(err.Error(), "running") {
+				} else if strings.Contains(err.Error(), "running") || strings.Contains(err.Error(), "closed") {
 					status, field = http.StatusConflict, "session"
 				}
 				writeError(w, status, err.Error(), field)
@@ -710,7 +727,11 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Label != nil {
 			if err := s.registry.Rename(id, *body.Label); err != nil {
-				writeError(w, 404, err.Error(), "session")
+				status := http.StatusNotFound
+				if strings.Contains(err.Error(), "closed") {
+					status = http.StatusConflict
+				}
+				writeError(w, status, err.Error(), "session")
 				return
 			}
 		}
@@ -724,10 +745,10 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, 200, map[string]any{"session": item.Snapshot()})
 	case http.MethodDelete:
-		err := s.registry.Close(id, r.URL.Query().Get("force") == "1")
+		err := s.registry.Close(id)
 		if err != nil {
 			status := 404
-			if strings.Contains(err.Error(), "running") {
+			if strings.Contains(err.Error(), "running") || strings.Contains(err.Error(), "closed") {
 				status = 409
 			}
 			writeError(w, status, err.Error(), "session")
@@ -1043,6 +1064,10 @@ func (s *Server) toggleTool(w http.ResponseWriter, r *http.Request) {
 	item, ok := s.registry.Get(body.SessionID)
 	if !ok {
 		writeError(w, 404, "session not found", "session_id")
+		return
+	}
+	if item.IsClosed() {
+		writeError(w, 409, "session is closed", "session_id")
 		return
 	}
 	if !item.ToggleTool(name, body.Enabled) {

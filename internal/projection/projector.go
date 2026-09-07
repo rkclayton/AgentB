@@ -94,6 +94,7 @@ type ChatEntry struct {
 	Event                    *events.Event       `json:"event,omitempty"`
 	Decision                 string              `json:"decision,omitempty"`
 	Attachments              []events.Attachment `json:"attachments,omitempty"`
+	AgentRole                string              `json:"agent_role,omitempty"`
 }
 
 // Snapshot is the serializable session projection. Complete is false when the log has no
@@ -105,6 +106,9 @@ type Snapshot struct {
 	ID                   string           `json:"id"`
 	Label                string           `json:"label"`
 	ServerID             string           `json:"server_id"`
+	AgentName            string           `json:"agent_name"`
+	MainProfile          string           `json:"main_profile"`
+	CreatedAt            string           `json:"created_at"`
 	Workspace            string           `json:"workspace"`
 	Run                  Run              `json:"run"`
 	Tools                []Tool           `json:"tools"`
@@ -186,6 +190,12 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.Label = stringValue(data["label"])
 	case events.SessionUpdated:
 		next.ServerID = stringValue(data["server_id"])
+		if value := stringValue(data["agent_name"]); value != "" {
+			next.AgentName = value
+		}
+		if value := stringValue(data["main_profile"]); value != "" {
+			next.MainProfile = value
+		}
 		next.Runnable = boolValue(data["runnable"])
 		next.NotRunnableReason = stringValue(data["not_runnable_reason"])
 		next.MemoryPath = stringValue(data["memory_path"])
@@ -248,7 +258,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 	case events.ModelRequest:
 		at := eventMillis(record.Event)
 		next.Activity.Stream = &StreamTelemetry{Key: turnKey(record.Event, data), StartedAt: at, LastChunkAt: at, RateStartedAt: at}
-		next.Chat = appendChat(next.Chat, ChatEntry{Type: "agent", Key: "turn:" + turnKey(record.Event, data), RunID: record.Event.RunID, Turn: intValue(data["turn"])})
+		next.Chat = appendChat(next.Chat, ChatEntry{Type: "agent", Key: "turn:" + turnKey(record.Event, data), RunID: record.Event.RunID, Turn: intValue(data["turn"]), AgentRole: "main"})
 	case events.ModelProgress:
 		next.Activity.Progress = cloneMap(data)
 		next.Activity.Stream = touchStream(next.Activity.Stream, record.Event, data, false)
@@ -283,7 +293,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.Chat = cloneChat(next.Chat)
 		entry := chatTurn(next.Chat, record.Event.RunID, intValue(data["turn"]))
 		if entry == nil {
-			next.Chat = append(next.Chat, ChatEntry{Type: "agent", Key: "turn:" + turnKey(record.Event, data), RunID: record.Event.RunID, Turn: intValue(data["turn"])})
+			next.Chat = append(next.Chat, ChatEntry{Type: "agent", Key: "turn:" + turnKey(record.Event, data), RunID: record.Event.RunID, Turn: intValue(data["turn"]), AgentRole: "main"})
 			entry = &next.Chat[len(next.Chat)-1]
 		}
 		if content := stringValue(data["content"]); content != "" {
@@ -473,7 +483,11 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 	}
 	if chatNotice(record.Event.Type) {
 		event := stripDiagnostic(record.Event)
-		next.Chat = appendChat(next.Chat, ChatEntry{Type: "notice", Key: "event:" + strconv.FormatInt(record.Event.Seq, 10), RunID: record.Event.RunID, Event: &event})
+		role := ""
+		if stringValue(data["role"]) == "aux" {
+			role = "aux"
+		}
+		next.Chat = appendChat(next.Chat, ChatEntry{Type: "notice", Key: "event:" + strconv.FormatInt(record.Event.Seq, 10), RunID: record.Event.RunID, Event: &event, AgentRole: role})
 	}
 	if record.Event.Type == events.RunStopped {
 		next.Chat = cloneChat(next.Chat)
@@ -540,6 +554,10 @@ type seed struct {
 	ID                   string           `json:"id"`
 	Label                string           `json:"label"`
 	ServerID             string           `json:"server_id"`
+	AgentName            string           `json:"agent_name"`
+	MainProfile          string           `json:"main_profile"`
+	CreatedAt            string           `json:"created_at"`
+	Closed               bool             `json:"closed"`
 	Workspace            string           `json:"workspace"`
 	Run                  Run              `json:"run"`
 	Tools                []Tool           `json:"tools"`
@@ -562,7 +580,7 @@ type seed struct {
 func (value seed) snapshot(cursor Cursor) Snapshot {
 	return Snapshot{
 		SchemaVersion: SchemaVersion, Cursor: cursor, Complete: true,
-		ID: value.ID, Label: value.Label, ServerID: value.ServerID, Workspace: value.Workspace,
+		ID: value.ID, Label: value.Label, ServerID: value.ServerID, AgentName: value.AgentName, MainProfile: value.MainProfile, CreatedAt: value.CreatedAt, Closed: value.Closed, Workspace: value.Workspace,
 		Run: value.Run, Tools: cloneTools(value.Tools), Messages: cloneMessages(value.Messages), Budget: value.Budget,
 		QueuedMessages: value.QueuedMessages, Runnable: value.Runnable, NotRunnableReason: value.NotRunnableReason,
 		MemoryPath: value.MemoryPath, MemoryContent: value.MemoryContent, LogPath: value.LogPath,
@@ -581,7 +599,8 @@ func diff(before, after Snapshot) Patch {
 		before, now any
 	}{
 		{"complete", before.Complete, after.Complete}, {"id", before.ID, after.ID}, {"label", before.Label, after.Label},
-		{"server_id", before.ServerID, after.ServerID}, {"workspace", before.Workspace, after.Workspace},
+		{"server_id", before.ServerID, after.ServerID}, {"agent_name", before.AgentName, after.AgentName},
+		{"main_profile", before.MainProfile, after.MainProfile}, {"created_at", before.CreatedAt, after.CreatedAt}, {"workspace", before.Workspace, after.Workspace},
 		{"tools", before.Tools, after.Tools}, {"messages", before.Messages, after.Messages}, {"budget", before.Budget, after.Budget},
 		{"queued_messages", before.QueuedMessages, after.QueuedMessages}, {"runnable", before.Runnable, after.Runnable},
 		{"not_runnable_reason", before.NotRunnableReason, after.NotRunnableReason}, {"memory_path", before.MemoryPath, after.MemoryPath},

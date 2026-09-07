@@ -14,6 +14,18 @@
       "rationale": "A minimal durable user message with attachment metadata; it pins replay projection into both messages and Chat without embedding file bytes."
     },
     {
+      "id": "session-close",
+      "source": "sources/session-close.events",
+      "golden": "golden/session-close.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/session-close.events",
+      "origin_sha256": "fbbf3319a7c98450acc89efea32132c8b144bd7b7725c8e4e805569c9c5209a3",
+      "origin_records": 9,
+      "decompressed_bytes": 2660,
+      "synthetic": true,
+      "shapes": ["session-close", "chat-lifecycle", "agent-labels", "aux-notice"],
+      "rationale": "A complete session that answers once, records an aux-produced notice, and closes durably; it pins closed-state retention plus replay-derived chat rows and labels for the later Console lifecycle view."
+    },
+    {
       "id": "known-good-live",
       "source": "sources/known-good-live.events.gz",
       "golden": "golden/known-good-live.golden.json",

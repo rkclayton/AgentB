@@ -1,4 +1,4 @@
-import { api, store, subscribe } from "./bus.js";
+import { api, reduce, setActive, store, subscribe } from "./bus.js";
 import { renderMarkdown } from "./markdown.js";
 import { operatorLogEntry } from "./operator-log.js";
 import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
@@ -6,17 +6,20 @@ import { createThinkingRenderer } from "./reasoning.js";
 import { renderBuildHeader } from "./build-header.js";
 import { formatDuration } from "./duration.js";
 import { renderStopState } from "./stop-state.js";
-import { createSessionResetController } from "./session-reset.js";
 import { createFileChip, fileURL, filesFromResponse, probeFile } from "./deliverables.js";
 import { approvalChoices } from "./approval.js";
 import { callServiceKey, callServiceStatus } from "./call-service-display.js";
 import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, uploadAttachment } from "./attachment-upload.js";
+import { agentAuthor, chatRowText, closeConfirmText, firstUserLine, isRunning, openSessions, sessionTitle } from "./chat-lifecycle.js";
 
 const binding = document.getElementById("chat-binding");
+const closeCurrent = document.getElementById("chat-close");
+const newChatButton = document.getElementById("chat-new");
+const chatListToggle = document.getElementById("chat-list-toggle");
+const chatList = document.getElementById("chat-list");
 const status = document.getElementById("chat-status");
 const buildID = document.getElementById("chat-build");
 const stop = document.getElementById("chat-stop");
-const clearConversation = document.getElementById("chat-clear-conversation");
 const operatorStatus = document.getElementById("chat-operator-status");
 const budget = document.getElementById("chat-budget");
 const log = document.getElementById("chat-log");
@@ -25,8 +28,11 @@ const send = document.getElementById("chat-send");
 const notice = document.getElementById("chat-notice");
 const composer = document.querySelector(".chat-composer");
 const attachButton = document.getElementById("chat-attach");
+const attachMenu = document.getElementById("chat-attach-menu");
+const attachBrowse = document.getElementById("chat-attach-browse");
+const attachExchange = document.getElementById("chat-attach-exchange");
+const exchangeFileList = document.getElementById("chat-exchange-files");
 const filePicker = document.getElementById("chat-file-picker");
-const exchangePicker = document.getElementById("chat-exchange");
 const pendingFiles = document.getElementById("chat-attachments");
 const identityAlarm = document.getElementById("chat-identity-alarm");
 const chatCurrent = document.getElementById("chat-current");
@@ -42,6 +48,8 @@ let localAlarm = false;
 let frame = 0;
 let renderTimer = 0;
 let attachmentsBusy = false;
+let chatListExpanded = false;
+let dragDepth = 0;
 let queuedAttachments = [];
 const attachmentQueues = new Map();
 let lastRender = 0;
@@ -83,18 +91,6 @@ const operatorControl = createOperatorStatusController(operatorStatus, {
     renderComposer(store.sessions[bound]);
   },
 });
-const resetControl = createSessionResetController(clearConversation, {
-  session: () => store.sessions[bound],
-  interactive: () => !store.replay,
-  confirmClear: (message) => window.confirm(message),
-  reset: (id, force) => api(`/api/sessions/${encodeURIComponent(id)}/reset${force ? "?force=1" : ""}`, {}),
-  reportError: (message) => {
-    localNotice = message;
-    localAlarm = true;
-    renderComposer(store.sessions[bound]);
-  },
-});
-
 chatCurrent.addEventListener("click", (event) => event.preventDefault());
 
 function consoleURL() {
@@ -106,8 +102,10 @@ function consoleURL() {
 subscribe((_state, event) => {
   if (isOperatorStateEvent(event)) operatorControl.render();
   if (event.type === "snapshot") {
-    if (!store.sessions[bound]) changeBound(requested && store.sessions[requested] ? requested : Object.keys(store.sessions)[0] || "");
+    const open = newestOpenSessions();
+    if (!store.sessions[bound] || store.sessions[bound].closed) changeBound(requested && store.sessions[requested] && !store.sessions[requested].closed ? requested : open[0]?.id || "");
   }
+  if (store.sessions[bound]?.closed) changeBound(newestOpenSessions()[0]?.id || "");
   if (event.session_id && bound && event.session_id !== bound) return;
   schedule();
 });
@@ -132,9 +130,9 @@ function render() {
   chatCurrent.href = `/chat${query.size ? `?${query}` : ""}`;
   consoleButton.href = consoleURL();
   settingsButton.href = `${consoleURL()}#settings/servers`;
-  resetControl.render();
   renderIdentityAlarm();
   renderBinding(session);
+  renderChatList();
   renderHeader(session);
   renderBudget(session);
   renderLog(session);
@@ -151,27 +149,57 @@ function renderIdentityAlarm() {
 }
 
 function renderBinding(session) {
-  binding.replaceChildren();
-  if (requested) {
-    binding.textContent = session?.label || requested;
+  binding.textContent = sessionTitle(session);
+  binding.title = session ? firstUserLine(session) : "";
+  closeCurrent.hidden = !session;
+  closeCurrent.disabled = !session || !!store.replay;
+}
+
+function newestOpenSessions() {
+  return openSessions(store.sessions).sort((left, right) => Date.parse(right.created_at || 0) - Date.parse(left.created_at || 0));
+}
+
+function renderChatList() {
+  const sessions = newestOpenSessions();
+  chatListToggle.hidden = sessions.length === 0;
+  chatListToggle.textContent = `${chatListExpanded ? "▾" : "▸"} chats (${sessions.length})`;
+  chatListToggle.setAttribute("aria-expanded", String(chatListExpanded));
+  chatList.hidden = !chatListExpanded;
+  if (!chatListExpanded) {
+    chatList.replaceChildren();
     return;
   }
-  const select = document.createElement("select");
-  select.setAttribute("aria-label", "Session");
-  for (const item of Object.values(store.sessions)) {
-    const option = document.createElement("option");
-    option.value = item.id;
-    option.textContent = item.label;
-    option.selected = item.id === bound;
-    select.append(option);
-  }
-  select.onchange = () => {
-    changeBound(select.value);
-    follow = true;
-    page = 0;
-    render();
-  };
-  binding.append(select);
+  chatList.replaceChildren(...sessions.map((session) => {
+    const row = document.createElement("div");
+    row.className = `chat-list-row ${session.id === bound ? "current" : ""}`;
+    const select = document.createElement("button");
+    select.type = "button";
+    select.className = "chat-list-select";
+    const text = chatRowText(session);
+    select.append(document.createTextNode(text.slice(0, -1)));
+    const glyph = document.createElement("span");
+    glyph.className = `chat-state-glyph ${session.run?.status || "idle"}`;
+    glyph.textContent = text.slice(-1);
+    select.append(glyph);
+    select.title = `${firstUserLine(session)} · ${session.run?.status || "idle"}`;
+    select.onclick = () => {
+      chatListExpanded = false;
+      changeBound(session.id);
+      follow = true;
+      page = 0;
+      render();
+    };
+    const close = document.createElement("button");
+    close.type = "button";
+    close.className = "chat-list-close";
+    close.textContent = "×";
+    close.title = "Close chat";
+    close.setAttribute("aria-label", `Close ${firstUserLine(session)}`);
+    close.disabled = !!store.replay;
+    close.onclick = () => void closeChat(session);
+    row.append(select, close);
+    return row;
+  }));
 }
 
 function renderHeader(session) {
@@ -197,7 +225,7 @@ function renderLog(session) {
   if (!session) {
     const empty = document.createElement("div");
     empty.className = "chat-empty";
-    empty.textContent = "Choose a session to start.";
+    empty.textContent = "No open chats.";
     finishLogRender([empty]);
     return;
   }
@@ -247,7 +275,11 @@ function buildEntries(session) {
 function changeBound(value) {
   if (bound) attachmentQueues.set(bound, queuedAttachments);
   bound = value;
+  if (bound) setActive(bound);
   queuedAttachments = attachmentQueues.get(bound) || [];
+  const query = new URLSearchParams(location.search);
+  if (bound) query.set("session", bound); else query.delete("session");
+  history.replaceState(null, "", `/chat${query.size ? `?${query}` : ""}`);
 }
 
 function groupResponses(entries) {
@@ -279,11 +311,13 @@ function renderEntry(session, entry) {
     row.tabIndex = 0;
     const content = document.createElement("div");
     content.className = "chat-content";
-    row.append(speaker(entry.type === "user" ? "you" : "agent"), content);
-    view = { row, content, text: "" };
+    const author = speaker(entry.type === "user" ? "you" : agentAuthor(session, entry.agentRole));
+    row.append(author, content);
+    view = { row, author, content, text: "" };
     entryViews.set(entry.key, view);
   }
   usedEntryViews.add(entry.key);
+  view.author.lastElementChild.textContent = entry.type === "user" ? "you" : agentAuthor(session, entry.agentRole);
   view.row.className = `chat-entry ${entry.type === "user" ? "chat-user" : entry.type === "tool" ? "tool-entry" : "chat-agent"}`;
   const content = view.content;
   if (entry.type === "user") {
@@ -307,7 +341,7 @@ function renderEntry(session, entry) {
     if (entry.text) {
       const answer = document.createElement("div");
       renderMarkdown(answer, entry.text);
-      nodes.push(answer, messageCopy(() => assistantCopyText(entry, [])));
+      nodes.push(answer);
     }
     if (!entry.done) {
       const caret = document.createElement("span");
@@ -327,11 +361,13 @@ function renderResponse(session, entry) {
     row.tabIndex = 0;
     const content = document.createElement("div");
     content.className = "chat-content chat-response-content";
-    row.append(speaker("agent"), content);
-    view = { row, content, items: new Map() };
+    const author = speaker(agentAuthor(session));
+    row.append(author, content);
+    view = { row, author, content, items: new Map() };
     entryViews.set(entry.key, view);
   }
   usedEntryViews.add(entry.key);
+  view.author.lastElementChild.textContent = agentAuthor(session);
   const nodes = [];
   const usedItems = new Set();
   for (const item of entry.items) {
@@ -346,7 +382,7 @@ function renderResponse(session, entry) {
     if (!itemView) {
       const step = document.createElement("div");
       step.className = `chat-response-step ${item.type === "tool" ? "chat-response-tool" : ""}`;
-      itemView = { step, answer: null, copy: null, caret: null, answerText: "" };
+      itemView = { step, answer: null, caret: null, answerText: "" };
       view.items.set(item.key, itemView);
     }
     const stepNodes = [];
@@ -360,9 +396,7 @@ function renderResponse(session, entry) {
         }
         if (itemView.answerText !== item.text) renderMarkdown(itemView.answer, item.text);
         itemView.answerText = item.text;
-        if (!itemView.copy) itemView.copy = messageCopy(() => "");
-        itemView.copy.onclick = () => navigator.clipboard?.writeText(assistantCopyText(item, entry.items));
-        stepNodes.push(itemView.answer, itemView.copy);
+        stepNodes.push(itemView.answer);
       }
       if (!item.done) {
         if (!itemView.caret) {
@@ -431,27 +465,6 @@ function speaker(name) {
   label.textContent = name;
   node.append(label);
   return node;
-}
-
-function messageCopy(value) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "message-copy";
-  button.textContent = "Copy message";
-  button.onclick = () => navigator.clipboard?.writeText(value());
-  return button;
-}
-
-function assistantCopyText(entry, responseItems) {
-  const parts = [];
-  if (expanded.has(entry.key) && entry.reasoning) parts.push(`Reasoning\n\n${entry.reasoning}`);
-  if (entry.text) parts.push(entry.text);
-  const callIDs = new Set(entry.toolCallIDs || []);
-  for (const item of responseItems) {
-    if (item.type !== "tool" || !callIDs.has(item.callID) || !expanded.has(item.key)) continue;
-    parts.push(`Tool: ${item.name}\n\narguments\n${JSON.stringify(item.args, null, 2)}\n\nresult\n${capResult(item.content)}`);
-  }
-  return parts.join("\n\n");
 }
 
 function thinking(entry, tokens) {
@@ -569,16 +582,22 @@ function noticeContent(session, entry) {
       }
     }
   }
+  if (entry.agentRole === "aux") {
+    const label = document.createElement("span");
+    label.className = "chat-notice-author";
+    label.textContent = `${agentAuthor(session, "aux")} · `;
+    content.prepend(label);
+  }
   return content;
 }
 
 function renderComposer(session) {
   const running = busy(session);
+  document.body.classList.toggle("no-open-chats", !session);
   send.textContent = running ? "Stop" : "Send";
   send.disabled = !session || !!store.replay;
   input.disabled = !session || !!store.replay;
   attachButton.disabled = !session || !!store.replay || attachmentsBusy;
-  exchangePicker.disabled = !session || !!store.replay || attachmentsBusy;
   if (store.replay) input.placeholder = "Replay";
   else if (session?.run.status === "paused") input.placeholder = "paused — waiting for approval";
   else input.placeholder = "Send a task · Enter sends · Shift+Enter newline";
@@ -592,7 +611,55 @@ function renderComposer(session) {
     row.textContent = `${file.path.split("/").pop()} · ${format(file.bytes)} B${file.reused ? " · reused" : ""}`;
     return row;
   }));
-  composer.classList.toggle("drop-target", attachmentsBusy);
+}
+
+async function newChat() {
+  if (store.replay) return;
+  const source = store.sessions[bound] || Object.values(store.sessions).sort((left, right) => Date.parse(right.created_at || 0) - Date.parse(left.created_at || 0))[0];
+  if (!source) {
+    localNotice = "No session template is available.";
+    localAlarm = true;
+    return renderComposer(undefined);
+  }
+  try {
+    const result = await api("/api/sessions", { source_session_id: source.id });
+    reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
+    changeBound(result.session.id);
+    chatListExpanded = false;
+    localNotice = "";
+    localAlarm = false;
+    follow = true;
+    page = 0;
+    render();
+    input.focus();
+  } catch (error) {
+    localNotice = error.message || String(error);
+    localAlarm = true;
+    renderComposer(store.sessions[bound]);
+  }
+}
+
+async function closeChat(session) {
+  if (!session || store.replay) return;
+  if (isRunning(session)) {
+    localNotice = "This chat has a running run. Stop it before closing the chat.";
+    localAlarm = true;
+    return renderComposer(store.sessions[bound]);
+  }
+  if (!window.confirm(closeConfirmText(session))) return;
+  try {
+    await api(`/api/sessions/${encodeURIComponent(session.id)}`, undefined, "DELETE");
+    reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
+    if (bound === session.id) changeBound(newestOpenSessions()[0]?.id || "");
+    chatListExpanded = false;
+    localNotice = "";
+    localAlarm = false;
+    render();
+  } catch (error) {
+    localNotice = error.message || String(error);
+    localAlarm = true;
+    renderComposer(store.sessions[bound]);
+  }
 }
 
 async function submit() {
@@ -646,15 +713,43 @@ async function refreshExchangeFiles() {
   if (store.replay || !store.sessions[bound]) return;
   try {
     const files = await exchangeFiles();
-    exchangePicker.replaceChildren(new Option("From exchange…", ""), ...files.map((file, index) => {
-      const option = new Option(`${file.path} · ${format(file.bytes)} B`, String(index));
-      option._attachment = file;
-      return option;
+    exchangeFileList.replaceChildren(...files.map((file) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = `${file.path} · ${format(file.bytes)} B`;
+      button.onclick = () => void queueExchangeFile(file);
+      return button;
     }));
+    if (!files.length) {
+      const empty = document.createElement("span");
+      empty.textContent = "Exchange folder is empty";
+      exchangeFileList.append(empty);
+    }
   } catch (error) {
     localNotice = error.message || String(error);
     localAlarm = true;
     renderComposer(store.sessions[bound]);
+  }
+}
+
+async function queueExchangeFile(item) {
+  const session = store.sessions[bound];
+  if (!session || !item) return;
+  attachmentsBusy = true;
+  localNotice = "Copying from exchange folder…";
+  localAlarm = false;
+  renderComposer(session);
+  try {
+    const uploaded = await exchangeUpload(item, session.id, { token: store.mutation_token, maxBytes: store.config.tools?.attachments?.max_bytes });
+    if (!queuedAttachments.some((value) => value.path.toLowerCase() === uploaded.path.toLowerCase())) queuedAttachments.push(uploaded);
+    localNotice = uploaded.note || "Attachment ready";
+    attachMenu.hidden = true;
+  } catch (error) {
+    localNotice = error.message || String(error);
+    localAlarm = true;
+  } finally {
+    attachmentsBusy = false;
+    renderComposer(session);
   }
 }
 
@@ -673,37 +768,36 @@ async function stopRun() {
 
 send.onclick = () => (busy(store.sessions[bound]) ? stopRun() : submit());
 stop.onclick = stopRun;
-attachButton.onclick = () => filePicker.click();
+newChatButton.onclick = () => void newChat();
+closeCurrent.onclick = () => void closeChat(store.sessions[bound]);
+chatListToggle.onclick = () => {
+  chatListExpanded = !chatListExpanded;
+  renderChatList();
+};
+attachButton.onclick = () => { attachMenu.hidden = !attachMenu.hidden; };
+attachBrowse.onclick = () => { attachMenu.hidden = true; filePicker.click(); };
+attachExchange.onclick = () => void refreshExchangeFiles();
 filePicker.addEventListener("change", () => {
   void queueFiles([...filePicker.files]);
   filePicker.value = "";
 });
-exchangePicker.addEventListener("focus", () => void refreshExchangeFiles());
-exchangePicker.addEventListener("change", async () => {
-  const session = store.sessions[bound];
-  const item = exchangePicker.selectedOptions[0]?._attachment;
-  if (!session || !item) return;
-  attachmentsBusy = true;
-  localNotice = "Copying from exchange folder…";
-  localAlarm = false;
-  renderComposer(session);
-  try {
-    const uploaded = await exchangeUpload(item, session.id, { token: store.mutation_token, maxBytes: store.config.tools?.attachments?.max_bytes });
-    if (!queuedAttachments.some((value) => value.path.toLowerCase() === uploaded.path.toLowerCase())) queuedAttachments.push(uploaded);
-    localNotice = uploaded.note || "Attachment ready";
-  } catch (error) {
-    localNotice = error.message || String(error);
-    localAlarm = true;
-  } finally {
-    attachmentsBusy = false;
-    exchangePicker.value = "";
-    renderComposer(session);
+document.body.addEventListener("dragenter", (event) => {
+  if (!store.replay && event.dataTransfer?.types?.includes("Files")) {
+    event.preventDefault();
+    dragDepth++;
+    document.body.classList.add("drop-target");
   }
 });
-composer.addEventListener("dragover", (event) => {
+document.body.addEventListener("dragover", (event) => {
   if (!store.replay && event.dataTransfer?.types?.includes("Files")) event.preventDefault();
 });
-composer.addEventListener("drop", (event) => {
+document.body.addEventListener("dragleave", () => {
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (!dragDepth) document.body.classList.remove("drop-target");
+});
+document.body.addEventListener("drop", (event) => {
+  dragDepth = 0;
+  document.body.classList.remove("drop-target");
   if (!store.replay && event.dataTransfer?.files?.length) {
     event.preventDefault();
     void queueFiles([...event.dataTransfer.files]);
