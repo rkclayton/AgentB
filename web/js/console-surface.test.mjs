@@ -20,9 +20,9 @@ test("Activity uses the full panel height after composer removal", () => {
   assert.doesNotMatch(styles, /\.composer(?:\s|\{|\.)/);
 });
 
-test("Console renders the running build identity from the state snapshot", () => {
+test("Console renders the release tag, commit, and signature from the state snapshot", () => {
   assert.match(index, /id="build-id" class="build-id"/);
-  assert.match(script, /buildID\.textContent = `build \$\{build\.display \|\| "unknown"\}`/);
-  assert.match(script, /dirty worktree/);
+  assert.match(index, /id="signature-state" class="signature-state"/);
+  assert.match(script, /renderBuildHeader\([^;]+store\.build, store\.signature\)/);
   assert.match(styles, /\.build-id\s*\{[^}]*font-family:\s*"IBM Plex Mono"/s);
 });

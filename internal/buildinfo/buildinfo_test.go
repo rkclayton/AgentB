@@ -3,13 +3,14 @@ package buildinfo
 import "testing"
 
 func TestCurrentUsesInjectedCleanAndDirtyIdentity(t *testing.T) {
-	oldCommit, oldDirty := Commit, Dirty
-	t.Cleanup(func() { Commit, Dirty = oldCommit, oldDirty })
+	oldCommit, oldDirty, oldTag := Commit, Dirty, Tag
+	t.Cleanup(func() { Commit, Dirty, Tag = oldCommit, oldDirty, oldTag })
 	Commit = "0123456789abcdef0123456789abcdef01234567"
+	Tag = "v0.7.0"
 
 	Dirty = "false"
 	clean := Current()
-	if clean.Display != "0123456789ab" || clean.Dirty || !clean.Known || clean.Source != "ldflags" {
+	if clean.Tag != "v0.7.0" || clean.Display != "0123456789ab" || clean.Dirty || !clean.Known || clean.Source != "ldflags" {
 		t.Fatalf("clean identity = %+v", clean)
 	}
 

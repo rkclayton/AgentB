@@ -14,9 +14,11 @@ import (
 var (
 	Commit string
 	Dirty  string
+	Tag    = "v0.7.0"
 )
 
 type Info struct {
+	Tag              string `json:"tag"`
 	Commit           string `json:"commit"`
 	Dirty            bool   `json:"dirty"`
 	Known            bool   `json:"known"`
@@ -39,6 +41,7 @@ var executableHash = sync.OnceValue(func() string {
 })
 
 func Current() Info {
+	tag := strings.TrimSpace(Tag)
 	commit := strings.TrimSpace(Commit)
 	dirty, dirtyKnown := parseDirty(Dirty)
 	source := "ldflags"
@@ -47,7 +50,7 @@ func Current() Info {
 		source = "go-vcs"
 	}
 	if commit == "" {
-		return Info{Commit: "unknown", Source: "unknown", Display: "unknown", ExecutableSHA256: executableHash()}
+		return Info{Tag: tag, Commit: "unknown", Source: "unknown", Display: "unknown", ExecutableSHA256: executableHash()}
 	}
 	display := commit
 	if len(display) > 12 {
@@ -56,7 +59,7 @@ func Current() Info {
 	if dirtyKnown && dirty {
 		display += "+dirty"
 	}
-	return Info{Commit: commit, Dirty: dirtyKnown && dirty, Known: true, Source: source, Display: display, ExecutableSHA256: executableHash()}
+	return Info{Tag: tag, Commit: commit, Dirty: dirtyKnown && dirty, Known: true, Source: source, Display: display, ExecutableSHA256: executableHash()}
 }
 
 func parseDirty(value string) (bool, bool) {

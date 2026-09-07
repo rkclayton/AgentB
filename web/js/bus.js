@@ -2,7 +2,7 @@ import { createOperatorReconciler } from "./operator-reconcile.js";
 
 export const store = {
   sessions: {}, active: "", servers: [], config: {}, flow: { stages: [], edges: [] }, tools: [], serving_facts: {},
-  build: { commit: "unknown", dirty: false, known: false, source: "unknown", display: "unknown" },
+  build: { tag: "", commit: "unknown", dirty: false, known: false, source: "unknown", display: "unknown" }, signature: {},
   mutation_token: "", shell_credential: { stored: false, stored_at: "" },
   shell_identity: { fallback: false, operator_approval_required: false, operator_context: false, reason: "", since: "" }, replay: false,
 };

@@ -9,6 +9,8 @@ import { initSettings } from "./settings.js";
 import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
 import { createSessionResetController } from "./session-reset.js";
 import { createMessageDropController } from "./message-drop.js";
+import { renderBuildHeader } from "./build-header.js";
+import { renderStopState } from "./stop-state.js";
 const consoleLaunch = document.getElementById("console-launch"),
   chatLaunch = document.getElementById("chat-launch"),
   operatorStatus = document.getElementById("operator-status"),
@@ -98,12 +100,9 @@ function renderConsole() {
   const suffix = query.size ? `?${query}` : "";
   consoleLaunch.href = `/${suffix}`;
 	chatLaunch.href = `/chat${suffix}`;
-	stop.hidden = !!store.replay;
+	renderStopState(stop, s, store.replay);
 	document.getElementById("mode").textContent = store.replay ? "replay" : "";
-	const build = store.build || {};
-	const buildID = document.getElementById("build-id");
-	buildID.textContent = `build ${build.display || "unknown"}`;
-	buildID.title = build.known ? `Build ${build.commit}${build.dirty ? " (dirty worktree)" : " (clean commit)"}` : "Build identity unavailable";
+	renderBuildHeader(document.getElementById("build-id"), document.getElementById("signature-state"), store.build, store.signature);
 }
 stop.onclick = (event) => {
   const s = store.sessions[store.active];

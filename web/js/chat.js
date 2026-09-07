@@ -3,6 +3,9 @@ import { renderMarkdown } from "./markdown.js";
 import { operatorLogEntry } from "./operator-log.js";
 import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
 import { createThinkingRenderer } from "./reasoning.js";
+import { renderBuildHeader } from "./build-header.js";
+import { formatDuration } from "./duration.js";
+import { renderStopState } from "./stop-state.js";
 import { createSessionResetController } from "./session-reset.js";
 import { createFileChip, fileURL, filesFromResponse, probeFile } from "./deliverables.js";
 import { approvalChoices } from "./approval.js";
@@ -173,11 +176,8 @@ function renderBinding(session) {
 
 function renderHeader(session) {
   status.textContent = store.replay ? "replay" : session?.run?.status || "idle";
-  const build = store.build || {};
-  buildID.textContent = `build ${build.display || "unknown"}`;
-  buildID.title = build.known ? `Build ${build.commit}${build.dirty ? " (dirty worktree)" : " (clean commit)"}` : "Build identity unavailable";
-  stop.hidden = !!store.replay;
-  stop.disabled = !session || !busy(session);
+  renderBuildHeader(buildID, document.getElementById("chat-signature-state"), store.build, store.signature);
+  renderStopState(stop, session, store.replay);
 }
 
 function renderBudget(session) {
@@ -471,7 +471,7 @@ function toolTick(entry) {
   button.children[1].textContent = keyArgument(entry.args);
   button.children[2].textContent = callServiceStatus(entry.name, entry.result) || state;
   button.children[2].className = `tool-state ${state === "error" ? "error" : ""}`;
-  button.children[3].textContent = entry.result && entry.result.ms !== null && entry.result.ms !== undefined ? `${entry.result.ms} ms` : "";
+  button.children[3].textContent = formatDuration(entry.result?.ms);
   button.onclick = () => {
     expanded.has(entry.key) ? expanded.delete(entry.key) : expanded.add(entry.key);
     render();

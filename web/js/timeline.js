@@ -4,6 +4,7 @@ import { groupToolRuns, toolGroupRange, toolGroupStatus, toolResultText } from "
 import { operatorLogEntry } from "./operator-log.js";
 import { callServiceKey, callServiceStatus } from "./call-service-display.js";
 import { createFileChip, fileURL, probeFile } from "./deliverables.js";
+import { formatDuration } from "./duration.js";
 
 const states = createPanelState("timeline");
 const attachmentStates = new Map();
@@ -190,7 +191,7 @@ function toolRow(session, call, callEvent, resultEvent, state, modelEvent = null
   row.head.innerHTML = '<span class="timeline-lamp"></span><span class="timeline-label"></span><span class="timeline-key"></span><span class="duration number"></span><span class="finish"></span>';
   row.head.children[1].textContent = friendly(call.name);
   row.head.children[2].textContent = keyArgument(args);
-  row.head.children[3].textContent = formatDuration(result.ms || 0);
+  row.head.children[3].textContent = formatDuration(result.ms);
   const serviceStatus = callServiceStatus(call.name, result);
   row.head.children[4].textContent = serviceStatus || (result.operator_context
     ? `Operator · ${result.ok === false ? "Failed" : "Done"}`
@@ -395,9 +396,6 @@ function capLines(value) {
   return lines.length <= 200
     ? value
     : [...lines.slice(0, 199), "[… open the JSONL for the rest]"].join("\n");
-}
-function formatDuration(ms) {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms || 0} ms`;
 }
 function formatNumber(value) {
   return Number(value || 0).toLocaleString("en-US");
