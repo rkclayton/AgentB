@@ -49,7 +49,10 @@ export function initShell(options = {}) {
     link.dataset.page = id;
     link.textContent = label;
     link.href = path;
-    if (page === id) link.setAttribute("aria-current", "page");
+    if (page === id) {
+      link.setAttribute("aria-current", "page");
+      link.onclick = (event) => event.preventDefault();
+    }
     pages.append(link);
   }
   const settings = node("a", "shell-settings");

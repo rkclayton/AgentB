@@ -54,31 +54,37 @@ try {
     }
     $indexSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\index.html')
     $chatSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\chat.html')
-    if ($indexSource -match 'target=' -or $chatSource -match 'target=') {
+    $planSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\plan.html')
+    $shellSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\shell.js')
+    if ($indexSource -match 'target=' -or $chatSource -match 'target=' -or $planSource -match 'target=') {
         throw 'Installed application still contains second-window navigation.'
     }
     if ($indexSource -match 'class="brand"' -or $chatSource -match 'class="chat-brand"') {
         throw 'Installed application still contains redundant in-page Agent_b branding.'
     }
-    if ($indexSource -notmatch '<header class="header window-titlebar">\s+<nav id="tabs"' -or
-        $indexSource.IndexOf('id="stop"') -gt $indexSource.IndexOf('id="console-launch"') -or
-        $chatSource.IndexOf('id="chat-stop"') -gt $chatSource.IndexOf('id="chat-current"') -or
-        $indexSource -notmatch 'class="stop-sign"' -or $chatSource -notmatch 'class="stop-sign"') {
-        throw 'Installed application is missing the consolidated tab header or leading stop-sign control.'
+    foreach ($page in @(
+        @{ Source = $indexSource; Name = 'console' },
+        @{ Source = $chatSource; Name = 'chat' },
+        @{ Source = $planSource; Name = 'plan' }
+    )) {
+        if ($page.Source -notmatch ('id="app-shell"[^>]+data-page="' + $page.Name + '"')) {
+            throw "Installed $($page.Name) page is missing the shared shell slot."
+        }
     }
-    foreach ($required in @('id="chat-console"', 'id="chat-settings"', 'id="chat-stop"', 'id="chat-new"', 'id="chat-close"', 'id="chat-list-toggle"', 'id="chat-attach"', 'class="identity-status"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
+    if ($shellSource -notmatch 'root\.append\(left, middle, right\)' -or
+        $shellSource -notmatch 'right\.append\(stop, state, operator, alarm, connection, pages, settings\)' -or
+        $shellSource -notmatch 'const sessionID = store\.selection\.session_id' -or
+        $shellSource -match 'all:\s*true') {
+        throw 'Installed shared shell does not preserve LEFT/MIDDLE/RIGHT order or selected-chat Stop scope.'
+    }
+    foreach ($required in @('id="chat-attach"', 'id="chat-expand"', 'rows="5"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
         if ($chatSource -notmatch [regex]::Escape($required)) { throw "Installed Chat view is missing: $required" }
     }
     if ($chatSource -match 'chat-clear-conversation|chat-attachment-controls') {
         throw 'Installed Chat view still contains removed Clear or attachment-pane chrome.'
     }
-    foreach ($link in @(
-        @{ Source = $indexSource; Pattern = '<a id="console-launch"[^>]+href="/"'; Name = 'Console selector' },
-        @{ Source = $indexSource; Pattern = '<a id="chat-launch"[^>]+href="/chat"'; Name = 'Console-to-Chat link' },
-        @{ Source = $chatSource; Pattern = '<a id="chat-console"[^>]+href="/"'; Name = 'Chat-to-Console link' },
-        @{ Source = $chatSource; Pattern = '<a id="chat-settings"[^>]+href="/#settings/servers"'; Name = 'Chat-to-Settings link' }
-    )) {
-        if ($link.Source -notmatch $link.Pattern) { throw "Installed application is missing its native $($link.Name)." }
+    foreach ($link in @('Chat", "/chat"', 'Console", "/"', 'Plan", "/plan"')) {
+        if ($shellSource -notmatch [regex]::Escape($link)) { throw "Installed application is missing page switch $link." }
     }
     $chatCSS = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\css\chat.css')
     foreach ($required in @('.chat-budget { grid-row: 2; }', '.chat-log { grid-row: 3; }', '.chat-composer { grid-row: 4; }', '#chat-send {')) {
@@ -86,7 +92,7 @@ try {
     }
     $chatScript = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\chat.js')
     $settingsScript = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\settings.js')
-    if ($chatScript -notmatch 'chatCurrent\.addEventListener\("click", \(event\) => event\.preventDefault\(\)\);' -or
+    if ($shellSource -notmatch 'link\.onclick = \(event\) => event\.preventDefault\(\);' -or
         $settingsScript -notmatch 'consoleLaunch\.addEventListener\("click", \(event\) => \{\s+event\.preventDefault\(\);\s+if \(open\) closeSettings\(\);') {
         throw 'Installed application allows its selected view control to reload the page.'
     }
