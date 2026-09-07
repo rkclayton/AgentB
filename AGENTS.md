@@ -1,15 +1,20 @@
 # Agent_b repository guidance
 
 ## Orientation
-- Read `PLAN.md` and `NOTES.md` at session start. `PLAN.md` is the sequencing authority; `NOTES.md` is the append-only document of record for decisions, discovery findings, and the follow-up card backlog.
+- Read `PLAN.md` at session start. `PLAN.md` is the sequencing authority. Read `NOTES.md` only by a targeted pointer (named heading, search result, or tail), never at session start and never from top to bottom; it is the append-only document of record for decisions, discovery findings, and the follow-up card backlog.
 - `INTERFACES.md` and `SECURITY.md` are binding. `docs/HARDENING.md` is the operator runbook.
 - Planning documents are not tracked. `PLAN.md` is gitignored and operator-owned; record durable findings and decisions in `NOTES.md`.
 
 ## PLAN.md is operator-owned
-- Never create, modify, delete, or commit `PLAN.md`. It is edited by the operator, outside your session.
+- Never create, delete, or commit `PLAN.md`. It is edited by the operator, outside your session, except that Codex may append progress lines beneath its existing `## In flight` heading while a work order is underway.
 - Read it at session start for sequencing. After that, the work order you were given is the authority for the task in flight.
 - `PLAN.md` appearing, changing, or being reordered mid-task is expected and is not a finding. Do not report it as a workspace anomaly, do not investigate it, and do not re-plan the task in flight because of it.
 - If the operator wants a change to affect work already underway, they will say so in the session. Otherwise a `PLAN.md` change affects the NEXT task, not the current one.
+
+## INBOX.md is the in-session channel
+- At the start of every W item, before every commit, and before every hard-stop report, check only the byte size of `INBOX.md`.
+- If it is non-empty, read it and act on the operator's instruction: `STOP` means finish the file in hand safely, report, and end; `REVISE: <text>` means re-read `## Current work order` and continue under the revision; any other text is a note to acknowledge.
+- Append one acknowledgement line to `NOTES.md`, then truncate `INBOX.md` to zero so the flag resets. Only the operator or Fable writes new mailbox content; Codex never writes instructions there.
 
 ## Alpha testing instance — do not touch
 - A second, production-shaped install runs on **port 7337**, with roots under `C:\alpha` and a git worktree at `C:\alpha\src`. It is the operator's daily driver while development continues.
