@@ -179,6 +179,57 @@ func TestRunScriptRetainsSplitModeConfirmation(t *testing.T) {
 	}
 }
 
+func TestShellSessionGrantCrossesRunsAndLapsesOnClose(t *testing.T) {
+	cfg := config.Defaults(t.TempDir())
+	cfg.Approval.Mode = config.ApprovalModeMutating
+	cfg.Shell.ServiceAccount.Enabled = true
+	tool := &shellPolicyTool{}
+	runner, s, bus := shellPolicyRunner(t, cfg, tool)
+	eventCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	done := make(chan tools.CallOutcome, 1)
+	go func() {
+		done <- runner.executeTool(context.Background(), s, "run-1", "call-1", "shell", map[string]any{"command": "Write-Output first"})
+	}()
+	nextApprovalEvent(t, eventCh)
+	if err := runner.gate.Decide(s.ID, "call-1", "session"); err != nil {
+		t.Fatal(err)
+	}
+	if outcome := <-done; !outcome.OK || outcome.OperatorContext {
+		t.Fatalf("first=%+v", outcome)
+	}
+	second := runner.executeTool(context.Background(), s, "run-2", "call-2", "shell", map[string]any{"command": "Write-Output second"})
+	if !second.OK || second.OperatorContext || tool.normalCalls != 2 {
+		t.Fatalf("second=%+v calls=%d", second, tool.normalCalls)
+	}
+	foundGrant := false
+	for len(eventCh) > 0 {
+		event := <-eventCh
+		data, _ := event.Data.(map[string]any)
+		if event.Type == events.ShellGrant {
+			foundGrant = data["run_id"] == "run-1" && data["scope"] == "session" && data["rule"] == shellGrantPolicy && data["identity"] == "service"
+		}
+	}
+	if !foundGrant {
+		t.Fatal("missing durable session shell.grant shape")
+	}
+	runner.LapseSessionGrants(s.ID)
+	lapsed := <-eventCh
+	lapseData, _ := lapsed.Data.(map[string]any)
+	if lapsed.Type != events.ShellGrantLapsed || lapseData["run_id"] != "run-1" || lapseData["scope"] != "session" || lapseData["rule"] != shellGrantPolicy || lapseData["identity"] != "service" || lapseData["reason"] != "session closed" {
+		t.Fatalf("shell lapse=%#v", lapsed)
+	}
+	done = make(chan tools.CallOutcome, 1)
+	go func() {
+		done <- runner.executeTool(context.Background(), s, "run-3", "call-3", "shell", map[string]any{"command": "Write-Output third"})
+	}()
+	nextApprovalEvent(t, eventCh)
+	if err := runner.gate.Decide(s.ID, "call-3", "deny"); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+}
+
 func TestDeniedServiceShellPolicyExecutesNothing(t *testing.T) {
 	cfg := config.Defaults(t.TempDir())
 	cfg.Approval.Mode = config.ApprovalModeMutating

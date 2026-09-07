@@ -429,8 +429,28 @@
   background: transparent;
 }
 .chat-approval button:last-child {
-  color: var(--alarm);
+	color: var(--alarm);
 }
+.pending-approval {
+	min-height: 0;
+	padding: 5px 7px;
+	color: var(--alarm);
+	background: var(--well);
+	border: 1px solid var(--alarm);
+	font-size: 12px;
+	line-height: 20px;
+	user-select: none;
+}
+.pending-approval[hidden] { display: none; }
+.pending-approval .chat-content { color: inherit; }
+.pending-approval button {
+	min-height: 20px;
+	margin-left: 6px;
+	padding: 0 5px;
+	color: var(--trace);
+	background: transparent;
+}
+.pending-approval button:last-child { color: var(--alarm); }
 .chat-earlier {
   width: 100%;
   color: var(--mute);
@@ -511,6 +531,7 @@
   color: var(--well);
   background: var(--alarm);
 }
+#chat-status.waiting { color: var(--alarm); }
 .chat-pending-attachments {
   display: flex;
   gap: 6px;

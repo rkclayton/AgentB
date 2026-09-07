@@ -36,6 +36,20 @@ test("Composer uses one paperclip and pending files occupy no row when empty", (
   assert.match(css, /\.chat-pending-attachments:empty\s*\{\s*display:\s*none/);
 });
 
+test("Pending approval is pinned above the composer with zero idle space", () => {
+	assert.match(html, /id="chat-pending-approval" class="pending-approval" hidden[\s\S]*class="chat-composer-row"/);
+	assert.match(chat, /session\?\.pending_approval \? "waiting for you"/);
+	assert.match(chat, /pendingApproval\.hidden = !session\?\.pending_approval/);
+	assert.match(css, /\.pending-approval\[hidden\]\s*\{\s*display:\s*none/);
+	assert.match(css, /#chat-status\.waiting\s*\{\s*color:\s*var\(--alarm\)/);
+});
+
+test("Composer sends during an active run and reports projected queue count", () => {
+	assert.doesNotMatch(chat, /Run in progress|queue_depth/);
+	assert.match(chat, /send\.onclick = submit/);
+	assert.match(chat, /queued \? `queued \(\$\{queued\}\)`/);
+});
+
 test("New, list, and close are Chat lifecycle controls while Clear is absent", () => {
   assert.match(html, /id="chat-new"/);
   assert.match(html, /id="chat-list-toggle"/);

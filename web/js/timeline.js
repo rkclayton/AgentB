@@ -60,7 +60,11 @@ export function renderTimeline() {
         "workspace.conflict",
         "message.queued",
         "run.queued",
-        "operator.context",
+		"operator.context",
+		"shell.grant",
+		"shell.grant_lapsed",
+		"file.grant",
+		"file.grant_lapsed",
         "compaction",
         "run.stopped",
       ].includes(event.type)
@@ -266,28 +270,20 @@ function inlineRow(session, event, decisions, state) {
       decided.className = "decision";
       decided.textContent = decision;
       row.head.append(decided);
-    } else
-      for (const choice of boundaryEscape
-        ? [["approve", "Run once as operator"], ["deny", "Keep denied"]]
-        : [["approve", "Approve"], ["deny", "Deny"]]) {
-        const [value, label] = choice;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = label;
-        button.onclick = (eventClick) => {
-          eventClick.stopPropagation();
-          api("/api/approve", {
-            session_id: session.id,
-            call_id: data.call_id,
-            decision: value,
-          });
-        };
-        row.head.append(button);
-      }
+	} else if (session.pending_approval?.event?.data?.call_id === data.call_id) {
+		const waiting = document.createElement("span");
+		waiting.className = "decision alarm";
+		waiting.textContent = "waiting for you";
+		row.head.append(waiting);
+	}
     addBlock(row.expansion, "arguments", data.args || {});
   } else if (event.type === "workspace.conflict") {
     text.textContent = `Conflict · ${data.path} · ${data.other_label} · ${data.age_s} s`;
-  } else if (event.type === "message.queued") {
+	} else if (event.type === "shell.grant" || event.type === "file.grant") {
+		text.textContent = `${event.type === "shell.grant" ? "Shell" : "File-tool"} grant · for this ${data.scope === "session" ? "chat" : "run"}`;
+	} else if (event.type === "shell.grant_lapsed" || event.type === "file.grant_lapsed") {
+		text.textContent = `${event.type === "shell.grant_lapsed" ? "Shell" : "File-tool"} grant lapsed · ${data.reason || "scope ended"}`;
+	} else if (event.type === "message.queued") {
     text.textContent = `Queued · message ${String(data.message_id || "").replace(/\D/g, "")} · position ${data.position}`;
   } else if (event.type === "message.appended" && data.message?.attachments?.length) {
     text.textContent = `Attached · ${data.message.attachments.length} file${data.message.attachments.length === 1 ? "" : "s"}`;

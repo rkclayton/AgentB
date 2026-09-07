@@ -23,19 +23,23 @@ import (
 )
 
 type Runner struct {
-	bus          *events.Bus
-	tools        *tools.Registry
-	prompt       *PromptRenderer
-	profile      func(string) (*config.Profile, bool)
-	cfg          func() config.Config
-	gate         *Gate
-	budget       *Budgeter
-	compact      *contextmgr.Compactor
-	toolActivity func(string)
-	deliver      func(*session.Session, string, []delivery.Source)
-	shellGrantMu sync.Mutex
-	shellGrants  map[string][]shellRunGrant
-	ids          atomic.Int64
+	bus                *events.Bus
+	tools              *tools.Registry
+	prompt             *PromptRenderer
+	profile            func(string) (*config.Profile, bool)
+	cfg                func() config.Config
+	gate               *Gate
+	budget             *Budgeter
+	compact            *contextmgr.Compactor
+	toolActivity       func(string)
+	deliver            func(*session.Session, string, []delivery.Source)
+	shellGrantMu       sync.Mutex
+	shellGrants        map[string][]shellRunGrant
+	shellSessionGrants map[string][]shellSessionGrant
+	fileGrantMu        sync.Mutex
+	fileRunGrants      map[string]bool
+	fileSessionGrants  map[string]string
+	ids                atomic.Int64
 }
 
 func NewRunner(bus *events.Bus, registry *tools.Registry, prompt *PromptRenderer, profile func(string) (*config.Profile, bool), cfg func() config.Config) *Runner {
@@ -88,6 +92,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		}
 	}()
 	defer r.lapseShellGrants(s, runID)
+	defer r.lapseFileRunGrant(s, runID)
 	profile, ok := r.profile(s.ServerID)
 	if !ok {
 		return "profile_not_runnable", "profile not found", 0
@@ -393,6 +398,9 @@ func toolResultEventData(turn int, callID, name, content string, ok, operatorCon
 func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) tools.CallOutcome {
 	cfg := r.cfg()
 	eventArgs := sanitizedToolArguments(name, args)
+	if fileGrantTool(name) && cfg.Shell.ServiceAccount.Enabled && !cfg.Shell.OperatorContext && r.hasFileGrant(s.ID, runID) {
+		return r.callFileAsOperator(ctx, s, name, args)
+	}
 	if name == "shell" && cfg.Shell.ServiceAccount.Enabled && !cfg.Shell.OperatorContext {
 		if r.hasShellGrant(s.ID, runID, shellGrantBoundary, "") {
 			return r.callShellAsOperator(ctx, s, name, args)
@@ -429,6 +437,9 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	if name == "shell" && decision == "run" {
 		r.grantShellRun(s, runID, shellRunGrant{Rule: shellGrantPolicy, Identity: "service"})
 	}
+	if name == "shell" && decision == "session" {
+		r.grantShellSession(s, runID, shellRunGrant{Rule: shellGrantPolicy, Identity: "service"})
+	}
 	outcome := r.callDetailed(ctx, s, name, args)
 	if !outcome.OperatorOverrideAvailable {
 		return outcome
@@ -458,11 +469,7 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	if name == "shell" {
 		overrideDecision, overrideErr = r.gate.WaitBoundaryDecision(ctx, s, runID, overrideID, name+".operator_override", overrideArgs)
 	} else {
-		var approved bool
-		approved, overrideErr = r.gate.WaitBoundaryEscape(ctx, s, runID, overrideID, name+".operator_override", overrideArgs)
-		if approved {
-			overrideDecision = "approve"
-		}
+		overrideDecision, overrideErr = r.gate.WaitBoundaryDecision(ctx, s, runID, overrideID, name+".operator_override", overrideArgs)
 	}
 	if overrideErr != nil {
 		outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override canceled", false, false
@@ -476,6 +483,15 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	if name == "shell" && overrideDecision == "run" {
 		r.grantShellRun(s, runID, shellRunGrant{Rule: shellGrantBoundary, Identity: "operator"})
 	}
+	if name == "shell" && overrideDecision == "session" {
+		r.grantShellSession(s, runID, shellRunGrant{Rule: shellGrantBoundary, Identity: "operator"})
+	}
+	if fileGrantTool(name) && overrideDecision == "run" {
+		r.grantFileRun(s, runID)
+	}
+	if fileGrantTool(name) && overrideDecision == "session" {
+		r.grantFileSession(s, runID)
+	}
 	log.Printf("SECURITY: %s operator-identity override approved: session=%s call=%s command=%q path=%q", name, s.ID, callID, command, path)
 	overrideContent, overrideOK := r.tools.CallAsOperator(ctx, s, name, args)
 	if overrideOK {
@@ -487,6 +503,18 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	}
 	outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override was attempted but failed:\n"+overrideContent, false, true
 	return outcome
+}
+
+func (r *Runner) callFileAsOperator(ctx context.Context, s *session.Session, name string, args map[string]any) tools.CallOutcome {
+	if r.toolActivity != nil {
+		r.toolActivity("started")
+		defer r.toolActivity("completed")
+	}
+	content, ok := r.tools.CallAsOperator(ctx, s, name, args)
+	if ok && strings.TrimSpace(content) == "" {
+		content = "the tool completed with no output"
+	}
+	return tools.CallOutcome{Content: content, OK: ok, OperatorContext: true}
 }
 
 func (r *Runner) callDetailed(ctx context.Context, s *session.Session, name string, args map[string]any) (outcome tools.CallOutcome) {

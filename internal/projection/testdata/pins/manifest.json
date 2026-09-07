@@ -14,6 +14,30 @@
       "rationale": "A minimal durable user message with attachment metadata; it pins replay projection into both messages and Chat without embedding file bytes."
     },
     {
+      "id": "approval-parallel-turn2",
+      "source": "sources/approval-parallel-turn2.events",
+      "golden": "golden/approval-parallel-turn2.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/approval-parallel-turn2.events",
+      "origin_sha256": "eaced2d9831487d27cf736ce94e9add216112c3a14d7d44e361874ba3db03efe",
+      "origin_records": 13,
+      "decompressed_bytes": 4162,
+      "synthetic": true,
+      "shapes": ["approval", "parallel-tools", "turn-two", "pending-decision"],
+      "rationale": "The r5 seq 1993 shape: a turn-two shell operator-command approval follows three parallel sibling tool calls and must remain a projected pending decision."
+    },
+    {
+      "id": "stop-preserves-chat",
+      "source": "sources/stop-preserves-chat.events",
+      "golden": "golden/stop-preserves-chat.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/stop-preserves-chat.events",
+      "origin_sha256": "22b14305f85a9071cb6aa994224113b13344aa8036dee52a003164e7d8e77d8e",
+      "origin_records": 18,
+      "decompressed_bytes": 5491,
+      "synthetic": true,
+      "shapes": ["approval-dismissed", "parallel-cancel", "stop-preserves-chat"],
+      "rationale": "A stopped approval-blocked run with three parallel results; it pins durable dismissal and proves the final projection retains user, agent, and tool rows."
+    },
+    {
       "id": "session-close",
       "source": "sources/session-close.events",
       "golden": "golden/session-close.golden.json",

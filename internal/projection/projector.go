@@ -129,6 +129,7 @@ type Snapshot struct {
 	Activity             Activity         `json:"activity"`
 	Timeline             []events.Event   `json:"timeline"`
 	Chat                 []ChatEntry      `json:"chat"`
+	PendingApproval      *ChatEntry       `json:"pending_approval,omitempty"`
 	Closed               bool             `json:"closed"`
 	Stale                bool             `json:"projection_stale,omitempty"`
 	StaleReason          string           `json:"projection_stale_reason,omitempty"`
@@ -217,6 +218,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.Activity = Activity{CompletedStages: []string{}}
 		next.Timeline = []events.Event{}
 		next.Chat = []ChatEntry{}
+		next.PendingApproval = nil
 		if value := stringValue(data["log_path"]); value != "" {
 			next.LogPath = value
 		}
@@ -242,6 +244,9 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.Activity.ActiveTool = ""
 		if stringValue(data["reason"]) == "tool_errors" {
 			next.Activity.DispatchAlarm = true
+		}
+		if next.PendingApproval != nil && next.PendingApproval.RunID == record.Event.RunID {
+			next.PendingApproval = nil
 		}
 	case events.Stage:
 		stage, state := stringValue(data["stage"]), stringValue(data["state"])
@@ -437,14 +442,22 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		}
 	case events.ApprovalRequired:
 		next.Run.Status = "paused"
+		event := stripDiagnostic(record.Event)
+		next.PendingApproval = &ChatEntry{Type: "notice", Key: "event:" + strconv.FormatInt(record.Event.Seq, 10), RunID: record.Event.RunID, Event: &event}
 	case events.ApprovalDecided:
-		next.Run.Status = "running"
+		decision := stringValue(data["decision"])
+		if decision != "superseded" && decision != "dismissed" {
+			next.Run.Status = "running"
+		}
 		next.Chat = cloneChat(next.Chat)
 		for index := len(next.Chat) - 1; index >= 0; index-- {
 			if next.Chat[index].Type == "notice" && next.Chat[index].Event != nil && stringValue(eventMap(next.Chat[index].Event.Data)["call_id"]) == stringValue(data["call_id"]) {
 				next.Chat[index].Decision = stringValue(data["decision"])
 				break
 			}
+		}
+		if next.PendingApproval != nil && next.PendingApproval.Event != nil && stringValue(eventMap(next.PendingApproval.Event.Data)["call_id"]) == stringValue(data["call_id"]) {
+			next.PendingApproval = nil
 		}
 	case events.CycleDetected:
 		next.Activity.DispatchAlarm = true
@@ -610,7 +623,7 @@ func diff(before, after Snapshot) Patch {
 		{"compaction_model_calls", before.CompactionModelCalls, after.CompactionModelCalls},
 		{"compaction_prompt_tokens", before.CompactionPrompt, after.CompactionPrompt},
 		{"compaction_completion_tokens", before.CompactionCompletion, after.CompactionCompletion},
-		{"activity", before.Activity, after.Activity}, {"closed", before.Closed, after.Closed},
+		{"activity", before.Activity, after.Activity}, {"pending_approval", before.PendingApproval, after.PendingApproval}, {"closed", before.Closed, after.Closed},
 		{"projection_stale", before.Stale, after.Stale}, {"projection_stale_reason", before.StaleReason, after.StaleReason},
 	}
 	patch.Operations = append(patch.Operations, diffRun(before.Run, after.Run)...)
@@ -673,6 +686,23 @@ func diffChat(before, after []ChatEntry) []Operation {
 		}
 		value, _ := json.Marshal(after[len(after)-1])
 		return []Operation{{Op: "upsert", Path: "/chat/" + pointer(after[len(after)-1].Key), Value: value}}
+	}
+	if len(after) == len(before) {
+		operations := make([]Operation, 0, len(after))
+		for index := range after {
+			if before[index].Key != after[index].Key {
+				operations = nil
+				break
+			}
+			if reflect.DeepEqual(before[index], after[index]) {
+				continue
+			}
+			value, _ := json.Marshal(after[index])
+			operations = append(operations, Operation{Op: "upsert", Path: "/chat/" + pointer(after[index].Key), Value: value})
+		}
+		if operations != nil {
+			return operations
+		}
 	}
 	value, _ := json.Marshal(after)
 	return []Operation{{Op: "replace", Path: "/chat", Value: value}}
@@ -770,7 +800,7 @@ func toolCalls(value any) []events.ToolCall {
 }
 func chatNotice(value string) bool {
 	switch value {
-	case events.RunStopped, events.RunQueued, events.MessageQueued, events.Compaction, events.WorkspaceConflict, events.ApprovalRequired, events.MemoryNoted, events.OperatorContext, events.SigningApplied, events.FilesDelivered, events.ShellGrant, events.ShellGrantLapsed:
+	case events.RunStopped, events.RunQueued, events.MessageQueued, events.Compaction, events.WorkspaceConflict, events.ApprovalRequired, events.MemoryNoted, events.OperatorContext, events.SigningApplied, events.FilesDelivered, events.ShellGrant, events.ShellGrantLapsed, events.FileGrant, events.FileGrantLapsed:
 		return true
 	}
 	return false

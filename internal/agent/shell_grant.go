@@ -22,6 +22,10 @@ type shellRunGrant struct {
 	Identity   string `json:"identity"`
 	Executable string `json:"executable,omitempty"`
 }
+type shellSessionGrant struct {
+	shellRunGrant
+	RunID string
+}
 
 func shellGrantKey(sessionID, runID string) string { return sessionID + "\x00" + runID }
 
@@ -33,7 +37,31 @@ func (r *Runner) hasShellGrant(sessionID, runID, rule, executable string) bool {
 			return true
 		}
 	}
+	for _, stored := range r.shellSessionGrants[sessionID] {
+		grant := stored.shellRunGrant
+		if grant.Rule == rule && strings.EqualFold(grant.Executable, executable) {
+			return true
+		}
+	}
 	return false
+}
+
+func (r *Runner) grantShellSession(s *session.Session, runID string, grant shellRunGrant) {
+	r.shellGrantMu.Lock()
+	if r.shellSessionGrants == nil {
+		r.shellSessionGrants = map[string][]shellSessionGrant{}
+	}
+	for _, existing := range r.shellSessionGrants[s.ID] {
+		if existing.Rule == grant.Rule && strings.EqualFold(existing.Executable, grant.Executable) {
+			r.shellGrantMu.Unlock()
+			return
+		}
+	}
+	r.shellSessionGrants[s.ID] = append(r.shellSessionGrants[s.ID], shellSessionGrant{shellRunGrant: grant, RunID: runID})
+	r.shellGrantMu.Unlock()
+	if r.bus != nil {
+		r.bus.Publish(events.New(events.ShellGrant, s.ID, runID, shellGrantData(runID, "session", grant, "")))
+	}
 }
 
 func (r *Runner) grantShellRun(s *session.Session, runID string, grant shellRunGrant) {
@@ -51,7 +79,7 @@ func (r *Runner) grantShellRun(s *session.Session, runID string, grant shellRunG
 	r.shellGrants[key] = append(r.shellGrants[key], grant)
 	r.shellGrantMu.Unlock()
 	if r.bus != nil {
-		r.bus.Publish(events.New(events.ShellGrant, s.ID, runID, shellGrantData(runID, grant, "")))
+		r.bus.Publish(events.New(events.ShellGrant, s.ID, runID, shellGrantData(runID, "run", grant, "")))
 	}
 }
 
@@ -69,13 +97,41 @@ func (r *Runner) lapseShellGrants(s *session.Session, runID string) {
 	})
 	for _, grant := range grants {
 		if r.bus != nil {
-			r.bus.Publish(events.New(events.ShellGrantLapsed, s.ID, runID, shellGrantData(runID, grant, "run ended")))
+			r.bus.Publish(events.New(events.ShellGrantLapsed, s.ID, runID, shellGrantData(runID, "run", grant, "run ended")))
 		}
 	}
 }
 
-func shellGrantData(runID string, grant shellRunGrant, reason string) map[string]any {
-	data := map[string]any{"run_id": runID, "scope": "run", "rule": grant.Rule, "identity": grant.Identity}
+// LapseSessionGrants closes only grants scoped to the durable chat. Run grants
+// retain their existing run-end lifecycle.
+func (r *Runner) LapseSessionGrants(sessionID string) {
+	r.shellGrantMu.Lock()
+	shellGrants := append([]shellSessionGrant(nil), r.shellSessionGrants[sessionID]...)
+	delete(r.shellSessionGrants, sessionID)
+	r.shellGrantMu.Unlock()
+	sort.Slice(shellGrants, func(i, j int) bool {
+		if shellGrants[i].Rule == shellGrants[j].Rule {
+			return shellGrants[i].Executable < shellGrants[j].Executable
+		}
+		return shellGrants[i].Rule < shellGrants[j].Rule
+	})
+	for _, stored := range shellGrants {
+		if r.bus != nil {
+			r.bus.Publish(events.New(events.ShellGrantLapsed, sessionID, stored.RunID, shellGrantData(stored.RunID, "session", stored.shellRunGrant, "session closed")))
+		}
+	}
+
+	r.fileGrantMu.Lock()
+	fileRunID := r.fileSessionGrants[sessionID]
+	delete(r.fileSessionGrants, sessionID)
+	r.fileGrantMu.Unlock()
+	if fileRunID != "" {
+		r.publishFileGrant(events.FileGrantLapsed, sessionID, fileRunID, "session", "session closed")
+	}
+}
+
+func shellGrantData(runID, scope string, grant shellRunGrant, reason string) map[string]any {
+	data := map[string]any{"run_id": runID, "scope": scope, "rule": grant.Rule, "identity": grant.Identity}
 	if grant.Executable != "" {
 		data["executable"] = grant.Executable
 	}
@@ -102,6 +158,9 @@ func (r *Runner) executeOperatorCommand(ctx context.Context, s *session.Session,
 		}
 		if decision == "run" {
 			r.grantShellRun(s, runID, shellRunGrant{Rule: shellGrantOperatorCommand, Identity: "operator", Executable: command.Executable})
+		}
+		if decision == "session" {
+			r.grantShellSession(s, runID, shellRunGrant{Rule: shellGrantOperatorCommand, Identity: "operator", Executable: command.Executable})
 		}
 	}
 	return r.callConfiguredCommandAsOperator(ctx, s, name, args)

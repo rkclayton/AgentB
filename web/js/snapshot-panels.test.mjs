@@ -8,7 +8,15 @@ class FakeElement {
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.get(name); }
   set innerHTML(value) { const count = [...String(value).matchAll(/<span/g)].length; this.children = Array.from({ length: count }, () => new FakeElement("span")); }
-  get classList() { return { add: (...names) => { this.className += ` ${names.join(" ")}`; }, contains: (name) => this.className.split(/\s+/).includes(name) }; }
+  get classList() { return {
+    add: (...names) => { this.className += ` ${names.join(" ")}`; },
+    contains: (name) => this.className.split(/\s+/).includes(name),
+    toggle: (name, force) => {
+      const names = new Set(this.className.split(/\s+/).filter(Boolean));
+      if (force ?? !names.has(name)) names.add(name); else names.delete(name);
+      this.className = [...names].join(" ");
+    },
+  }; }
 }
 const elements = new Map();
 globalThis.document = { hidden: false, addEventListener: () => {}, getElementById: (id) => { if (!elements.has(id)) elements.set(id, new FakeElement()); return elements.get(id); }, createElement: (tag) => new FakeElement(tag) };

@@ -20,12 +20,14 @@ export function renderFlow() {
   const stages = store.flow.stages || [];
   root.replaceChildren();
   for (const name of stages) root.append(stageRow(session, name));
-  if (!session) {
-    count.textContent = "";
-    return;
-  }
-  count.textContent = store.replay ? "replay" :
-    session.run.status === "running" || session.run.status === "paused"
+	if (!session) {
+		count.textContent = "";
+		count.classList.remove("alarm");
+		return;
+	}
+	count.classList.toggle("alarm", !store.replay && !!session.pending_approval);
+	count.textContent = store.replay ? "replay" : session.pending_approval ? "waiting for you" :
+		session.run.status === "running" || session.run.status === "paused"
       ? `${session.run.turn}/${session.run.max_turns}`
       : session.run.status;
 }

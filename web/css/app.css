@@ -675,7 +675,7 @@
 .timeline-well {
   grid-column: span 7;
   display: grid;
-  grid-template-rows: 36px 1fr;
+	grid-template-rows: 36px minmax(0, 1fr) auto;
   overflow: hidden;
 }
 .panel-caption {
@@ -944,6 +944,25 @@
 .timeline-inline.run-stopped.fault .timeline-head {
   color: var(--alarm);
 }
+.pending-approval {
+	min-height: 0;
+	padding: 5px 7px;
+	color: var(--alarm);
+	background: var(--well);
+	border-top: 1px solid var(--alarm);
+	font-size: 12px;
+	line-height: 20px;
+	user-select: none;
+}
+.pending-approval[hidden] { display: none; }
+.pending-approval button {
+	min-height: 20px;
+	margin-left: 6px;
+	padding: 0 5px;
+	color: var(--trace);
+	background: transparent;
+}
+.pending-approval button:last-child { color: var(--alarm); }
 .timeline-attachment-chips {
   display: grid;
   gap: 4px;
@@ -1553,7 +1572,7 @@
 }
 .rack-well { grid-column: span 4; }
 .state-well { grid-template-rows: 32px 1fr; }
-.timeline-well { grid-template-rows: 32px 1fr; }
+.timeline-well { grid-template-rows: 32px minmax(0, 1fr) auto; }
 .panel-caption { height: 32px; padding: 6px 10px; }
 .flow {
   min-height: 0;

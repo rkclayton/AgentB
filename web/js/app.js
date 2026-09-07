@@ -11,6 +11,7 @@ import { createSessionResetController } from "./session-reset.js";
 import { createMessageDropController } from "./message-drop.js";
 import { renderBuildHeader } from "./build-header.js";
 import { renderStopState } from "./stop-state.js";
+import { createApprovalCard } from "./approval.js";
 const consoleLaunch = document.getElementById("console-launch"),
   chatLaunch = document.getElementById("chat-launch"),
   operatorStatus = document.getElementById("operator-status"),
@@ -103,6 +104,16 @@ function renderConsole() {
 	renderStopState(stop, s, store.replay);
 	document.getElementById("mode").textContent = store.replay ? "replay" : "";
 	renderBuildHeader(document.getElementById("build-id"), document.getElementById("signature-state"), store.build, store.signature);
+	renderPendingApproval(s);
+}
+
+function renderPendingApproval(session) {
+	const root = document.getElementById("console-pending-approval");
+	root.hidden = !session?.pending_approval;
+	root.replaceChildren(...(session?.pending_approval ? [createApprovalCard(document, session.pending_approval, {
+		replay: store.replay,
+		decide: (callID, decision) => api("/api/approve", { session_id: session.id, call_id: callID, decision }),
+	})] : []));
 }
 stop.onclick = (event) => {
   const s = store.sessions[store.active];

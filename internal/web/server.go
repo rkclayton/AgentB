@@ -754,6 +754,9 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 			writeError(w, status, err.Error(), "session")
 			return
 		}
+		if s.runner != nil {
+			s.runner.LapseSessionGrants(id)
+		}
 		writeJSON(w, 200, map[string]string{"session_id": id})
 	default:
 		method(w)

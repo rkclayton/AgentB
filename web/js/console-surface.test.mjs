@@ -26,3 +26,12 @@ test("Console renders the release tag, commit, and signature from the state snap
   assert.match(script, /renderBuildHeader\([^;]+store\.build, store\.signature\)/);
   assert.match(styles, /\.build-id\s*\{[^}]*font-family:\s*"IBM Plex Mono"/s);
 });
+
+test("Console pins the current approval and shows waiting for you in state colour", () => {
+	assert.match(index, /id="console-pending-approval" class="pending-approval" hidden/);
+	assert.match(script, /renderPendingApproval\(s\)/);
+	assert.match(styles, /\.pending-approval\[hidden\]\s*\{\s*display:\s*none/);
+	const flow = fs.readFileSync(new URL("flow.js", import.meta.url), "utf8");
+	assert.match(flow, /session\.pending_approval \? "waiting for you"/);
+	assert.match(flow, /classList\.toggle\("alarm"/);
+});

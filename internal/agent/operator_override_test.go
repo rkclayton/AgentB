@@ -207,6 +207,98 @@ func TestFileToolOperatorOverrideUsesPathAndExactCall(t *testing.T) {
 	}
 }
 
+func TestFileToolRunGrantCoversLaterFileCallsAndLapses(t *testing.T) {
+	bus := events.NewBus()
+	eventCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	cfg := config.Defaults(t.TempDir())
+	cfg.Shell.ServiceAccount.Enabled = true
+	tool := &overrideTestTool{name: "read_file"}
+	runner := &Runner{bus: bus, tools: tools.New(tool), cfg: func() config.Config { return cfg }}
+	runner.gate = NewGate(bus, runner.cfg)
+	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"read_file": true}}
+	done := make(chan tools.CallOutcome, 1)
+	go func() {
+		done <- runner.executeTool(context.Background(), s, "run-1", "call-1", "read_file", map[string]any{"path": `C:\outside.txt`})
+	}()
+	nextApprovalEvent(t, eventCh)
+	if err := runner.gate.Decide(s.ID, "call-1:operator", "run"); err != nil {
+		t.Fatal(err)
+	}
+	if outcome := <-done; !outcome.OK || !outcome.OperatorContext {
+		t.Fatalf("first=%+v", outcome)
+	}
+	second := runner.executeTool(context.Background(), s, "run-1", "call-2", "read_file", map[string]any{"path": `C:\other.txt`})
+	if !second.OK || !second.OperatorContext || tool.normalCalls != 1 || tool.overrideCalls != 2 {
+		t.Fatalf("second=%+v normal=%d operator=%d", second, tool.normalCalls, tool.overrideCalls)
+	}
+	runner.lapseFileRunGrant(s, "run-1")
+	done = make(chan tools.CallOutcome, 1)
+	go func() {
+		done <- runner.executeTool(context.Background(), s, "run-2", "call-3", "read_file", map[string]any{"path": `C:\again.txt`})
+	}()
+	nextApprovalEvent(t, eventCh)
+	if err := runner.gate.Decide(s.ID, "call-3:operator", "deny"); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	if tool.normalCalls != 2 {
+		t.Fatalf("lapsed grant skipped service attempt: %d", tool.normalCalls)
+	}
+}
+
+func TestFileToolSessionGrantPersistsAcrossRunsAndLapsesOnClose(t *testing.T) {
+	bus := events.NewBus()
+	eventCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	cfg := config.Defaults(t.TempDir())
+	cfg.Shell.ServiceAccount.Enabled = true
+	tool := &overrideTestTool{name: "write_file"}
+	runner := &Runner{bus: bus, tools: tools.New(tool), cfg: func() config.Config { return cfg }}
+	runner.gate = NewGate(bus, runner.cfg)
+	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"write_file": true}}
+	done := make(chan tools.CallOutcome, 1)
+	go func() {
+		done <- runner.executeTool(context.Background(), s, "run-1", "call-1", "write_file", map[string]any{"path": `C:\outside.txt`})
+	}()
+	nextApprovalEvent(t, eventCh)
+	if err := runner.gate.Decide(s.ID, "call-1:operator", "session"); err != nil {
+		t.Fatal(err)
+	}
+	<-done
+	second := runner.executeTool(context.Background(), s, "run-2", "call-2", "write_file", map[string]any{"path": `C:\other.txt`})
+	if !second.OK || !second.OperatorContext || tool.normalCalls != 1 || tool.overrideCalls != 2 {
+		t.Fatalf("session grant did not cross runs: %+v normal=%d operator=%d", second, tool.normalCalls, tool.overrideCalls)
+	}
+	runner.LapseSessionGrants(s.ID)
+	foundGrant, foundLapse := false, false
+	for len(eventCh) > 0 {
+		event := <-eventCh
+		data, _ := event.Data.(map[string]any)
+		if event.Type == events.FileGrant && data["run_id"] == "run-1" && data["scope"] == "session" && data["identity"] == "operator" {
+			foundGrant = true
+		}
+		if event.Type == events.FileGrantLapsed && data["run_id"] == "run-1" && data["scope"] == "session" && data["identity"] == "operator" && data["reason"] == "session closed" {
+			foundLapse = true
+		}
+	}
+	if !foundGrant || !foundLapse {
+		t.Fatalf("file session grant events grant=%t lapse=%t", foundGrant, foundLapse)
+	}
+}
+
+func TestFileGrantToolContractNeverIncludesShell(t *testing.T) {
+	want := map[string]bool{
+		"read_file": true, "list_dir": true, "write_file": true, "edit_file": true,
+		"search_text": true, "find_files": true,
+	}
+	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "run_script", "call_service"} {
+		if got := fileGrantTool(name); got != want[name] {
+			t.Errorf("fileGrantTool(%q)=%t, want %t", name, got, want[name])
+		}
+	}
+}
+
 type emptyOverrideTool struct{ overrideTestTool }
 
 func (t *emptyOverrideTool) CallAsOperator(context.Context, *session.Session, map[string]any) (string, error) {

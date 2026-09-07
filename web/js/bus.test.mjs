@@ -42,3 +42,38 @@ test("mutable messages and immutable History records arrive as separate projecte
   assert.equal(store.sessions.main.messages[0].content, "[elided: complete tool result]");
   assert.equal(store.sessions.main.timeline[0].data.message.content, "complete tool result");
 });
+
+test("turn-two parallel approval projects independently of sibling tool rows", () => {
+	const chat = [
+		{ type: "user", key: "message:first", text: "first turn" },
+		{ type: "user", key: "message:second", text: "second turn" },
+		{ type: "tool", key: "tool:list", text: "running" },
+		{ type: "tool", key: "tool:read", text: "running" },
+	];
+	snapshot({ chat });
+	const pending = { type: "notice", key: "event:1993", event: { type: "approval.required", data: { call_id: "shell-2", name: "shell.operator_command" } } };
+	patch(11, [
+		{ op: "replace", path: "/pending_approval", value: pending },
+		{ op: "append", path: "/chat", value: pending },
+	], 10);
+	assert.equal(store.sessions.main.pending_approval.event.data.call_id, "shell-2");
+	assert.equal(store.sessions.main.chat.length, 5);
+	assert.equal(store.sessions.main.chat[2].key, "tool:list");
+});
+
+test("parallel stop updates preserve existing Chat rows", () => {
+	const user = { type: "user", key: "message:user", text: "keep this visible" };
+	snapshot({ chat: [user, { type: "tool", key: "tool:shell", text: "running" }, { type: "tool", key: "tool:read", text: "running" }] });
+	patch(11, [
+		{ op: "upsert", path: "/chat/tool:shell", value: { type: "tool", key: "tool:shell", text: "canceled" } },
+		{ op: "upsert", path: "/chat/tool:read", value: { type: "tool", key: "tool:read", text: "canceled" } },
+	], 10);
+	assert.strictEqual(store.sessions.main.chat[0], user);
+	assert.deepEqual(store.sessions.main.chat.map((entry) => entry.text), ["keep this visible", "canceled", "canceled"]);
+});
+
+test("queued count reconstructs from projected state", () => {
+	snapshot({ queued_messages: 0 });
+	patch(11, [{ op: "replace", path: "/queued_messages", value: 2 }], 10);
+	assert.equal(store.sessions.main.queued_messages, 2);
+});

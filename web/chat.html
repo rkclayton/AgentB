@@ -32,8 +32,9 @@
   </header>
   <div id="chat-budget" class="chat-budget" aria-label="Context budget"><span class="chat-budget-fill"></span><span class="chat-budget-tip"></span></div>
   <main id="chat-log" class="chat-log" tabindex="0" aria-live="polite"></main>
-  <footer class="chat-composer">
-    <div class="chat-composer-row">
+	<footer class="chat-composer">
+		<div id="chat-pending-approval" class="pending-approval" hidden></div>
+		<div class="chat-composer-row">
       <input id="chat-file-picker" type="file" multiple hidden>
       <div class="chat-attach-wrap">
         <button id="chat-attach" class="chat-attach" type="button" aria-label="Attach" title="Attach">📎</button>

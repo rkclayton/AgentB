@@ -7,7 +7,7 @@ import { renderBuildHeader } from "./build-header.js";
 import { formatDuration } from "./duration.js";
 import { renderStopState } from "./stop-state.js";
 import { createFileChip, fileURL, filesFromResponse, probeFile } from "./deliverables.js";
-import { approvalChoices } from "./approval.js";
+import { createApprovalCard } from "./approval.js";
 import { callServiceKey, callServiceStatus } from "./call-service-display.js";
 import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, uploadAttachment } from "./attachment-upload.js";
 import { agentAuthor, chatRowText, closeConfirmText, firstUserLine, isRunning, openSessions, sessionTitle } from "./chat-lifecycle.js";
@@ -26,6 +26,7 @@ const log = document.getElementById("chat-log");
 const input = document.getElementById("chat-task");
 const send = document.getElementById("chat-send");
 const notice = document.getElementById("chat-notice");
+const pendingApproval = document.getElementById("chat-pending-approval");
 const composer = document.querySelector(".chat-composer");
 const attachButton = document.getElementById("chat-attach");
 const attachMenu = document.getElementById("chat-attach-menu");
@@ -203,7 +204,8 @@ function renderChatList() {
 }
 
 function renderHeader(session) {
-  status.textContent = store.replay ? "replay" : session?.run?.status || "idle";
+	status.textContent = store.replay ? "replay" : session?.pending_approval ? "waiting for you" : session?.run?.status || "idle";
+	status.classList.toggle("waiting", !store.replay && !!session?.pending_approval);
   renderBuildHeader(buildID, document.getElementById("chat-signature-state"), store.build, store.signature);
   renderStopState(stop, session, store.replay);
 }
@@ -373,7 +375,7 @@ function renderResponse(session, entry) {
   for (const item of entry.items) {
     usedItems.add(item.key);
     if (item.type === "notice") {
-      const notice = noticeContent(session, item);
+		const notice = noticeContent(session, item, false);
       notice.classList.add("chat-response-notice");
       nodes.push(notice);
       continue;
@@ -508,13 +510,13 @@ function formatThoughtSeconds(milliseconds) {
 function renderNotice(session, entry) {
   const row = document.createElement("div");
   row.className = "chat-entry chat-notice-row";
-  const content = noticeContent(session, entry);
+	const content = noticeContent(session, entry, false);
   if (content.classList.contains("alarm")) row.classList.add("alarm");
   row.append(content);
   return row;
 }
 
-function noticeContent(session, entry) {
+function noticeContent(session, entry, actionable) {
   const event = entry.event;
   const data = event.data || {};
   const content = document.createElement("div");
@@ -549,38 +551,21 @@ function noticeContent(session, entry) {
     content.textContent = entry.text;
     if (entry.alarm) content.classList.add("operator-mode-enabled");
   }
-  else if (event.type === "shell.grant") {
-    const executable = data.executable ? ` · ${data.executable}` : "";
-    content.textContent = `shell grant: ${String(data.rule || "shell").replaceAll("_", " ")} · ${data.identity || "service"} · for this run${executable}`;
-  }
+	else if (event.type === "shell.grant") {
+		const executable = data.executable ? ` · ${data.executable}` : "";
+		content.textContent = `shell grant: ${String(data.rule || "shell").replaceAll("_", " ")} · ${data.identity || "service"} · for this ${data.scope === "session" ? "chat" : "run"}${executable}`;
+	}
   else if (event.type === "shell.grant_lapsed") {
     const executable = data.executable ? ` · ${data.executable}` : "";
-    content.textContent = `shell grant lapsed: ${String(data.rule || "shell").replaceAll("_", " ")}${executable}`;
-  }
-  else if (event.type === "approval.required") {
-    content.className += " chat-approval";
-    const boundaryEscape = typeof data.boundary_escape === "boolean"
-      ? data.boundary_escape
-      : data.name?.endsWith(".operator_override");
-    const shellPolicy = !boundaryEscape && data.name === "shell";
-    if (boundaryEscape) content.classList.add("alarm");
-    content.append(document.createTextNode(boundaryEscape
-	  ? `Privilege escalation: ${data.args?.reason || "service identity could not run operation"}. ${keyArgument(data.args || {})}`
-      : shellPolicy
-        ? `Run shell command? ${keyArgument(data.args || {})}`
-        : `Policy confirmation: ${data.name} ${keyArgument(data.args || {})}`));
-    const decision = entry.decision;
-    if (decision) content.append(document.createTextNode(` ${decision}`));
-    else if (!store.replay) {
-      for (const choice of approvalChoices(data)) {
-        const [value, label] = choice;
-        const button = document.createElement("button");
-        button.type = "button";
-        button.textContent = label;
-        button.onclick = () => api("/api/approve", { session_id: session.id, call_id: data.call_id, decision: value });
-        content.append(button);
-      }
-    }
+		content.textContent = `shell grant lapsed: ${String(data.rule || "shell").replaceAll("_", " ")}${executable}`;
+	}
+	else if (event.type === "file.grant") content.textContent = `file-tool grant: operator · for this ${data.scope === "session" ? "chat" : "run"}`;
+	else if (event.type === "file.grant_lapsed") content.textContent = `file-tool grant lapsed: ${data.scope === "session" ? "chat closed" : "run ended"}`;
+	else if (event.type === "approval.required") {
+		return createApprovalCard(document, entry, {
+			replay: store.replay,
+			decide: actionable ? (callID, decision) => api("/api/approve", { session_id: session.id, call_id: callID, decision }) : null,
+		});
   }
   if (entry.agentRole === "aux") {
     const label = document.createElement("span");
@@ -592,9 +577,8 @@ function noticeContent(session, entry) {
 }
 
 function renderComposer(session) {
-  const running = busy(session);
-  document.body.classList.toggle("no-open-chats", !session);
-  send.textContent = running ? "Stop" : "Send";
+	document.body.classList.toggle("no-open-chats", !session);
+	send.textContent = "Send";
   send.disabled = !session || !!store.replay;
   input.disabled = !session || !!store.replay;
   attachButton.disabled = !session || !!store.replay || attachmentsBusy;
@@ -602,15 +586,20 @@ function renderComposer(session) {
   else if (session?.run.status === "paused") input.placeholder = "paused — waiting for approval";
   else input.placeholder = "Send a task · Enter sends · Shift+Enter newline";
   const queued = session?.queued_messages || 0;
-  const message = localNotice || (session && !session.runnable ? session.not_runnable_reason : queued ? `queued (${queued})` : session?.run.status === "paused" ? "paused — waiting for approval" : "");
+	const message = localNotice || (session && !session.runnable ? session.not_runnable_reason : queued ? `queued (${queued})` : session?.pending_approval ? "waiting for you" : "");
   notice.textContent = message;
   notice.className = `chat-notice ${localAlarm || (session && !session.runnable) ? "alarm" : ""}`;
-  pendingFiles.replaceChildren(...queuedAttachments.map((file) => {
+	pendingFiles.replaceChildren(...queuedAttachments.map((file) => {
     const row = document.createElement("span");
     row.className = "chat-pending-file";
     row.textContent = `${file.path.split("/").pop()} · ${format(file.bytes)} B${file.reused ? " · reused" : ""}`;
     return row;
-  }));
+	}));
+	pendingApproval.hidden = !session?.pending_approval;
+	pendingApproval.replaceChildren(...(session?.pending_approval ? [createApprovalCard(document, session.pending_approval, {
+		replay: store.replay,
+		decide: (callID, decision) => api("/api/approve", { session_id: session.id, call_id: callID, decision }),
+	})] : []));
 }
 
 async function newChat() {
@@ -665,20 +654,15 @@ async function closeChat(session) {
 async function submit() {
   const session = store.sessions[bound];
   if (!session || store.replay) return;
-  if (busy(session) && (store.config.run?.queue_depth || 0) === 0) {
-    localNotice = "Run in progress";
-    localAlarm = true;
-    return renderComposer(session);
-  }
   const text = input.value.trim();
   if (!text && !queuedAttachments.length) return;
   try {
-    const result = await api("/api/message", { session_id: session.id, text, attachments: queuedAttachments.map(attachmentMetadata) });
+		await api("/api/message", { session_id: session.id, text, attachments: queuedAttachments.map(attachmentMetadata) });
     input.value = "";
     queuedAttachments = [];
     attachmentQueues.set(bound, queuedAttachments);
     resize();
-    localNotice = result.queued ? `queued (${result.position})` : "";
+		localNotice = "";
     localAlarm = false;
   } catch (error) {
     localNotice = error.message;
@@ -766,7 +750,7 @@ async function stopRun() {
   renderComposer(store.sessions[bound]);
 }
 
-send.onclick = () => (busy(store.sessions[bound]) ? stopRun() : submit());
+send.onclick = submit;
 stop.onclick = stopRun;
 newChatButton.onclick = () => void newChat();
 closeCurrent.onclick = () => void closeChat(store.sessions[bound]);

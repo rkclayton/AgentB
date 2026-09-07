@@ -56,10 +56,7 @@ func (s *Scheduler) SubmitAttachments(ctx context.Context, sessionID, text strin
 	defer item.EndSubmission()
 	if _, active := s.active[sessionID]; active || item.IsRunning() {
 		depth := s.cfg().Run.QueueDepth
-		if depth == 0 {
-			return SubmitResult{}, fmt.Errorf("run in progress")
-		}
-		if len(s.pending[sessionID]) >= depth {
+		if depth > 0 && len(s.pending[sessionID]) >= depth {
 			return SubmitResult{}, fmt.Errorf("queue full")
 		}
 		message, err := s.runner.QueueUserAttachments(ctx, item, text, attachments)
@@ -105,14 +102,7 @@ func (s *Scheduler) startLocked(entry queuedRun) {
 func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 	s.mu.Lock()
 	delete(s.active, entry.s.ID)
-	if reason == "user_stop" {
-		discarded := len(s.pending[entry.s.ID])
-		delete(s.pending, entry.s.ID)
-		entry.s.SetQueuedMessages(0)
-		if discarded > 0 {
-			detail = fmt.Sprintf("discarded %d queued message(s)", discarded)
-		}
-	} else if waiting := s.pending[entry.s.ID]; len(waiting) > 0 {
+	if waiting := s.pending[entry.s.ID]; len(waiting) > 0 {
 		next := waiting[0]
 		s.pending[entry.s.ID] = waiting[1:]
 		entry.s.SetQueuedMessages(len(waiting) - 1)

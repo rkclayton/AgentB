@@ -27,6 +27,8 @@ const (
 	ShellCredential   = "shell.credential"
 	ShellGrant        = "shell.grant"
 	ShellGrantLapsed  = "shell.grant_lapsed"
+	FileGrant         = "file.grant"
+	FileGrantLapsed   = "file.grant_lapsed"
 	SigningApplied    = "signing.applied"
 	OperatorContext   = "operator.context"
 	Error             = "error"
