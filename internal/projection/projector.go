@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"harness/internal/events"
+	workspaceinfo "harness/internal/workspace"
 )
 
 const SchemaVersion = 1
@@ -100,39 +101,46 @@ type ChatEntry struct {
 // Snapshot is the serializable session projection. Complete is false when the log has no
 // session.created seed, so callers cannot mistake guessed defaults for reconstructed state.
 type Snapshot struct {
-	SchemaVersion        int              `json:"schema_version"`
-	Cursor               Cursor           `json:"cursor"`
-	Complete             bool             `json:"complete"`
-	ID                   string           `json:"id"`
-	Label                string           `json:"label"`
-	ServerID             string           `json:"server_id"`
-	AgentName            string           `json:"agent_name"`
-	MainProfile          string           `json:"main_profile"`
-	CreatedAt            string           `json:"created_at"`
-	Workspace            string           `json:"workspace"`
-	Run                  Run              `json:"run"`
-	Tools                []Tool           `json:"tools"`
-	Messages             []events.Message `json:"messages"`
-	Budget               events.Budget    `json:"budget"`
-	QueuedMessages       int              `json:"queued_messages"`
-	Runnable             bool             `json:"runnable"`
-	NotRunnableReason    string           `json:"not_runnable_reason"`
-	MemoryPath           string           `json:"memory_path"`
-	MemoryContent        string           `json:"memory_content"`
-	LogPath              string           `json:"log_path"`
-	ModelTurns           int              `json:"model_turns"`
-	CompactionCount      int              `json:"compaction_count"`
-	CompactionTokenDelta int              `json:"compaction_token_delta"`
-	CompactionModelCalls int              `json:"compaction_model_calls"`
-	CompactionPrompt     int              `json:"compaction_prompt_tokens"`
-	CompactionCompletion int              `json:"compaction_completion_tokens"`
-	Activity             Activity         `json:"activity"`
-	Timeline             []events.Event   `json:"timeline"`
-	Chat                 []ChatEntry      `json:"chat"`
-	PendingApproval      *ChatEntry       `json:"pending_approval,omitempty"`
-	Closed               bool             `json:"closed"`
-	Stale                bool             `json:"projection_stale,omitempty"`
-	StaleReason          string           `json:"projection_stale_reason,omitempty"`
+	SchemaVersion        int                        `json:"schema_version"`
+	Cursor               Cursor                     `json:"cursor"`
+	Complete             bool                       `json:"complete"`
+	ID                   string                     `json:"id"`
+	Label                string                     `json:"label"`
+	ServerID             string                     `json:"server_id"`
+	AgentName            string                     `json:"agent_name"`
+	MainProfile          string                     `json:"main_profile"`
+	CreatedAt            string                     `json:"created_at"`
+	Workspace            string                     `json:"workspace"`
+	WorkspaceDir         string                     `json:"workspace_dir"`
+	WorkspaceMissing     bool                       `json:"workspace_missing"`
+	ProjectContent       string                     `json:"project_content"`
+	ProjectFiles         []string                   `json:"project_files"`
+	ProjectNotes         []string                   `json:"project_notes"`
+	PendingRepoPolicy    *workspaceinfo.PolicyState `json:"pending_repo_policy,omitempty"`
+	RepoPolicy           *workspaceinfo.PolicyState `json:"repo_policy,omitempty"`
+	Run                  Run                        `json:"run"`
+	Tools                []Tool                     `json:"tools"`
+	Messages             []events.Message           `json:"messages"`
+	Budget               events.Budget              `json:"budget"`
+	QueuedMessages       int                        `json:"queued_messages"`
+	Runnable             bool                       `json:"runnable"`
+	NotRunnableReason    string                     `json:"not_runnable_reason"`
+	MemoryPath           string                     `json:"memory_path"`
+	MemoryContent        string                     `json:"memory_content"`
+	LogPath              string                     `json:"log_path"`
+	ModelTurns           int                        `json:"model_turns"`
+	CompactionCount      int                        `json:"compaction_count"`
+	CompactionTokenDelta int                        `json:"compaction_token_delta"`
+	CompactionModelCalls int                        `json:"compaction_model_calls"`
+	CompactionPrompt     int                        `json:"compaction_prompt_tokens"`
+	CompactionCompletion int                        `json:"compaction_completion_tokens"`
+	Activity             Activity                   `json:"activity"`
+	Timeline             []events.Event             `json:"timeline"`
+	Chat                 []ChatEntry                `json:"chat"`
+	PendingApproval      *ChatEntry                 `json:"pending_approval,omitempty"`
+	Closed               bool                       `json:"closed"`
+	Stale                bool                       `json:"projection_stale,omitempty"`
+	StaleReason          string                     `json:"projection_stale_reason,omitempty"`
 }
 
 type Operation struct {
@@ -201,6 +209,32 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.NotRunnableReason = stringValue(data["not_runnable_reason"])
 		next.MemoryPath = stringValue(data["memory_path"])
 		next.MemoryContent = stringValue(data["memory_content"])
+	case events.ProjectInstructions:
+		if boolValue(data["lazy"]) {
+			if block := stringValue(data["block"]); block != "" {
+				if next.ProjectContent != "" {
+					next.ProjectContent += "\n\n"
+				}
+				next.ProjectContent += block
+			}
+			next.ProjectFiles = appendUniqueStrings(next.ProjectFiles, stringSlice(data["files"])...)
+			next.ProjectNotes = append(next.ProjectNotes, stringSlice(data["notes"])...)
+		}
+	case events.PolicyApproved:
+		var policy workspaceinfo.PolicyState
+		if decode(record.Event.Data, &policy) == nil {
+			next.RepoPolicy = &policy
+			next.PendingRepoPolicy = nil
+		}
+		if data["tools"] != nil { var tools []Tool; if decode(data["tools"], &tools)==nil { next.Tools=tools } }
+	case events.PolicyRevoked:
+		next.RepoPolicy = nil
+	case events.PolicyDenied:
+		next.PendingRepoPolicy = nil
+	case events.MemoryCleared:
+		if strings.EqualFold(filepathClean(stringValue(data["dir"])), filepathClean(next.WorkspaceDir)) {
+			next.MemoryContent = ""
+		}
 	case events.SessionReset:
 		next.Messages = []events.Message{}
 		next.Tools = cloneTools(next.Tools)
@@ -564,36 +598,43 @@ func turnKey(event events.Event, data map[string]any) string {
 }
 
 type seed struct {
-	ID                   string           `json:"id"`
-	Label                string           `json:"label"`
-	ServerID             string           `json:"server_id"`
-	AgentName            string           `json:"agent_name"`
-	MainProfile          string           `json:"main_profile"`
-	CreatedAt            string           `json:"created_at"`
-	Closed               bool             `json:"closed"`
-	Workspace            string           `json:"workspace"`
-	Run                  Run              `json:"run"`
-	Tools                []Tool           `json:"tools"`
-	Messages             []events.Message `json:"messages"`
-	Budget               events.Budget    `json:"budget"`
-	QueuedMessages       int              `json:"queued_messages"`
-	Runnable             bool             `json:"runnable"`
-	NotRunnableReason    string           `json:"not_runnable_reason"`
-	MemoryPath           string           `json:"memory_path"`
-	MemoryContent        string           `json:"memory_content"`
-	LogPath              string           `json:"log_path"`
-	ModelTurns           int              `json:"model_turns"`
-	CompactionCount      int              `json:"compaction_count"`
-	CompactionTokenDelta int              `json:"compaction_token_delta"`
-	CompactionModelCalls int              `json:"compaction_model_calls"`
-	CompactionPrompt     int              `json:"compaction_prompt_tokens"`
-	CompactionCompletion int              `json:"compaction_completion_tokens"`
+	ID                   string                     `json:"id"`
+	Label                string                     `json:"label"`
+	ServerID             string                     `json:"server_id"`
+	AgentName            string                     `json:"agent_name"`
+	MainProfile          string                     `json:"main_profile"`
+	CreatedAt            string                     `json:"created_at"`
+	Closed               bool                       `json:"closed"`
+	Workspace            string                     `json:"workspace"`
+	WorkspaceDir         string                     `json:"workspace_dir"`
+	WorkspaceMissing     bool                       `json:"workspace_missing"`
+	ProjectContent       string                     `json:"project_content"`
+	ProjectFiles         []string                   `json:"project_files"`
+	ProjectNotes         []string                   `json:"project_notes"`
+	PendingRepoPolicy    *workspaceinfo.PolicyState `json:"pending_repo_policy,omitempty"`
+	RepoPolicy           *workspaceinfo.PolicyState `json:"repo_policy,omitempty"`
+	Run                  Run                        `json:"run"`
+	Tools                []Tool                     `json:"tools"`
+	Messages             []events.Message           `json:"messages"`
+	Budget               events.Budget              `json:"budget"`
+	QueuedMessages       int                        `json:"queued_messages"`
+	Runnable             bool                       `json:"runnable"`
+	NotRunnableReason    string                     `json:"not_runnable_reason"`
+	MemoryPath           string                     `json:"memory_path"`
+	MemoryContent        string                     `json:"memory_content"`
+	LogPath              string                     `json:"log_path"`
+	ModelTurns           int                        `json:"model_turns"`
+	CompactionCount      int                        `json:"compaction_count"`
+	CompactionTokenDelta int                        `json:"compaction_token_delta"`
+	CompactionModelCalls int                        `json:"compaction_model_calls"`
+	CompactionPrompt     int                        `json:"compaction_prompt_tokens"`
+	CompactionCompletion int                        `json:"compaction_completion_tokens"`
 }
 
 func (value seed) snapshot(cursor Cursor) Snapshot {
 	return Snapshot{
 		SchemaVersion: SchemaVersion, Cursor: cursor, Complete: true,
-		ID: value.ID, Label: value.Label, ServerID: value.ServerID, AgentName: value.AgentName, MainProfile: value.MainProfile, CreatedAt: value.CreatedAt, Closed: value.Closed, Workspace: value.Workspace,
+		ID: value.ID, Label: value.Label, ServerID: value.ServerID, AgentName: value.AgentName, MainProfile: value.MainProfile, CreatedAt: value.CreatedAt, Closed: value.Closed, Workspace: value.Workspace, WorkspaceDir: firstString(value.WorkspaceDir, value.Workspace), WorkspaceMissing: value.WorkspaceMissing, ProjectContent: value.ProjectContent, ProjectFiles: append([]string(nil), value.ProjectFiles...), ProjectNotes: append([]string(nil), value.ProjectNotes...), PendingRepoPolicy: value.PendingRepoPolicy, RepoPolicy: value.RepoPolicy,
 		Run: value.Run, Tools: cloneTools(value.Tools), Messages: cloneMessages(value.Messages), Budget: value.Budget,
 		QueuedMessages: value.QueuedMessages, Runnable: value.Runnable, NotRunnableReason: value.NotRunnableReason,
 		MemoryPath: value.MemoryPath, MemoryContent: value.MemoryContent, LogPath: value.LogPath,
@@ -613,7 +654,7 @@ func diff(before, after Snapshot) Patch {
 	}{
 		{"complete", before.Complete, after.Complete}, {"id", before.ID, after.ID}, {"label", before.Label, after.Label},
 		{"server_id", before.ServerID, after.ServerID}, {"agent_name", before.AgentName, after.AgentName},
-		{"main_profile", before.MainProfile, after.MainProfile}, {"created_at", before.CreatedAt, after.CreatedAt}, {"workspace", before.Workspace, after.Workspace},
+		{"main_profile", before.MainProfile, after.MainProfile}, {"created_at", before.CreatedAt, after.CreatedAt}, {"workspace", before.Workspace, after.Workspace}, {"workspace_dir", before.WorkspaceDir, after.WorkspaceDir}, {"workspace_missing", before.WorkspaceMissing, after.WorkspaceMissing}, {"project_content", before.ProjectContent, after.ProjectContent}, {"project_files", before.ProjectFiles, after.ProjectFiles}, {"project_notes", before.ProjectNotes, after.ProjectNotes}, {"pending_repo_policy", before.PendingRepoPolicy, after.PendingRepoPolicy}, {"repo_policy", before.RepoPolicy, after.RepoPolicy},
 		{"tools", before.Tools, after.Tools}, {"messages", before.Messages, after.Messages}, {"budget", before.Budget, after.Budget},
 		{"queued_messages", before.QueuedMessages, after.QueuedMessages}, {"runnable", before.Runnable, after.Runnable},
 		{"not_runnable_reason", before.NotRunnableReason, after.NotRunnableReason}, {"memory_path", before.MemoryPath, after.MemoryPath},
@@ -800,11 +841,29 @@ func toolCalls(value any) []events.ToolCall {
 }
 func chatNotice(value string) bool {
 	switch value {
-	case events.RunStopped, events.RunQueued, events.MessageQueued, events.Compaction, events.WorkspaceConflict, events.ApprovalRequired, events.MemoryNoted, events.OperatorContext, events.SigningApplied, events.FilesDelivered, events.ShellGrant, events.ShellGrantLapsed, events.FileGrant, events.FileGrantLapsed:
+	case events.RunStopped, events.RunQueued, events.MessageQueued, events.Compaction, events.WorkspaceConflict, events.ApprovalRequired, events.MemoryNoted, events.MemoryCleared, events.ProjectInstructions, events.PolicyApproved, events.PolicyDenied, events.PolicyRevoked, events.OperatorContext, events.SigningApplied, events.FilesDelivered, events.ShellGrant, events.ShellGrantLapsed, events.FileGrant, events.FileGrantLapsed:
 		return true
 	}
 	return false
 }
+
+func stringSlice(value any) []string { var out []string; _ = decode(value, &out); return out }
+func appendUniqueStrings(values []string, additions ...string) []string {
+	for _, addition := range additions {
+		found := false
+		for _, value := range values {
+			if value == addition {
+				found = true
+				break
+			}
+		}
+		if !found {
+			values = append(values, addition)
+		}
+	}
+	return values
+}
+func filepathClean(value string) string { return strings.ToLower(strings.ReplaceAll(value, "/", "\\")) }
 
 func decode(value, target any) error {
 	data, err := json.Marshal(value)

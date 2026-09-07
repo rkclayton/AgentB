@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 
 	"harness/internal/config"
@@ -98,7 +99,7 @@ func (t *identityFileTool) CallDetailed(ctx context.Context, s *session.Session,
 	}
 	defer clearBytes(password)
 	result, err := runner(service, password, func() (string, error) {
-		return t.tool.Call(withOSPathPolicy(ctx), s, args)
+		return t.tool.Call(ctx, s, args)
 	})
 	if err == nil {
 		return CallDetail{Content: result}
@@ -109,6 +110,9 @@ func (t *identityFileTool) CallDetailed(ctx context.Context, s *session.Session,
 	}
 	if errors.Is(err, os.ErrPermission) {
 		return fileIdentityOverride("service account was denied permission for the requested path")
+	}
+	if strings.Contains(strings.ToLower(err.Error()), "path is outside the workspace") {
+		return fileIdentityOverride("bound-directory jail: path is outside the workspace")
 	}
 	return CallDetail{Err: err}
 }

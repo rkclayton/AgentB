@@ -62,6 +62,22 @@
   background: transparent !important;
   font: 12px/20px var(--mono) !important;
 }
+
+#chat-binding { min-width: 0; display: flex; flex-direction: column; }
+.chat-workspace { color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 42vw; }
+.chat-workspace.missing { color: var(--alarm); }
+.chat-new-wrap { position: relative; }
+.chat-new-menu { position: absolute; z-index: 20; top: 100%; left: 0; width: min(34rem, 70vw); background: var(--bezel); border: 1px solid var(--mute); padding: 3px; }
+.chat-new-menu button { display: block; width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.repo-policy-card pre { max-height: 12rem; overflow: auto; white-space: pre-wrap; }
+.approval-card { display: grid; gap: 2px; }
+.approval-card > span:first-child { color: var(--alarm); font: 11px/16px var(--mono); text-transform: uppercase; }
+.approval-card details { color: var(--mute); }
+.approval-card summary { cursor: pointer; }
+.approval-card pre { margin: 2px 0; color: var(--trace); }
+.approval-actions { display: flex; gap: 6px; }
+.approval-actions button { margin-left: 0 !important; }
+.approval-actions button.default { color: var(--ink); }
 .chat-title-close,
 .chat-new { width: 24px; font-size: 16px !important; }
 .chat-list-wrap { position: relative; }

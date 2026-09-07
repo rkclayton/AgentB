@@ -38,8 +38,8 @@ test("Composer uses one paperclip and pending files occupy no row when empty", (
 
 test("Pending approval is pinned above the composer with zero idle space", () => {
 	assert.match(html, /id="chat-pending-approval" class="pending-approval" hidden[\s\S]*class="chat-composer-row"/);
-	assert.match(chat, /session\?\.pending_approval \? "waiting for you"/);
-	assert.match(chat, /pendingApproval\.hidden = !session\?\.pending_approval/);
+	assert.match(chat, /session\?\.pending_approval \|\| session\?\.pending_repo_policy \? "waiting for you"/);
+	assert.match(chat, /pendingApproval\.hidden = !\(session\?\.pending_approval \|\| session\?\.pending_repo_policy\)/);
 	assert.match(css, /\.pending-approval\[hidden\]\s*\{\s*display:\s*none/);
 	assert.match(css, /#chat-status\.waiting\s*\{\s*color:\s*var\(--alarm\)/);
 });
@@ -55,8 +55,25 @@ test("New, list, and close are Chat lifecycle controls while Clear is absent", (
   assert.match(html, /id="chat-list-toggle"/);
   assert.match(html, /id="chat-close"/);
   assert.doesNotMatch(html, /chat-clear-conversation|Clear conversation/);
-  assert.match(chat, /source_session_id: source\.id/);
+  assert.match(chat, /source_session_id: source\.id, workspace/);
   assert.match(chat, /Stop it before closing the chat/);
+});
+
+test("New chat binds a default, recent, or operator-picked directory", () => {
+  assert.match(html, /id="chat-new-menu"[^>]*hidden/);
+  assert.match(chat, /api\("\/api\/pick-folder",undefined,"GET"\)/);
+  assert.match(chat, /api\("\/api\/pick-folder",\{default:choices\.default\}\)/);
+  assert.match(chat, /session\.workspace_dir \|\| session\.workspace/);
+});
+
+test("Repository policy is a pinned full-content trust decision", () => {
+  assert.match(chat, /Trust this repo's policy\?/);
+  assert.match(chat, /policy\.content/);
+  assert.match(chat, /policy\.diff/);
+  assert.match(chat, /\["Yes, for this chat","policy-approve"\]/);
+  assert.match(chat, /\["Just once","policy-once"\]/);
+  assert.match(chat, /\["No","policy-deny"\]/);
+  assert.match(chat, /Technical detail/);
 });
 
 test("Reduced motion remains zero-duration", () => {

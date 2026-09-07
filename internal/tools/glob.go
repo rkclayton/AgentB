@@ -41,6 +41,7 @@ func (*Glob) Schema() map[string]any {
 }
 func (g *Glob) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
 	cfg := g.config()
+	cfg.SkipRoots = append(cfg.SkipRoots, s.Policy().FindFiles.SkipRootsAdd...)
 	pattern, ok := args["pattern"].(string)
 	if !ok || pattern == "" {
 		return "", fmt.Errorf("pattern is required")
@@ -107,6 +108,7 @@ func (g *Glob) Call(ctx context.Context, s *session.Session, args map[string]any
 	if err != nil {
 		return "", err
 	}
+	s.TouchProject(path)
 	if total == 0 {
 		return withSkippedInaccessible("no matches", skipped), nil
 	}

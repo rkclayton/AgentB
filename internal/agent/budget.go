@@ -19,12 +19,12 @@ import (
 var fallbackOverhead = map[string]int{"system": 4, "user": 4, "assistant": 4, "assistant_tools": 12, "tool": 5}
 
 type budgetInput struct {
-	SystemBase, System string
-	WithoutToolSystems map[string]string
-	Schemas            []any
-	AllSchemas         map[string]any
-	Messages           []llm.Message
-	Records            []events.Message
+	SystemBase, SystemProject, System string
+	WithoutToolSystems                map[string]string
+	Schemas                           []any
+	AllSchemas                        map[string]any
+	Messages                          []llm.Message
+	Records                           []events.Message
 }
 type budgetState struct {
 	cpt                    float64
@@ -104,8 +104,11 @@ func (b *Budgeter) saveCosts(id, key string, schema, marginal map[string]int) {
 	b.mu.Unlock()
 }
 func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
+	if in.SystemProject == "" {
+		in.SystemProject = in.SystemBase
+	}
 	state := b.state(s.ID)
-	categories := map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "fetched": 0, "summary": 0}
+	categories := map[string]int{"system": 0, "project": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "fetched": 0, "summary": 0}
 	estimated := []string{}
 	messageCounts := map[string]session.MessageCount{}
 	forceEstimate := global.Accounting == "estimated" || !profile.Capabilities.Tokenize
@@ -123,15 +126,17 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 	client := llm.New(profile)
 	if forceEstimate {
 		mode = "estimated"
-		estimated = []string{"system", "memory", "tools", "history", "files", "results", "fetched", "summary"}
+		estimated = []string{"system", "project", "memory", "tools", "history", "files", "results", "fetched", "summary"}
 		cpt := state.cpt
 		if cpt <= 0 {
 			cpt = 3.6
 		}
 		baseChars := float64(len([]rune(in.SystemBase)))
+		projectChars := float64(len([]rune(in.SystemProject)))
 		fullChars := float64(len([]rune(in.System)))
 		categories["system"] = estimateChars(baseChars, cpt)
-		categories["memory"] = estimateChars(math.Max(0, fullChars-baseChars), cpt)
+		categories["project"] = estimateChars(math.Max(0, projectChars-baseChars), cpt)
+		categories["memory"] = estimateChars(math.Max(0, fullChars-projectChars), cpt)
 		toolData, _ := json.Marshal(in.Schemas)
 		toolChars := float64(len([]rune(string(toolData)))) * 1.1
 		categories["tools"] = estimateChars(toolChars, cpt)
@@ -157,7 +162,7 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			}
 		}
 	} else if !profile.Capabilities.ApplyTemplate {
-		estimated = []string{"system", "memory", "tools", "history", "files", "results", "fetched", "summary"}
+		estimated = []string{"system", "project", "memory", "tools", "history", "files", "results", "fetched", "summary"}
 		count := func(text string) int {
 			value, err := client.Tokenize(ctx, text, false)
 			if err != nil {
@@ -166,7 +171,8 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 			return value
 		}
 		categories["system"] = count(in.SystemBase) + fallbackOverhead["system"]
-		categories["memory"] = max(0, count(in.System)-count(in.SystemBase))
+		categories["project"] = max(0, count(in.SystemProject)-count(in.SystemBase))
+		categories["memory"] = max(0, count(in.System)-count(in.SystemProject))
 		toolData, _ := json.Marshal(in.Schemas)
 		categories["tools"] = int(math.Ceil(float64(count(string(toolData))) * 1.1))
 		for index, message := range in.Messages {
@@ -206,11 +212,18 @@ func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *sess
 		if err != nil {
 			return events.Budget{}, err
 		}
+		withProject := base
+		if in.SystemProject != in.SystemBase {
+			withProject, err = render([]llm.Message{{Role: "system", Content: in.SystemProject}}, nil)
+			if err != nil {
+				return events.Budget{}, err
+			}
+		}
 		withMemory, err := render([]llm.Message{{Role: "system", Content: in.System}}, nil)
 		if err != nil {
 			return events.Budget{}, err
 		}
-		categories["system"], categories["memory"] = base, max(0, withMemory-base)
+		categories["system"], categories["project"], categories["memory"] = base, max(0, withProject-base), max(0, withMemory-withProject)
 		previous := withMemory
 		activeTools := []any(nil)
 		if profile.Capabilities.ApplyTemplateTools {

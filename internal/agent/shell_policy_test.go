@@ -10,6 +10,7 @@ import (
 	"harness/internal/events"
 	"harness/internal/session"
 	"harness/internal/tools"
+	workspaceinfo "harness/internal/workspace"
 )
 
 type shellPolicyTool struct {
@@ -18,6 +19,34 @@ type shellPolicyTool struct {
 	offerOverride bool
 	operatorMatch *tools.OperatorCommand
 	operatorArgs  map[string]any
+	normalArgs    map[string]any
+}
+
+func TestApprovedRepoRunGrantDefaultSkipsShellPrompt(t *testing.T) {
+	for _, split := range []bool{false, true} {
+		t.Run(map[bool]string{false: "operator", true: "service"}[split], func(t *testing.T) {
+			cfg := config.Defaults(t.TempDir())
+			cfg.Approval.Mode = config.ApprovalModeMutating
+			cfg.Shell.ServiceAccount.Enabled = split
+			tool := &shellPolicyTool{}
+			runner, item, bus := shellPolicyRunner(t, cfg, tool)
+			item.RepoPolicy = &workspaceinfo.PolicyState{Approved: true, Policy: workspaceinfo.Policy{Version: 1, Shell: workspaceinfo.ShellPolicy{RunGrantDefaults: []string{"node --test"}}}}
+			eventsCh, unsubscribe := bus.Subscribe()
+			defer unsubscribe()
+			outcome := runner.executeTool(context.Background(), item, "run", "call", "shell", map[string]any{"command": "node --test test/*.test.js"})
+			if !outcome.OK || tool.normalCalls != 1 {
+				t.Fatalf("outcome=%+v calls=%d", outcome, tool.normalCalls)
+			}
+			select {
+			case event := <-eventsCh:
+				if event.Type != events.ShellGrant {
+					t.Fatalf("event=%+v", event)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("missing shell.grant")
+			}
+		})
+	}
 }
 
 type runScriptPolicyTool struct{ calls int }
@@ -36,8 +65,9 @@ func (*shellPolicyTool) Schema() map[string]any { return map[string]any{} }
 func (t *shellPolicyTool) Call(context.Context, *session.Session, map[string]any) (string, error) {
 	return "unused", nil
 }
-func (t *shellPolicyTool) CallDetailed(context.Context, *session.Session, map[string]any) tools.CallDetail {
+func (t *shellPolicyTool) CallDetailed(_ context.Context, _ *session.Session, args map[string]any) tools.CallDetail {
 	t.normalCalls++
+	t.normalArgs = args
 	if t.offerOverride {
 		return tools.CallDetail{Content: "exit=1\nAccess is denied.", OperatorOverrideReason: "service account was denied permission"}
 	}

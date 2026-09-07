@@ -6,23 +6,26 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
 	"harness/internal/config"
 	"harness/internal/events"
+	workspaceinfo "harness/internal/workspace"
 )
 
 type Registry struct {
-	mu       sync.Mutex
-	sessions map[string]*Session
-	next     int
-	profiles func(string) (*config.Profile, bool)
-	bus      *events.Bus
-	writers  *events.Writers
-	maxTurns int
-	config   func() config.Config
-	memory   func(context.Context, string, string) (string, string, error)
+	mu         sync.Mutex
+	sessions   map[string]*Session
+	next       int
+	profiles   func(string) (*config.Profile, bool)
+	bus        *events.Bus
+	writers    *events.Writers
+	maxTurns   int
+	config     func() config.Config
+	memory     func(context.Context, string, string) (string, string, error)
+	workspaces *workspaceinfo.Manager
 }
 
 func NewRegistry(bus *events.Bus, writers *events.Writers, profiles func(string) (*config.Profile, bool), maxTurns int, settings func() config.Config) *Registry {
@@ -31,10 +34,14 @@ func NewRegistry(bus *events.Bus, writers *events.Writers, profiles func(string)
 func (r *Registry) SetMemoryLoader(loader func(context.Context, string, string) (string, string, error)) {
 	r.memory = loader
 }
+func (r *Registry) SetWorkspaceManager(manager *workspaceinfo.Manager) { r.workspaces = manager }
 func (r *Registry) Create(label, serverID, workspace string) (*Session, error) {
 	return r.create(label, serverID, workspace, nil)
 }
 func (r *Registry) CreateLike(sourceID string) (*Session, error) {
+	return r.CreateLikeAt(sourceID, "")
+}
+func (r *Registry) CreateLikeAt(sourceID, workspace string) (*Session, error) {
 	source, ok := r.Get(sourceID)
 	if !ok {
 		return nil, fmt.Errorf("source session not found")
@@ -44,7 +51,10 @@ func (r *Registry) CreateLike(sourceID string) (*Session, error) {
 	for _, tool := range snapshot.Tools {
 		enabled[tool.Name] = tool.Enabled
 	}
-	return r.create("", snapshot.ServerID, snapshot.Workspace, enabled)
+	if workspace == "" {
+		workspace = snapshot.Workspace
+	}
+	return r.create("", snapshot.ServerID, workspace, enabled)
 }
 func (r *Registry) create(label, serverID, workspace string, enabled map[string]bool) (*Session, error) {
 	r.mu.Lock()
@@ -57,8 +67,13 @@ func (r *Registry) create(label, serverID, workspace string, enabled map[string]
 	if err != nil {
 		return nil, err
 	}
-	if err := os.MkdirAll(abs, 0o755); err != nil {
-		return nil, err
+	setup := workspaceinfo.Setup{Dir: abs}
+	if r.workspaces != nil {
+		setup, err = r.workspaces.Inspect(abs)
+		if err != nil {
+			return nil, err
+		}
+		abs = setup.Dir
 	}
 	id := "main"
 	if len(r.sessions) > 0 {
@@ -77,6 +92,27 @@ func (r *Registry) create(label, serverID, workspace string, enabled map[string]
 	if tools == nil {
 		tools = map[string]bool{"read_file": true, "list_dir": true, "write_file": true, "edit_file": true, "search_text": true, "shell": true, "remember": true, "recall": true, "fetch_url": true, "find_files": true, "run_script": true, "call_service": true}
 	}
+	var activePolicy, pendingPolicy *workspaceinfo.PolicyState
+	if setup.Policy.Path != "" {
+		copy := setup.Policy
+		if setup.Policy.Approved && setup.Policy.Error == "" {
+			activePolicy = &copy
+		} else {
+			pendingPolicy = &copy
+		}
+	}
+	if activePolicy != nil && len(activePolicy.Policy.DefaultToolset) > 0 {
+		selected := map[string]bool{}
+		for name := range tools {
+			selected[name] = false
+		}
+		for _, name := range activePolicy.Policy.DefaultToolset {
+			if _, ok := selected[name]; ok {
+				selected[name] = true
+			}
+		}
+		tools = selected
+	}
 	memoryBlock, memoryPath := "", ""
 	if r.memory != nil {
 		memoryBlock, memoryPath, err = r.memory(context.Background(), abs, serverID)
@@ -84,12 +120,80 @@ func (r *Registry) create(label, serverID, workspace string, enabled map[string]
 			return nil, err
 		}
 	}
-	session := &Session{ID: id, Label: label, ServerID: serverID, AgentName: profile.Label, MainProfile: profile.Label, Workspace: abs, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	session := &Session{ID: id, Label: label, ServerID: serverID, AgentName: profile.Label, MainProfile: profile.Label, Workspace: abs, WorkspaceMissing: setup.Missing, ProjectBlock: setup.Instructions.Block, ProjectFiles: setup.Instructions.Files, ProjectNotes: setup.Instructions.Notes, PendingRepoPolicy: pendingPolicy, RepoPolicy: activePolicy, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	if r.workspaces != nil && !setup.Missing {
+		session.ProjectTouch = func(relative string) {
+			target := filepath.Join(abs, relative)
+			info, statErr := os.Stat(target)
+			if statErr == nil && !info.IsDir() {
+				target = filepath.Dir(target)
+			}
+			addition, loadErr := workspaceinfo.LoadInstructions(abs, target)
+			if loadErr != nil {
+				r.bus.Publish(events.New(events.Error, id, "", map[string]any{"where": "project_instructions", "message": loadErr.Error()}))
+				return
+			}
+			if session.AppendProject(addition.Block, addition.Files, addition.Notes) {
+				r.bus.Publish(events.New(events.ProjectInstructions, id, "", map[string]any{"block": addition.Block, "files": addition.Files, "notes": addition.Notes, "lazy": true}))
+			}
+		}
+	}
 	session.Messages = []events.Message{}
 	session.Budget = initialBudget(profile)
 	r.sessions[id] = session
-	r.bus.Publish(events.New(events.SessionCreated, id, "", map[string]any{"session": session.Snapshot()}))
+	r.bus.Publish(events.New(events.SessionCreated, id, "", map[string]any{"workspace_dir": abs, "session": session.Snapshot()}))
+	if len(setup.Instructions.Files) > 0 {
+		r.bus.Publish(events.New(events.ProjectInstructions, id, "", map[string]any{"block": setup.Instructions.Block, "files": setup.Instructions.Files, "notes": setup.Instructions.Notes, "lazy": false}))
+	}
 	return session, nil
+}
+
+func (r *Registry) ApplyRepoPolicySession(sessionID string, state workspaceinfo.PolicyState) error {
+	s, ok := r.Get(sessionID)
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+	copy := state
+	s.SetRepoPolicy(&copy)
+	if len(state.Policy.DefaultToolset) > 0 {
+		enabled := s.EnabledTools()
+		for name := range enabled {
+			s.ToggleTool(name, false)
+		}
+		for _, name := range state.Policy.DefaultToolset {
+			s.ToggleTool(name, true)
+		}
+	}
+	return nil
+}
+func (r *Registry) DenyRepoPolicy(sessionID string) error {
+	s, ok := r.Get(sessionID)
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+	s.mu.Lock()
+	s.PendingRepoPolicy = nil
+	s.mu.Unlock()
+	return nil
+}
+func (r *Registry) RevokeRepoPolicy(workspace string) {
+	for _, s := range r.List() {
+		if strings.EqualFold(filepath.Clean(s.Workspace), filepath.Clean(workspace)) {
+			s.mu.Lock()
+			s.RepoPolicy = nil
+			s.PendingRepoPolicy = nil
+			s.mu.Unlock()
+		}
+	}
+}
+func (r *Registry) ClearWorkspaceMemory(workspace string) {
+	for _, s := range r.List() {
+		if strings.EqualFold(filepath.Clean(s.Workspace), filepath.Clean(workspace)) {
+			s.mu.Lock()
+			s.MemoryBlock = ""
+			s.mu.Unlock()
+		}
+	}
 }
 func (r *Registry) Get(id string) (*Session, bool) {
 	r.mu.Lock()
@@ -314,7 +418,7 @@ func initialBudget(profile *config.Profile) events.Budget {
 	return events.Budget{
 		NCtx: nctx, Reserve: profile.Context.ReserveOutput, Ceiling: ceiling,
 		Mode: "estimated", Estimated: true, EstimatedCategories: []string{},
-		Categories:       map[string]int{"system": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "fetched": 0, "summary": 0},
+		Categories:       map[string]int{"system": 0, "project": 0, "memory": 0, "tools": 0, "history": 0, "files": 0, "results": 0, "fetched": 0, "summary": 0},
 		ToolSchemaTokens: map[string]int{}, ToolMarginalTokens: map[string]int{},
 	}
 }

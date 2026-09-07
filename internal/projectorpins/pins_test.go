@@ -26,8 +26,8 @@ func TestManifestPinsTenDistinctRealLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Cases) < 10 || len(manifest.Cases) > 15 {
-		t.Fatalf("curated cases = %d, want 10..15", len(manifest.Cases))
+	if len(manifest.Cases) < 10 || len(manifest.Cases) > 16 {
+		t.Fatalf("curated cases = %d, want 10..16", len(manifest.Cases))
 	}
 	origins := map[string]bool{}
 	shapes := map[string]bool{}

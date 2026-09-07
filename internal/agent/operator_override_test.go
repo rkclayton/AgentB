@@ -287,6 +287,34 @@ func TestFileToolSessionGrantPersistsAcrossRunsAndLapsesOnClose(t *testing.T) {
 	}
 }
 
+func TestRunAsYouChatGrantCoversFileAndShellWithoutAnotherPrompt(t *testing.T) {
+	bus := events.NewBus()
+	eventCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	cfg := config.Defaults(t.TempDir())
+	cfg.Shell.ServiceAccount.Enabled = true
+	fileTool := &overrideTestTool{name: "read_file"}
+	shellTool := &overrideTestTool{name: "shell"}
+	runner := &Runner{bus: bus, tools: tools.New(fileTool, shellTool), cfg: func() config.Config { return cfg }}
+	runner.gate = NewGate(bus, runner.cfg)
+	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"read_file": true, "shell": true}}
+	done := make(chan tools.CallOutcome, 1)
+	go func() {
+		done <- runner.executeTool(context.Background(), s, "run-1", "call-1", "read_file", map[string]any{"path": `C:\outside.txt`})
+	}()
+	nextApprovalEvent(t, eventCh)
+	if err := runner.gate.Decide(s.ID, "call-1:operator", "session"); err != nil {
+		t.Fatal(err)
+	}
+	if outcome := <-done; !outcome.OK || !outcome.OperatorContext {
+		t.Fatalf("file outcome=%+v", outcome)
+	}
+	outcome := runner.executeTool(context.Background(), s, "run-2", "call-2", "shell", map[string]any{"command": "whoami"})
+	if !outcome.OK || !outcome.OperatorContext || shellTool.normalCalls != 0 || shellTool.overrideCalls != 1 {
+		t.Fatalf("shell outcome=%+v normal=%d operator=%d", outcome, shellTool.normalCalls, shellTool.overrideCalls)
+	}
+}
+
 func TestFileGrantToolContractNeverIncludesShell(t *testing.T) {
 	want := map[string]bool{
 		"read_file": true, "list_dir": true, "write_file": true, "edit_file": true,

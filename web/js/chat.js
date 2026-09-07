@@ -15,6 +15,7 @@ import { agentAuthor, chatRowText, closeConfirmText, firstUserLine, isRunning, o
 const binding = document.getElementById("chat-binding");
 const closeCurrent = document.getElementById("chat-close");
 const newChatButton = document.getElementById("chat-new");
+const newChatMenu = document.getElementById("chat-new-menu");
 const chatListToggle = document.getElementById("chat-list-toggle");
 const chatList = document.getElementById("chat-list");
 const status = document.getElementById("chat-status");
@@ -150,7 +151,12 @@ function renderIdentityAlarm() {
 }
 
 function renderBinding(session) {
-  binding.textContent = sessionTitle(session);
+	binding.replaceChildren();
+	if (session) {
+		const title = document.createElement("span"); title.textContent = sessionTitle(session);
+		const path = document.createElement("span"); path.className = `chat-workspace ${session.workspace_missing ? "missing" : ""}`; path.textContent = `${session.workspace_dir || session.workspace}${session.workspace_missing ? " · missing" : ""}`;
+		binding.append(title, path);
+	}
   binding.title = session ? firstUserLine(session) : "";
   closeCurrent.hidden = !session;
   closeCurrent.disabled = !session || !!store.replay;
@@ -204,8 +210,9 @@ function renderChatList() {
 }
 
 function renderHeader(session) {
-	status.textContent = store.replay ? "replay" : session?.pending_approval ? "waiting for you" : session?.run?.status || "idle";
-	status.classList.toggle("waiting", !store.replay && !!session?.pending_approval);
+	const waiting = !!(session?.pending_approval || session?.pending_repo_policy);
+	status.textContent = store.replay ? "replay" : waiting ? "waiting for you" : session?.run?.status || "idle";
+	status.classList.toggle("waiting", !store.replay && waiting);
   renderBuildHeader(buildID, document.getElementById("chat-signature-state"), store.build, store.signature);
   renderStopState(stop, session, store.replay);
 }
@@ -586,7 +593,7 @@ function renderComposer(session) {
   else if (session?.run.status === "paused") input.placeholder = "paused — waiting for approval";
   else input.placeholder = "Send a task · Enter sends · Shift+Enter newline";
   const queued = session?.queued_messages || 0;
-	const message = localNotice || (session && !session.runnable ? session.not_runnable_reason : queued ? `queued (${queued})` : session?.pending_approval ? "waiting for you" : "");
+  const message = localNotice || (session && !session.runnable ? session.not_runnable_reason : queued ? `queued (${queued})` : session?.pending_approval || session?.pending_repo_policy ? "waiting for you" : "");
   notice.textContent = message;
   notice.className = `chat-notice ${localAlarm || (session && !session.runnable) ? "alarm" : ""}`;
 	pendingFiles.replaceChildren(...queuedAttachments.map((file) => {
@@ -595,14 +602,35 @@ function renderComposer(session) {
     row.textContent = `${file.path.split("/").pop()} · ${format(file.bytes)} B${file.reused ? " · reused" : ""}`;
     return row;
 	}));
-	pendingApproval.hidden = !session?.pending_approval;
+	pendingApproval.hidden = !(session?.pending_approval || session?.pending_repo_policy);
+	const policyCard = session?.pending_repo_policy ? createPolicyCard(session) : null;
 	pendingApproval.replaceChildren(...(session?.pending_approval ? [createApprovalCard(document, session.pending_approval, {
 		replay: store.replay,
 		decide: (callID, decision) => api("/api/approve", { session_id: session.id, call_id: callID, decision }),
-	})] : []));
+	})] : policyCard ? [policyCard] : []));
 }
 
-async function newChat() {
+function createPolicyCard(session) {
+	const policy = session.pending_repo_policy;
+	const card = document.createElement("section"); card.className = "approval-card repo-policy-card";
+	const title = document.createElement("span"); title.textContent = "Allow this";
+	const heading = document.createElement("strong"); heading.textContent = "Trust this repo's policy?";
+	const reason = document.createElement("span"); reason.textContent = "This repository wants to change defaults for this chat.";
+	const detail = document.createElement("details"); const summary=document.createElement("summary");summary.textContent="Technical detail";
+	const path = document.createElement("span"); path.textContent = `${policy.path}${policy.changed ? " · changed" : ""}`;
+	const pre = document.createElement("pre"); pre.textContent = policy.error || `${policy.content}${policy.diff ? `\n\n${policy.diff}` : ""}`; detail.append(summary,path,pre);
+	const actions = document.createElement("div"); actions.className = "approval-actions";
+	for (const [label, action] of [["Yes, for this chat","policy-approve"],["Just once","policy-once"],["No","policy-deny"]]) { const button=document.createElement("button");button.type="button";button.textContent=label;if(action==="policy-approve"){button.className="default";button.autofocus=true}button.disabled=!!store.replay || (action!=="policy-deny" && !!policy.error);button.onclick=()=>void decidePolicy(session,action);actions.append(button) }
+	card.append(title,heading,reason,detail,actions); return card;
+}
+
+async function decidePolicy(session, action) {
+	const policy=session.pending_repo_policy; if(!policy||store.replay)return;
+	try { await api(`/api/workspaces/${action}`,{dir:session.workspace_dir||session.workspace,hash:policy.hash,session_id:session.id}); reduce({type:"snapshot",data:await api("/api/state",undefined,"GET")}); localNotice="";localAlarm=false;render() }
+	catch(error){localNotice=error.message||String(error);localAlarm=true;renderComposer(store.sessions[bound])}
+}
+
+async function createNewChat(workspace) {
   if (store.replay) return;
   const source = store.sessions[bound] || Object.values(store.sessions).sort((left, right) => Date.parse(right.created_at || 0) - Date.parse(left.created_at || 0))[0];
   if (!source) {
@@ -611,7 +639,7 @@ async function newChat() {
     return renderComposer(undefined);
   }
   try {
-    const result = await api("/api/sessions", { source_session_id: source.id });
+    const result = await api("/api/sessions", { source_session_id: source.id, workspace });
     reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
     changeBound(result.session.id);
     chatListExpanded = false;
@@ -626,6 +654,19 @@ async function newChat() {
     localAlarm = true;
     renderComposer(store.sessions[bound]);
   }
+}
+
+async function newChat() {
+	if(store.replay)return;
+	try {
+		const choices=await api("/api/pick-folder",undefined,"GET");
+		newChatMenu.replaceChildren();
+		const add=(label,path)=>{const button=document.createElement("button");button.type="button";button.textContent=label;button.title=path;button.onclick=()=>{newChatMenu.hidden=true;void createNewChat(path)};newChatMenu.append(button)};
+		add(`Default · ${choices.default}`,choices.default);
+		for(const item of (choices.recent||[]).filter(item=>item.dir&&item.dir.toLowerCase()!==String(choices.default).toLowerCase()).slice(0,6))add(item.dir,item.dir);
+		const browse=document.createElement("button");browse.type="button";browse.textContent="Browse…";browse.onclick=async()=>{newChatMenu.hidden=true;try{const selected=await api("/api/pick-folder",{default:choices.default});await createNewChat(selected.workspace_dir)}catch(error){if(!String(error.message).includes("canceled")){localNotice=error.message;localAlarm=true;renderComposer(store.sessions[bound])}}};newChatMenu.append(browse);
+		newChatMenu.hidden=false;
+	}catch(error){localNotice=error.message||String(error);localAlarm=true;renderComposer(store.sessions[bound])}
 }
 
 async function closeChat(session) {

@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,6 +19,46 @@ func testManager(t *testing.T, baseDir, workspace string) *Manager {
 	return New(baseDir, func() config.Config { return cfg }, func(context.Context, string, string) (int, error) {
 		return 0, nil
 	})
+}
+
+func TestCanonicalWorkspaceMemoryKeyAndLegacyDefaultMigration(t *testing.T) {
+	baseDir := t.TempDir()
+	workspace := filepath.Join(baseDir, "MixedCaseWorkspace")
+	manager := testManager(t, baseDir, workspace)
+	canonical := manager.Path(workspace)
+	if filepath.Separator == '\\' {
+		alternate := strings.ToUpper(workspace)
+		if got := manager.Path(alternate); !strings.EqualFold(filepath.Base(got), filepath.Base(canonical)) {
+			t.Fatalf("case spelling changed key: %q vs %q", got, canonical)
+		}
+		clean, _ := filepath.Abs(workspace)
+		legacySum := sha256.Sum256([]byte(filepath.Clean(clean)))
+		legacy := filepath.Join(filepath.Dir(canonical), filepath.Base(clean)+"-"+hex.EncodeToString(legacySum[:4])+".md")
+		if legacy != canonical {
+			if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(legacy, []byte("- 2026-09-07 existing default memory\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if got := manager.Path(workspace); got != legacy {
+				t.Fatalf("legacy migration path=%q want %q", got, legacy)
+			}
+			content, err := manager.Read(workspace)
+			if err != nil || !strings.Contains(content, "existing default memory") {
+				t.Fatalf("content=%q err=%v", content, err)
+			}
+		}
+	}
+	if _, _, err := manager.Note(workspace, "clear me"); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Clear(workspace); err != nil {
+		t.Fatal(err)
+	}
+	if content, err := manager.Read(workspace); err != nil || content != "" {
+		t.Fatalf("after clear=%q err=%v", content, err)
+	}
 }
 
 func TestReadReturnsNotedEntriesAcrossManagerRestart(t *testing.T) {

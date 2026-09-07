@@ -78,3 +78,22 @@ func resolvePath(workspace, path string, enforceWorkspace bool) (string, error) 
 	}
 	return candidate, nil
 }
+
+func refuseRepoPolicyWrite(workspace, path string) error {
+	root, err := filepath.Abs(workspace)
+	if err != nil {
+		return err
+	}
+	candidate := filepath.FromSlash(path)
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(root, candidate)
+	}
+	rel, err := filepath.Rel(root, filepath.Clean(candidate))
+	if err == nil {
+		parts := strings.Split(filepath.ToSlash(rel), "/")
+		if len(parts) > 0 && strings.EqualFold(parts[0], ".agentb") {
+			return fmt.Errorf("repo-policy immutability rule: model file tools cannot write .agentb/")
+		}
+	}
+	return nil
+}

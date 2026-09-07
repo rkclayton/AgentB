@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -39,6 +40,10 @@ type Runner struct {
 	fileGrantMu        sync.Mutex
 	fileRunGrants      map[string]bool
 	fileSessionGrants  map[string]string
+	identityGrantMu    sync.Mutex
+	identityChatGrants map[string]string
+	policyGrantMu      sync.Mutex
+	policyChatGrants   map[string]map[string]bool
 	ids                atomic.Int64
 }
 
@@ -131,7 +136,8 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		var budget events.Budget
 		var budgetErr error
 		r.stage(s, runID, turn, "assemble", func() {
-			systemBase := r.prompt.Render(profile, s, toolNames, "")
+			systemBase := r.prompt.RenderParts(profile, s, toolNames, "", "")
+			systemProject := r.prompt.RenderParts(profile, s, toolNames, s.ProjectBlock, "")
 			system = r.prompt.Render(profile, s, toolNames, s.MemoryBlock)
 			messages := []llm.Message{{Role: "system", Content: system}}
 			records := s.MessagesCopy()
@@ -143,7 +149,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				messages = append(messages, converted)
 			}
 			request = llm.Request{Messages: messages, Tools: schemas, ToolChoice: "auto", Thinking: profile.Reasoning.Enabled}
-			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, System: system, WithoutToolSystems: r.withoutToolSystems(profile, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false)
+			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, SystemProject: systemProject, System: system, WithoutToolSystems: r.withoutToolSystems(profile, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false)
 			if budgetErr != nil {
 				return
 			}
@@ -398,6 +404,14 @@ func toolResultEventData(turn int, callID, name, content string, ok, operatorCon
 func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) tools.CallOutcome {
 	cfg := r.cfg()
 	eventArgs := sanitizedToolArguments(name, args)
+	if cfg.Shell.ServiceAccount.Enabled && !cfg.Shell.OperatorContext && r.hasIdentityChatGrant(s.ID) {
+		if fileGrantTool(name) {
+			return r.callFileAsOperator(ctx, s, name, args)
+		}
+		if name == "shell" || name == "run_script" {
+			return r.callShellAsOperator(ctx, s, name, args)
+		}
+	}
 	if fileGrantTool(name) && cfg.Shell.ServiceAccount.Enabled && !cfg.Shell.OperatorContext && r.hasFileGrant(s.ID, runID) {
 		return r.callFileAsOperator(ctx, s, name, args)
 	}
@@ -405,9 +419,16 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 		if r.hasShellGrant(s.ID, runID, shellGrantBoundary, "") {
 			return r.callShellAsOperator(ctx, s, name, args)
 		}
-		if command, matched := r.tools.OperatorCommand(name, args); matched {
+		if command, matched := r.tools.OperatorCommandWith(name, args, s.Policy().Shell.OperatorCommandsAdd); matched {
 			return r.executeOperatorCommand(ctx, s, runID, callID, name, args, command)
 		}
+	}
+	if name == "shell" && repoRunGrantMatches(s.Policy().Shell.RunGrantDefaults, args) && !r.hasShellGrant(s.ID, runID, shellGrantPolicy, "") {
+		identity := "operator"
+		if cfg.Shell.ServiceAccount.Enabled {
+			identity = "service"
+		}
+		r.grantShellRun(s, runID, shellRunGrant{Rule: shellGrantPolicy, Identity: identity})
 	}
 	decision := "approve"
 	var gateErr error
@@ -417,10 +438,15 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 		if !approved {
 			decision = "deny"
 		}
-	} else if name == "shell" && cfg.Shell.ServiceAccount.Enabled && !cfg.Shell.OperatorContext && r.gate.required(name) {
+	} else if name == "shell" && r.hasShellGrant(s.ID, runID, shellGrantPolicy, "") {
+		// An operator-approved repository default grants this displayed command
+		// pattern for the run under the already-configured identity.
+	} else if name == "shell" && cfg.Shell.ServiceAccount.Enabled && !cfg.Shell.OperatorContext && r.gate.requiredFor(s, name) {
 		if !r.hasShellGrant(s.ID, runID, shellGrantPolicy, "") {
 			decision, gateErr = r.gate.WaitPolicyDecision(ctx, s, runID, callID, name, eventArgs)
 		}
+	} else if r.hasPolicyChatGrant(s.ID, name) {
+		// The operator already allowed this policy-governed action for the chat.
 	} else {
 		var approved bool
 		approved, gateErr = r.gate.Wait(ctx, s, runID, callID, name, eventArgs)
@@ -439,6 +465,12 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	}
 	if name == "shell" && decision == "session" {
 		r.grantShellSession(s, runID, shellRunGrant{Rule: shellGrantPolicy, Identity: "service"})
+	}
+	if decision == "session" {
+		r.grantPolicyChat(s.ID, name)
+	}
+	if name == "shell" && repoRunGrantMatches(s.Policy().Shell.RunGrantDefaults, args) {
+		args = resolveRepoGrantedExecutable(cfg, args)
 	}
 	outcome := r.callDetailed(ctx, s, name, args)
 	if !outcome.OperatorOverrideAvailable {
@@ -492,6 +524,9 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	if fileGrantTool(name) && overrideDecision == "session" {
 		r.grantFileSession(s, runID)
 	}
+	if overrideDecision == "session" {
+		r.grantIdentityChat(s.ID, runID)
+	}
 	log.Printf("SECURITY: %s operator-identity override approved: session=%s call=%s command=%q path=%q", name, s.ID, callID, command, path)
 	overrideContent, overrideOK := r.tools.CallAsOperator(ctx, s, name, args)
 	if overrideOK {
@@ -503,6 +538,53 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	}
 	outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override was attempted but failed:\n"+overrideContent, false, true
 	return outcome
+}
+
+func repoRunGrantMatches(defaults []string, args map[string]any) bool {
+	command, _ := args["command"].(string)
+	normalized := strings.Join(strings.Fields(strings.ToLower(command)), " ")
+	for _, value := range defaults {
+		candidate := strings.Join(strings.Fields(strings.ToLower(value)), " ")
+		if candidate != "" && (normalized == candidate || strings.HasPrefix(normalized, candidate+" ")) {
+			return true
+		}
+	}
+	return false
+}
+
+func resolveRepoGrantedExecutable(cfg config.Config, args map[string]any) map[string]any {
+	if len(cfg.Shell.Command) == 0 {
+		return args
+	}
+	shellName := strings.ToLower(filepath.Base(cfg.Shell.Command[0]))
+	if shellName != "powershell" && shellName != "powershell.exe" && shellName != "pwsh" && shellName != "pwsh.exe" {
+		return args
+	}
+	command, _ := args["command"].(string)
+	fields := strings.Fields(command)
+	if len(fields) == 0 || strings.ContainsAny(fields[0], `'"&|;$(){}[]`) {
+		return args
+	}
+	resolved, err := exec.LookPath(fields[0])
+	if err != nil {
+		return args
+	}
+	absolute, err := filepath.Abs(resolved)
+	if err != nil {
+		return args
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(command, fields[0]))
+	quoted := "'" + strings.ReplaceAll(absolute, "'", "''") + "'"
+	prepared := "& " + quoted
+	if rest != "" {
+		prepared += " " + rest
+	}
+	copy := make(map[string]any, len(args))
+	for key, value := range args {
+		copy[key] = value
+	}
+	copy["command"] = prepared
+	return copy
 }
 
 func (r *Runner) callFileAsOperator(ctx context.Context, s *session.Session, name string, args map[string]any) tools.CallOutcome {
@@ -565,7 +647,8 @@ func (r *Runner) measureSession(ctx context.Context, p *config.Profile, s *sessi
 	enabled := s.EnabledTools()
 	toolNames := r.tools.Names(enabled)
 	schemas := r.tools.Schemas(enabled)
-	base := r.prompt.Render(p, s, toolNames, "")
+	base := r.prompt.RenderParts(p, s, toolNames, "", "")
+	project := r.prompt.RenderParts(p, s, toolNames, s.ProjectBlock, "")
 	system := r.prompt.Render(p, s, toolNames, s.MemoryBlock)
 	records := s.MessagesCopy()
 	messages := make([]llm.Message, 0, len(records))
@@ -576,7 +659,7 @@ func (r *Runner) measureSession(ctx context.Context, p *config.Profile, s *sessi
 		}
 		messages = append(messages, converted)
 	}
-	return r.budget.Measure(ctx, p, s, r.cfg().Context, budgetInput{SystemBase: base, System: system, WithoutToolSystems: r.withoutToolSystems(p, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages, Records: records}, mark)
+	return r.budget.Measure(ctx, p, s, r.cfg().Context, budgetInput{SystemBase: base, SystemProject: project, System: system, WithoutToolSystems: r.withoutToolSystems(p, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages, Records: records}, mark)
 }
 
 func (r *Runner) withoutToolSystems(p *config.Profile, s *session.Session, enabled map[string]bool, memory string) map[string]string {

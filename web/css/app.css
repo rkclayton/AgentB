@@ -164,6 +164,7 @@
   white-space: nowrap;
 }
 .occupancy-system { background: rgba(216, 221, 227, 0.9); }
+.occupancy-project { background: rgba(216, 221, 227, 0.82); }
 .occupancy-schemas { background: rgba(216, 221, 227, 0.75); }
 .occupancy-tool-results { background: rgba(216, 221, 227, 0.6); }
 .occupancy-history { background: rgba(216, 221, 227, 0.45); }

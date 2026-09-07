@@ -1,5 +1,6 @@
 const categoryGroups = [
   { key: "system", label: "system prompt", sources: ["system"] },
+  { key: "project", label: "project instructions", sources: ["project"] },
   { key: "schemas", label: "tool schemas", sources: ["tools"] },
   { key: "tool-results", label: "tool results", sources: ["files", "results", "fetched"] },
   { key: "history", label: "history", sources: ["history", "summary"] },

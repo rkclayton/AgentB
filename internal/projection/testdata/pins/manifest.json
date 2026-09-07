@@ -2,6 +2,30 @@
   "schema_version": 2,
   "cases": [
     {
+      "id": "bound-directory",
+      "source": "sources/bound-directory.events",
+      "golden": "golden/bound-directory.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/bound-directory.events",
+      "origin_sha256": "f8b7e1ec84566b590960826f91e9f403d4ea8cfc5ca2f4d6983935b8bc52a1b3",
+      "origin_records": 2,
+      "decompressed_bytes": 1088,
+      "synthetic": true,
+      "shapes": ["bound-directory", "project-instructions", "lazy-subdir"],
+      "rationale": "A session seed binds C:\\projects\\vesper and a later file-tool touch appends one subdirectory instruction block; it pins the directory jail identity and replay-only project state."
+    },
+    {
+      "id": "repo-policy-approved",
+      "source": "sources/repo-policy-approved.events",
+      "golden": "golden/repo-policy-approved.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/repo-policy-approved.events",
+      "origin_sha256": "2a1e77a10e16e2367a7e9a2885243be191a012e703ab0e6c0393caad4f5d10bf",
+      "origin_records": 2,
+      "decompressed_bytes": 829,
+      "synthetic": true,
+      "shapes": ["repo-policy", "tofu", "policy-approved"],
+      "rationale": "A first-sight repository policy starts as a durable pending trust card and becomes approved by exact hash without writing trust into the repository."
+    },
+    {
       "id": "attachment-message",
       "source": "sources/attachment-message.events",
       "golden": "golden/attachment-message.golden.json",

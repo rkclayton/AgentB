@@ -75,6 +75,9 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 	if !ok || path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	if err := refuseRepoPolicyWrite(s.Workspace, path); err != nil {
+		return "", err
+	}
 	content, ok := args["content"].(string)
 	if !ok {
 		return "", fmt.Errorf("content is required")

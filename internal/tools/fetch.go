@@ -62,7 +62,7 @@ func (f *Fetch) Call(ctx context.Context, s *session.Session, args map[string]an
 	return detail.Content, detail.Err
 }
 
-func (f *Fetch) CallDetailed(ctx context.Context, _ *session.Session, args map[string]any) (detail CallDetail) {
+func (f *Fetch) CallDetailed(ctx context.Context, s *session.Session, args map[string]any) (detail CallDetail) {
 	detail.Category, detail.Untrusted = "fetched", true
 	rawURL, ok := args["url"].(string)
 	if !ok || strings.TrimSpace(rawURL) == "" {
@@ -74,6 +74,13 @@ func (f *Fetch) CallDetailed(ctx context.Context, _ *session.Session, args map[s
 	meta := map[string]any{"url": rawURL, "status": 0, "source_bytes": 0, "source_truncated": false}
 	detail.Metadata = meta
 	cfg := f.config()
+	policy := s.Policy().Fetch
+	if len(policy.AllowDomains) > 0 {
+		cfg.AllowDomains = append([]string(nil), policy.AllowDomains...)
+	}
+	if len(policy.DenyDomains) > 0 {
+		cfg.DenyDomains = append(cfg.DenyDomains, policy.DenyDomains...)
+	}
 	target, err := parseFetchURL(rawURL)
 	if err != nil {
 		detail.Err = err

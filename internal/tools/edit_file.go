@@ -29,6 +29,9 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 	if path == "" {
 		return "", fmt.Errorf("path is required")
 	}
+	if err := refuseRepoPolicyWrite(s.Workspace, path); err != nil {
+		return "", err
+	}
 	if !oldOK {
 		return "", fmt.Errorf("old_string is required")
 	}

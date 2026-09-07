@@ -58,7 +58,7 @@ func enabledFileIdentity(t *testing.T, credential *fileIdentityTestCredential) *
 	return identity
 }
 
-func TestFileIdentityAllowsOSAuthorizedAbsolutePath(t *testing.T) {
+func TestFileIdentityKeepsBoundDirectoryJailUnderServiceIdentity(t *testing.T) {
 	root := t.TempDir()
 	workspace := filepath.Join(root, "workspace")
 	external := filepath.Join(root, "external")
@@ -75,7 +75,7 @@ func TestFileIdentityAllowsOSAuthorizedAbsolutePath(t *testing.T) {
 	identity := enabledFileIdentity(t, credential)
 	tool := identity.Wrap(NewListDir(config.Defaults(workspace).Tools.ListDir))
 	result, err := tool.Call(context.Background(), &session.Session{Workspace: workspace, LastSeen: map[string]time.Time{}}, map[string]any{"path": external})
-	if err != nil || !strings.Contains(result, "visible.txt") {
+	if err != nil || !strings.Contains(result, "bound-directory jail") {
 		t.Fatalf("result=%q err=%v", result, err)
 	}
 	if strings.Trim(string(credential.password), "\x00") != "" {

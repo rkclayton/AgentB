@@ -121,6 +121,7 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 	if err != nil {
 		return "", err
 	}
+	s.TouchProject(path)
 	if total == 0 {
 		return withSkippedInaccessible("no matches", skipped), nil
 	}

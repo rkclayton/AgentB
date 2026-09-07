@@ -28,13 +28,30 @@ func New(baseDir string, cfg func() config.Config, count Counter) *Manager {
 }
 func (m *Manager) Path(workspace string) string {
 	abs, _ := filepath.Abs(workspace)
-	sum := sha256.Sum256([]byte(filepath.Clean(abs)))
+	clean := filepath.Clean(abs)
+	canonical := filepath.ToSlash(clean)
+	if filepath.Separator == '\\' {
+		canonical = strings.ToLower(canonical)
+	}
+	sum := sha256.Sum256([]byte(canonical))
 	name := filepath.Base(abs) + "-" + hex.EncodeToString(sum[:4]) + ".md"
 	dir := m.cfg().Memory.Dir
 	if !filepath.IsAbs(dir) {
 		dir = filepath.Join(m.baseDir, dir)
 	}
-	return filepath.Join(dir, name)
+	path := filepath.Join(dir, name)
+	// v0.9 and earlier hashed the display spelling. Keep that existing file
+	// mapped to the default workspace instead of silently orphaning memory.
+	legacySum := sha256.Sum256([]byte(clean))
+	legacy := filepath.Join(dir, filepath.Base(abs)+"-"+hex.EncodeToString(legacySum[:4])+".md")
+	if path != legacy {
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			if info, legacyErr := os.Stat(legacy); legacyErr == nil && info.Mode().IsRegular() {
+				return legacy
+			}
+		}
+	}
+	return path
 }
 func (m *Manager) Load(ctx context.Context, workspace, serverID string) (string, string, error) {
 	path := m.Path(workspace)
@@ -94,6 +111,16 @@ func (m *Manager) Read(workspace string) (string, error) {
 		return "", err
 	}
 	return strings.TrimRight(normalize(string(data)), "\n"), nil
+}
+
+func (m *Manager) Clear(workspace string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	err := os.Remove(m.Path(workspace))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }
 
 func memoryBlock(lines []string, dropped int) string {

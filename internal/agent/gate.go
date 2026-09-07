@@ -28,6 +28,7 @@ const (
 	approvalNoScopes approvalScopeKind = iota
 	approvalShellScopes
 	approvalFileScopes
+	approvalPolicyScopes
 )
 
 type Gate struct {
@@ -44,7 +45,17 @@ func NewGate(bus *events.Bus, cfg func() config.Config) *Gate {
 }
 func approvalKey(sessionID, callID string) string { return sessionID + "\x00" + callID }
 func (g *Gate) required(name string) bool {
-	switch g.cfg().Approval.Mode {
+	return approvalRequired(g.cfg().Approval.Mode, name)
+}
+func (g *Gate) requiredFor(s *session.Session, name string) bool {
+	mode := s.Policy().ApprovalMode
+	if mode == "" {
+		mode = g.cfg().Approval.Mode
+	}
+	return approvalRequired(mode, name)
+}
+func approvalRequired(mode, name string) bool {
+	switch mode {
 	case config.ApprovalModeBoundaryOnly, config.ApprovalModeOff:
 		return false
 	case config.ApprovalModeMutating:
@@ -56,7 +67,7 @@ func (g *Gate) required(name string) bool {
 	}
 }
 func (g *Gate) Wait(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) (bool, error) {
-	if !g.required(name) {
+	if !g.requiredFor(s, name) {
 		return true, nil
 	}
 	return g.WaitPolicyRequired(ctx, s, runID, callID, name, args)
@@ -70,7 +81,7 @@ func (g *Gate) WaitPolicyRequired(ctx context.Context, s *session.Session, runID
 }
 
 func (g *Gate) WaitPolicyDecision(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) (string, error) {
-	kind := approvalNoScopes
+	kind := approvalPolicyScopes
 	if name == "shell" {
 		kind = approvalShellScopes
 	}
@@ -204,8 +215,11 @@ func (g *Gate) DecideWith(sessionID, callID, decision string, before func()) err
 	if !ok {
 		return fmt.Errorf("approval not found")
 	}
-	if (decision == "run" || decision == "session") && wait.scopeKind == approvalNoScopes {
-		return fmt.Errorf("decision %s requires a scoped shell or file-tool approval", decision)
+	if decision == "run" && wait.scopeKind != approvalShellScopes && wait.scopeKind != approvalFileScopes {
+		return fmt.Errorf("decision %s requires a run-scoped shell or file-tool approval", decision)
+	}
+	if decision == "session" && wait.scopeKind == approvalNoScopes {
+		return fmt.Errorf("decision %s requires a scoped approval", decision)
 	}
 	if decision == "operator_mode" && wait.scopeKind != approvalShellScopes {
 		return fmt.Errorf("decision %s is only valid for a shell approval", decision)

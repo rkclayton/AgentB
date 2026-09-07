@@ -171,7 +171,7 @@ func TestPolicyApprovalEventIsNotBoundaryEscape(t *testing.T) {
 	}
 }
 
-func TestRunAndOperatorModeDecisionsAreShellOnly(t *testing.T) {
+func TestNonShellPolicyAcceptsChatScopeButNotRunOrOperatorMode(t *testing.T) {
 	bus := events.NewBus()
 	eventsCh, unsubscribe := bus.Subscribe()
 	defer unsubscribe()
@@ -199,8 +199,22 @@ func TestRunAndOperatorModeDecisionsAreShellOnly(t *testing.T) {
 	if err := gate.Decide(s.ID, "call", "run"); err == nil {
 		t.Fatal("run accepted for non-shell approval")
 	}
-	if err := gate.Decide(s.ID, "call", "deny"); err != nil {
+	if err := gate.Decide(s.ID, "call", "session"); err != nil {
 		t.Fatal(err)
 	}
-	<-done
+	if approved := <-done; !approved {
+		t.Fatal("chat-scoped policy decision did not approve")
+	}
+}
+
+func TestPolicyChatGrantLapsesWithSession(t *testing.T) {
+	runner := &Runner{}
+	runner.grantPolicyChat("session", "write_file")
+	if !runner.hasPolicyChatGrant("session", "write_file") || runner.hasPolicyChatGrant("session", "read_file") {
+		t.Fatal("policy chat grant did not remain tool-specific")
+	}
+	runner.LapseSessionGrants("session")
+	if runner.hasPolicyChatGrant("session", "write_file") {
+		t.Fatal("policy chat grant survived session close")
+	}
 }

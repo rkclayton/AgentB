@@ -1,11 +1,14 @@
 package session
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"harness/internal/config"
 	"harness/internal/events"
+	workspaceinfo "harness/internal/workspace"
 )
 
 func TestSnapshotCarriesToolCallCounts(t *testing.T) {
@@ -21,6 +24,50 @@ func TestSnapshotCarriesToolCallCounts(t *testing.T) {
 	snapshot := s.Snapshot()
 	if len(snapshot.Tools) != 1 || snapshot.Tools[0].Calls != 2 || snapshot.Tools[0].SchemaTokens != 42 || snapshot.Tools[0].MarginalTokens != 17 {
 		t.Fatalf("snapshot tools=%+v", snapshot.Tools)
+	}
+}
+
+func TestCreateLikeAtBindsCanonicalDirectoryAndMissingIsVisible(t *testing.T) {
+	logs, data, source := t.TempDir(), t.TempDir(), t.TempDir()
+	writers, err := events.NewWriters(logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writers.Close()
+	profile := &config.Profile{ID: "main", Label: "Coder", Context: config.Context{NCtx: 32768, ReserveOutput: 8192}, Capabilities: config.Capabilities{Streaming: true, ToolCalls: true, OverflowBehavior: "error"}}
+	cfg := config.Defaults(source)
+	registry := NewRegistry(events.NewBus(), writers, func(id string) (*config.Profile, bool) { return profile, id == profile.ID }, 40, func() config.Config { return cfg })
+	manager := workspaceinfo.New(data, func(dir string) string { return filepath.Join(data, filepath.Base(dir)+".md") })
+	registry.SetWorkspaceManager(manager)
+	first, err := registry.Create("", profile.ID, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound := filepath.Join(t.TempDir(), "repo")
+	if err := os.MkdirAll(bound, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bound, "AGENTS.md"), []byte("project rule"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	second, err := registry.CreateLikeAt(first.ID, filepath.Join(bound, "."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := second.Snapshot()
+	if snapshot.WorkspaceDir != filepath.Clean(bound) || snapshot.Workspace != snapshot.WorkspaceDir || snapshot.WorkspaceMissing || !strings.Contains(snapshot.ProjectContent, "project rule") {
+		t.Fatalf("bound snapshot=%+v", snapshot)
+	}
+	missing := filepath.Join(t.TempDir(), "absent")
+	third, err := registry.CreateLikeAt(first.ID, missing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !third.Snapshot().WorkspaceMissing {
+		t.Fatalf("missing snapshot=%+v", third.Snapshot())
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Fatalf("missing directory was created: %v", err)
 	}
 }
 

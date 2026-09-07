@@ -30,10 +30,12 @@ let settingsSaveMessage = "All changes saved";
 let settingsSaveAlarm = false;
 let activeSection = "servers";
 let hardeningServerID = "";
+let workspaceState = [];
 
 const sectionLabels = [
   ["servers", "Connections"],
   ["sessions", "Sessions"],
+  ["workspace", "Workspace"],
   ["tools", "Tools"],
   ["memory", "Memory"],
   ["context", "Context"],
@@ -111,6 +113,7 @@ function openSettings(section = "") {
   refreshServiceAccountStatus();
 	refreshHardeningStatus();
 	refreshSigningStatus();
+  refreshWorkspaceState();
   requestAnimationFrame(() => sheet.querySelector(".settings-nav button.selected")?.focus());
 }
 
@@ -140,6 +143,7 @@ function render() {
   const content = {
     servers: () => servers(),
     sessions: () => sessions(),
+    workspace: () => workspaces(),
     tools: () => tools(active),
     memory: () => memory(active),
     context: () => context(active),
@@ -272,7 +276,7 @@ function profileFields(profile, reason) {
     ${number(`${p}.context.reserve_output`, "reserve", profile.context.reserve_output)}
 	${number(`${p}.context.n_ctx`, "context size", profile.context.n_ctx, "1", false, "", !profile.context.n_ctx)}
     ${textarea(`${p}.system_prompt_override`, "system prompt override", profile.system_prompt_override || "")}
-    <p class="settings-note">variables: {{workspace}} {{tools}} {{memory}}</p>
+    <p class="settings-note">variables: {{workspace}} {{tools}} {{project}} {{memory}}</p>
     <div class="settings-subhead">Capabilities</div>
     <div class="findings"><span class="settings-note">${html(caps.probed_at || "not probed")}</span><ul>${findings || "<li>no findings</li>"}</ul></div>
     ${reason ? `<p class="field-error">${html(reason)}</p>` : ""}
@@ -398,6 +402,22 @@ function run() {
     ${approvalChoices(cfg.approval?.mode)}
     <p class="settings-note">With the service identity enabled, run_script still requires confirmation. Shell follows the approval mode; boundary-only runs in-workspace commands silently, while boundary escapes and configured operator commands still ask.</p>
 	${number("run.queue_depth", "queue depth (0 = unbounded)", cfg.run?.queue_depth)}`;
+}
+
+function workspaces() {
+	if (!workspaceState.length) return '<p class="settings-note">No known workspace directories.</p>';
+	return workspaceState.map((item) => {
+		const memoryKey=`memory:${item.dir}`; const policyKey=`policy:${item.dir}`; const policy=item.policy;
+		return `<div class="session-row workspace-row"><span class="path" title="${attr(item.dir)}">${html(item.dir)}</span><span>${item.memory_count} memory ${item.memory_count===1?"entry":"entries"}</span><span>${html(relativeDate(item.last_used))}</span><button type="button" class="${armed.has(memoryKey)?"confirm":""}" data-action="clear-workspace-memory" data-id="${attr(item.dir)}">${armed.has(memoryKey)?"Confirm clear":"Clear memory"}</button></div>
+		${policy ? `<div class="session-row workspace-policy-row"><span class="path" title="${attr(policy.path)}">${html(policy.path)}</span><code title="${attr(policy.hash)}">${html((policy.hash||"").slice(0,12))}</code><span>${html(policy.approved_at||"not approved")}</span><button type="button" class="${armed.has(policyKey)?"confirm":""}" data-action="revoke-workspace-policy" data-id="${attr(item.dir)}" ${policy.approved?"":"disabled"}>${armed.has(policyKey)?"Confirm revoke":"Revoke"}</button></div>`:""}`;
+	}).join("");
+}
+
+function relativeDate(value) { if(!value)return "never"; const date=new Date(value); return Number.isNaN(date.valueOf())?value:date.toLocaleString(); }
+
+async function refreshWorkspaceState() {
+	try { workspaceState=await api("/api/workspaces",undefined,"GET") } catch { workspaceState=[] }
+	if(open&&activeSection==="workspace")render();
 }
 
 function delivery() {
@@ -670,6 +690,14 @@ async function click(event) {
   if (action === "new-session") return newSession();
   if (action === "close-session") return closeSession(id);
   if (action === "reset-session") return resetSession(id);
+  if (action === "clear-workspace-memory") {
+		const key=`memory:${id}`; if(!armed.has(key)){armed.add(key);return render()} armed.delete(key);
+		try{await api("/api/workspaces/memory-clear",{dir:id,confirm:true});await refreshWorkspaceState();reduce({type:"snapshot",data:await api("/api/state",undefined,"GET")})}catch(error){errors.set("workspace",error.message);render()} return;
+	}
+  if (action === "revoke-workspace-policy") {
+		const key=`policy:${id}`; if(!armed.has(key)){armed.add(key);return render()} armed.delete(key);
+		try{await api("/api/workspaces/policy-revoke",{dir:id});await refreshWorkspaceState();reduce({type:"snapshot",data:await api("/api/state",undefined,"GET")})}catch(error){errors.set("workspace",error.message);render()} return;
+	}
   if (action === "session-tool-toggle") {
     const active = store.sessions[store.active];
     if (!active) return;

@@ -23,6 +23,24 @@ func testTools(root string) (*EditFile, *WriteFile, *ReadFile, *session.Workspac
 	coordinator := NewFileCoordinator(workspaces, func(id string) string { return labels[id] }, events.NewBus())
 	return NewEditFile(coordinator), NewWriteFile(coordinator), NewReadFile(config.Defaults(root).Tools.ReadFile), workspaces
 }
+
+func TestModelFileToolsRefuseRepoPolicyDirectoryByNamedRule(t *testing.T) {
+	root := t.TempDir()
+	edit, write, _, _ := testTools(root)
+	item := testSession(root, "policy", "Policy")
+	if result, err := write.Call(context.Background(), item, map[string]any{"path": ".agentb/policy.json", "content": "{}"}); err == nil || !strings.Contains(err.Error(), "repo-policy immutability rule") || result != "" {
+		t.Fatalf("write result=%q err=%v", result, err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".agentb"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".agentb", "policy.json"), []byte("{}"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if result, err := edit.Call(context.Background(), item, map[string]any{"path": ".agentb/policy.json", "old_string": "{}", "new_string": "{\"version\":1}"}); err == nil || !strings.Contains(err.Error(), "repo-policy immutability rule") || result != "" {
+		t.Fatalf("edit result=%q err=%v", result, err)
+	}
+}
 func writeFixture(t *testing.T, root, name string, data []byte) string {
 	t.Helper()
 	path := filepath.Join(root, name)

@@ -23,12 +23,14 @@ import (
 	"harness/internal/detection"
 	"harness/internal/events"
 	"harness/internal/hardening"
+	"harness/internal/memory"
 	"harness/internal/probe"
 	"harness/internal/projection"
 	"harness/internal/serviceaccount"
 	"harness/internal/session"
 	"harness/internal/signing"
 	"harness/internal/tools"
+	workspaceinfo "harness/internal/workspace"
 )
 
 type Server struct {
@@ -69,6 +71,9 @@ type Server struct {
 	openFolder       func(string) error
 	extractClient    *http.Client
 	detectLocal      func(context.Context, string) (any, error)
+	workspaceState   *workspaceinfo.Manager
+	memoryState      *memory.Manager
+	pickFolder       func(string) (string, error)
 }
 
 type RuntimeRoots struct {
@@ -96,10 +101,14 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 		detectLocal: func(ctx context.Context, account string) (any, error) {
 			return detection.Local(ctx, filepath.Join(roots.Application, "scripts", "detect-local-capabilities.ps1"), account)
 		},
+		pickFolder: nativeFolderPicker,
 	}
 }
 func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry }
-func (s *Server) SetReplay(replay *projection.Replay)    { s.replay = replay }
+func (s *Server) SetWorkspaceState(manager *workspaceinfo.Manager, memories *memory.Manager) {
+	s.workspaceState, s.memoryState = manager, memories
+}
+func (s *Server) SetReplay(replay *projection.Replay) { s.replay = replay }
 func (s *Server) SetProjection(projector *projection.Store, writers *events.Writers) {
 	s.projector, s.writers = projector, writers
 }
@@ -151,6 +160,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/exchange-files", s.exchangeFiles)
 	mux.HandleFunc("/api/sessions", s.replayGuard(s.sessions))
 	mux.HandleFunc("/api/sessions/", s.replayGuard(s.session))
+	mux.HandleFunc("/api/workspaces", s.replayGuard(s.workspaces))
+	mux.HandleFunc("/api/workspaces/", s.replayGuard(s.workspaceAction))
+	mux.HandleFunc("/api/pick-folder", s.replayGuard(s.folderPicker))
 	mux.HandleFunc("/api/servers", s.servers)
 	mux.HandleFunc("/api/servers/", s.replayGuard(s.server))
 	mux.HandleFunc("/api/config", s.replayGuard(s.config))
@@ -608,11 +620,11 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if body.SourceSessionID != "" {
-			if body.Label != "" || body.ServerID != "" || body.Workspace != "" {
+			if body.Label != "" || body.ServerID != "" {
 				writeError(w, 400, "source_session_id cannot be combined with overrides", "session")
 				return
 			}
-			item, err := s.registry.CreateLike(body.SourceSessionID)
+			item, err := s.registry.CreateLikeAt(body.SourceSessionID, body.Workspace)
 			if err != nil {
 				writeError(w, 400, err.Error(), "session")
 				return
@@ -652,6 +664,140 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		method(w)
 	}
 }
+
+func (s *Server) workspaces(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		method(w)
+		return
+	}
+	if s.workspaceState == nil {
+		writeJSON(w, http.StatusOK, []workspaceinfo.Entry{})
+		return
+	}
+	writeJSON(w, http.StatusOK, s.workspaceState.List())
+}
+
+func (s *Server) workspaceAction(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost || s.workspaceState == nil {
+		method(w)
+		return
+	}
+	action := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/workspaces/"), "/")
+	var body struct {
+		Dir       string `json:"dir"`
+		Hash      string `json:"hash"`
+		SessionID string `json:"session_id"`
+		Confirm   bool   `json:"confirm"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	switch action {
+	case "memory-clear":
+		if !body.Confirm {
+			writeError(w, http.StatusBadRequest, "memory clear requires confirmation", "confirm")
+			return
+		}
+		if s.memoryState == nil {
+			writeError(w, 500, "memory manager unavailable", "memory")
+			return
+		}
+		if err := s.memoryState.Clear(body.Dir); err != nil {
+			writeError(w, 500, err.Error(), "memory")
+			return
+		}
+		s.registry.ClearWorkspaceMemory(body.Dir)
+		for _, item := range s.registry.List() {
+			if strings.EqualFold(filepath.Clean(item.Workspace), filepath.Clean(body.Dir)) {
+				s.bus.Publish(events.New(events.MemoryCleared, item.ID, "", map[string]any{"dir": body.Dir}))
+			}
+		}
+		writeJSON(w, 200, map[string]any{"dir": body.Dir, "cleared": true})
+	case "policy-approve":
+		state, err := s.workspaceState.Approve(body.Dir, body.Hash)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error(), "policy")
+			return
+		}
+		if err := s.registry.ApplyRepoPolicySession(body.SessionID, state); err != nil {
+			writeError(w, http.StatusNotFound, err.Error(), "session")
+			return
+		}
+		snapshot, _ := s.registry.Get(body.SessionID)
+		s.bus.Publish(events.New(events.PolicyApproved, body.SessionID, "", map[string]any{"dir": body.Dir, "path": state.Path, "hash": state.Hash, "approved_at": state.ApprovedAt, "approved": true, "persisted": true, "scope": "session", "tools": snapshot.Snapshot().Tools}))
+		writeJSON(w, 200, state)
+	case "policy-once":
+		state, err := s.workspaceState.PolicyForDecision(body.Dir, body.Hash)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error(), "policy")
+			return
+		}
+		state.Approved = true
+		if err := s.registry.ApplyRepoPolicySession(body.SessionID, state); err != nil {
+			writeError(w, http.StatusNotFound, err.Error(), "session")
+			return
+		}
+		snapshot, _ := s.registry.Get(body.SessionID)
+		s.bus.Publish(events.New(events.PolicyApproved, body.SessionID, "", map[string]any{"dir": body.Dir, "path": state.Path, "hash": state.Hash, "approved": true, "persisted": false, "scope": "session", "tools": snapshot.Snapshot().Tools}))
+		writeJSON(w, 200, state)
+	case "policy-deny":
+		if err := s.registry.DenyRepoPolicy(body.SessionID); err != nil {
+			writeError(w, 404, err.Error(), "session")
+			return
+		}
+		s.bus.Publish(events.New(events.PolicyDenied, body.SessionID, "", map[string]any{"dir": body.Dir, "hash": body.Hash}))
+		writeJSON(w, 200, map[string]any{"denied": true})
+	case "policy-revoke":
+		if err := s.workspaceState.Revoke(body.Dir); err != nil {
+			writeError(w, 500, err.Error(), "policy")
+			return
+		}
+		s.registry.RevokeRepoPolicy(body.Dir)
+		for _, item := range s.registry.List() {
+			if strings.EqualFold(filepath.Clean(item.Workspace), filepath.Clean(body.Dir)) {
+				s.bus.Publish(events.New(events.PolicyRevoked, item.ID, "", map[string]any{"dir": body.Dir}))
+			}
+		}
+		writeJSON(w, 200, map[string]any{"dir": body.Dir, "revoked": true})
+	default:
+		http.NotFound(w, r)
+	}
+}
+
+func (s *Server) folderPicker(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		recent := []workspaceinfo.Entry{}
+		if s.workspaceState != nil {
+			recent = s.workspaceState.List()
+		}
+		writeJSON(w, 200, map[string]any{"default": s.roots.Workspace, "recent": recent})
+		return
+	}
+	if r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	if err := s.operatorRequest(r); err != nil {
+		writeError(w, http.StatusForbidden, "folder selection requires a verified operator browser process: "+err.Error(), "workspace")
+		return
+	}
+	var body struct {
+		Default string `json:"default"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if body.Default == "" {
+		body.Default = s.roots.Workspace
+	}
+	selected, err := s.pickFolder(body.Default)
+	if err != nil {
+		writeError(w, 400, err.Error(), "workspace")
+		return
+	}
+	writeJSON(w, 200, map[string]string{"workspace_dir": selected})
+}
+
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 	tail := strings.TrimPrefix(r.URL.Path, "/api/sessions/")
 	parts := strings.Split(strings.Trim(tail, "/"), "/")

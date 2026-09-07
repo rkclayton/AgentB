@@ -60,6 +60,9 @@ type OperatorCommand struct {
 type OperatorCommandTool interface {
 	OperatorCommand(map[string]any) (OperatorCommand, bool)
 }
+type RepoOperatorCommandTool interface {
+	OperatorCommandWith(map[string]any, []string) (OperatorCommand, bool)
+}
 type Registry struct {
 	ordered []Tool
 	byName  map[string]Tool
@@ -183,7 +186,13 @@ func (r *Registry) CallAsOperator(ctx context.Context, s *session.Session, name 
 }
 
 func (r *Registry) OperatorCommand(name string, args map[string]any) (OperatorCommand, bool) {
+	return r.OperatorCommandWith(name, args, nil)
+}
+func (r *Registry) OperatorCommandWith(name string, args map[string]any, additional []string) (OperatorCommand, bool) {
 	tool := r.byName[name]
+	if matcher, ok := tool.(RepoOperatorCommandTool); ok {
+		return matcher.OperatorCommandWith(args, additional)
+	}
 	matcher, ok := tool.(OperatorCommandTool)
 	if !ok {
 		return OperatorCommand{}, false

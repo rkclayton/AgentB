@@ -34,6 +34,9 @@ func (r *PromptRenderer) Reload() error {
 	return nil
 }
 func (r *PromptRenderer) Render(profile *config.Profile, s *session.Session, toolNames []string, memory string) string {
+	return r.RenderParts(profile, s, toolNames, s.ProjectBlock, memory)
+}
+func (r *PromptRenderer) RenderParts(profile *config.Profile, s *session.Session, toolNames []string, project, memory string) string {
 	r.mu.RLock()
 	template := r.text
 	r.mu.RUnlock()
@@ -42,10 +45,11 @@ func (r *PromptRenderer) Render(profile *config.Profile, s *session.Session, too
 	}
 	value := strings.ReplaceAll(template, "{{workspace}}", s.Workspace)
 	value = strings.ReplaceAll(value, "{{tools}}", strings.Join(toolNames, ", "))
+	value = strings.ReplaceAll(value, "{{project}}", project)
 	value = strings.ReplaceAll(value, "{{memory}}", memory)
 	value = strings.ReplaceAll(value, "{{os_context}}", operatingSystemContext())
 	value = strings.ReplaceAll(value, "{{date}}", time.Now().Format("2006-01-02"))
-	if memory == "" {
+	if memory == "" && project == "" {
 		value = strings.TrimRight(value, "\r\n")
 	}
 	return value

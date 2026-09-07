@@ -91,6 +91,9 @@ func (s *Shell) CallAsOperator(ctx context.Context, item *session.Session, args 
 }
 
 func (s *Shell) OperatorCommand(args map[string]any) (OperatorCommand, bool) {
+	return s.OperatorCommandWith(args, nil)
+}
+func (s *Shell) OperatorCommandWith(args map[string]any, additional []string) (OperatorCommand, bool) {
 	command, _ := args["command"].(string)
 	segments := splitShellCommands(command)
 	if len(segments) == 0 {
@@ -108,6 +111,7 @@ func (s *Shell) OperatorCommand(args map[string]any) (OperatorCommand, bool) {
 		return OperatorCommand{}, false
 	}
 	_, configured := s.configWithOperatorCommands()
+	configured = append(configured, additional...)
 	for _, candidate := range configured {
 		configuredPath, found := resolveOperatorExecutable(candidate)
 		if found && strings.EqualFold(configuredPath, resolved) {

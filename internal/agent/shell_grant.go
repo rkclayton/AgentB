@@ -105,6 +105,13 @@ func (r *Runner) lapseShellGrants(s *session.Session, runID string) {
 // LapseSessionGrants closes only grants scoped to the durable chat. Run grants
 // retain their existing run-end lifecycle.
 func (r *Runner) LapseSessionGrants(sessionID string) {
+	r.identityGrantMu.Lock()
+	delete(r.identityChatGrants, sessionID)
+	r.identityGrantMu.Unlock()
+	r.policyGrantMu.Lock()
+	delete(r.policyChatGrants, sessionID)
+	r.policyGrantMu.Unlock()
+
 	r.shellGrantMu.Lock()
 	shellGrants := append([]shellSessionGrant(nil), r.shellSessionGrants[sessionID]...)
 	delete(r.shellSessionGrants, sessionID)
@@ -142,6 +149,9 @@ func shellGrantData(runID, scope string, grant shellRunGrant, reason string) map
 }
 
 func (r *Runner) executeOperatorCommand(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any, command tools.OperatorCommand) tools.CallOutcome {
+	if r.hasIdentityChatGrant(s.ID) {
+		return r.callConfiguredCommandAsOperator(ctx, s, name, args)
+	}
 	if !r.hasShellGrant(s.ID, runID, shellGrantOperatorCommand, command.Executable) {
 		approvalArgs := map[string]any{
 			"command": args["command"], "identity": "Agent_b operator (not Administrator)",
@@ -161,9 +171,43 @@ func (r *Runner) executeOperatorCommand(ctx context.Context, s *session.Session,
 		}
 		if decision == "session" {
 			r.grantShellSession(s, runID, shellRunGrant{Rule: shellGrantOperatorCommand, Identity: "operator", Executable: command.Executable})
+			r.grantIdentityChat(s.ID, runID)
 		}
 	}
 	return r.callConfiguredCommandAsOperator(ctx, s, name, args)
+}
+
+func (r *Runner) hasIdentityChatGrant(sessionID string) bool {
+	r.identityGrantMu.Lock()
+	defer r.identityGrantMu.Unlock()
+	return r.identityChatGrants[sessionID] != ""
+}
+
+func (r *Runner) grantIdentityChat(sessionID, runID string) {
+	r.identityGrantMu.Lock()
+	defer r.identityGrantMu.Unlock()
+	if r.identityChatGrants == nil {
+		r.identityChatGrants = map[string]string{}
+	}
+	r.identityChatGrants[sessionID] = runID
+}
+
+func (r *Runner) hasPolicyChatGrant(sessionID, name string) bool {
+	r.policyGrantMu.Lock()
+	defer r.policyGrantMu.Unlock()
+	return r.policyChatGrants[sessionID][name]
+}
+
+func (r *Runner) grantPolicyChat(sessionID, name string) {
+	r.policyGrantMu.Lock()
+	defer r.policyGrantMu.Unlock()
+	if r.policyChatGrants == nil {
+		r.policyChatGrants = map[string]map[string]bool{}
+	}
+	if r.policyChatGrants[sessionID] == nil {
+		r.policyChatGrants[sessionID] = map[string]bool{}
+	}
+	r.policyChatGrants[sessionID][name] = true
 }
 
 func (r *Runner) callConfiguredCommandAsOperator(ctx context.Context, s *session.Session, name string, args map[string]any) tools.CallOutcome {

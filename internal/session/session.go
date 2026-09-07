@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"harness/internal/events"
+	workspaceinfo "harness/internal/workspace"
 )
 
 type RunState struct {
@@ -25,33 +26,47 @@ type ToolState struct {
 	MarginalTokens int    `json:"marginal_tokens"`
 }
 type Snapshot struct {
-	ID                   string           `json:"id"`
-	Label                string           `json:"label"`
-	ServerID             string           `json:"server_id"`
-	AgentName            string           `json:"agent_name"`
-	MainProfile          string           `json:"main_profile"`
-	CreatedAt            string           `json:"created_at"`
-	Closed               bool             `json:"closed"`
-	Workspace            string           `json:"workspace"`
-	Run                  RunState         `json:"run"`
-	Tools                []ToolState      `json:"tools"`
-	Messages             []events.Message `json:"messages"`
-	Budget               events.Budget    `json:"budget"`
-	QueuedMessages       int              `json:"queued_messages"`
-	Runnable             bool             `json:"runnable"`
-	NotRunnableReason    string           `json:"not_runnable_reason"`
-	MemoryPath           string           `json:"memory_path"`
-	MemoryContent        string           `json:"memory_content"`
-	LogPath              string           `json:"log_path"`
-	ModelTurns           int              `json:"model_turns"`
-	CompactionCount      int              `json:"compaction_count"`
-	CompactionTokenDelta int              `json:"compaction_token_delta"`
-	CompactionModelCalls int              `json:"compaction_model_calls"`
-	CompactionPrompt     int              `json:"compaction_prompt_tokens"`
-	CompactionCompletion int              `json:"compaction_completion_tokens"`
+	ID                   string                     `json:"id"`
+	Label                string                     `json:"label"`
+	ServerID             string                     `json:"server_id"`
+	AgentName            string                     `json:"agent_name"`
+	MainProfile          string                     `json:"main_profile"`
+	CreatedAt            string                     `json:"created_at"`
+	Closed               bool                       `json:"closed"`
+	Workspace            string                     `json:"workspace"`
+	WorkspaceDir         string                     `json:"workspace_dir"`
+	WorkspaceMissing     bool                       `json:"workspace_missing"`
+	ProjectContent       string                     `json:"project_content"`
+	ProjectFiles         []string                   `json:"project_files"`
+	ProjectNotes         []string                   `json:"project_notes"`
+	PendingRepoPolicy    *workspaceinfo.PolicyState `json:"pending_repo_policy,omitempty"`
+	RepoPolicy           *workspaceinfo.PolicyState `json:"repo_policy,omitempty"`
+	Run                  RunState                   `json:"run"`
+	Tools                []ToolState                `json:"tools"`
+	Messages             []events.Message           `json:"messages"`
+	Budget               events.Budget              `json:"budget"`
+	QueuedMessages       int                        `json:"queued_messages"`
+	Runnable             bool                       `json:"runnable"`
+	NotRunnableReason    string                     `json:"not_runnable_reason"`
+	MemoryPath           string                     `json:"memory_path"`
+	MemoryContent        string                     `json:"memory_content"`
+	LogPath              string                     `json:"log_path"`
+	ModelTurns           int                        `json:"model_turns"`
+	CompactionCount      int                        `json:"compaction_count"`
+	CompactionTokenDelta int                        `json:"compaction_token_delta"`
+	CompactionModelCalls int                        `json:"compaction_model_calls"`
+	CompactionPrompt     int                        `json:"compaction_prompt_tokens"`
+	CompactionCompletion int                        `json:"compaction_completion_tokens"`
 }
 type Session struct {
 	ID, Label, ServerID, Workspace string
+	WorkspaceMissing               bool
+	ProjectBlock                   string
+	ProjectFiles                   []string
+	ProjectNotes                   []string
+	PendingRepoPolicy              *workspaceinfo.PolicyState
+	RepoPolicy                     *workspaceinfo.PolicyState
+	ProjectTouch                   func(string)
 	AgentName, MainProfile         string
 	Closed                         bool
 	Messages                       []events.Message
@@ -89,7 +104,14 @@ func (s *Session) Snapshot() Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name], MarginalTokens: s.MarginalTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, AgentName: s.AgentName, MainProfile: s.MainProfile, CreatedAt: s.CreatedAt.Format(time.RFC3339Nano), Closed: s.Closed, Workspace: s.Workspace, Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, AgentName: s.AgentName, MainProfile: s.MainProfile, CreatedAt: s.CreatedAt.Format(time.RFC3339Nano), Closed: s.Closed, Workspace: s.Workspace, WorkspaceDir: s.Workspace, WorkspaceMissing: s.WorkspaceMissing, ProjectContent: s.ProjectBlock, ProjectFiles: append([]string(nil), s.ProjectFiles...), ProjectNotes: append([]string(nil), s.ProjectNotes...), PendingRepoPolicy: clonePolicyState(s.PendingRepoPolicy), RepoPolicy: clonePolicyState(s.RepoPolicy), Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
+}
+func clonePolicyState(value *workspaceinfo.PolicyState) *workspaceinfo.PolicyState {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 func (s *Session) IsRunning() bool {
 	s.mu.Lock()
@@ -121,8 +143,68 @@ func (s *Session) BeginSubmission() bool {
 	s.submitting++
 	return true
 }
-func (s *Session) EndSubmission()    { s.mu.Lock(); s.submitting--; s.mu.Unlock() }
-func (s *Session) Touch(path string) { s.mu.Lock(); s.LastSeen[path] = time.Now().UTC(); s.mu.Unlock() }
+func (s *Session) EndSubmission() { s.mu.Lock(); s.submitting--; s.mu.Unlock() }
+func (s *Session) Touch(path string) {
+	s.mu.Lock()
+	s.LastSeen[path] = time.Now().UTC()
+	hook := s.ProjectTouch
+	s.mu.Unlock()
+	if hook != nil {
+		hook(path)
+	}
+}
+func (s *Session) TouchProject(path string) {
+	s.mu.Lock()
+	hook := s.ProjectTouch
+	s.mu.Unlock()
+	if hook != nil {
+		hook(path)
+	}
+}
+func (s *Session) AppendProject(block string, files, notes []string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	newFiles := []string{}
+	for _, file := range files {
+		seen := false
+		for _, prior := range s.ProjectFiles {
+			if prior == file {
+				seen = true
+				break
+			}
+		}
+		if seen {
+			continue
+		}
+		newFiles = append(newFiles, file)
+	}
+	if len(newFiles) == 0 {
+		return false
+	}
+	if block != "" {
+		if s.ProjectBlock != "" {
+			s.ProjectBlock += "\n\n"
+		}
+		s.ProjectBlock += block
+	}
+	s.ProjectFiles = append(s.ProjectFiles, newFiles...)
+	s.ProjectNotes = append(s.ProjectNotes, notes...)
+	return true
+}
+func (s *Session) Policy() workspaceinfo.Policy {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.RepoPolicy == nil {
+		return workspaceinfo.Policy{}
+	}
+	return s.RepoPolicy.Policy
+}
+func (s *Session) SetRepoPolicy(value *workspaceinfo.PolicyState) {
+	s.mu.Lock()
+	s.RepoPolicy = value
+	s.PendingRepoPolicy = nil
+	s.mu.Unlock()
+}
 func (s *Session) LastSeenAt(path string) (time.Time, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

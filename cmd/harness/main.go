@@ -30,6 +30,7 @@ import (
 	"harness/internal/signing"
 	"harness/internal/tools"
 	webserver "harness/internal/web"
+	workspaceinfo "harness/internal/workspace"
 )
 
 func main() {
@@ -116,9 +117,12 @@ func main() {
 		}
 		return llm.New(profile).Tokenize(ctx, text, false)
 	})
+	workspaceManager := workspaceinfo.New(paths.Data, memoryManager.Path)
 	registry := session.NewRegistry(bus, writers, web.Profile, cfg.Run.MaxTurns, web.ConfigSnapshot)
 	registry.SetMemoryLoader(memoryManager.Load)
+	registry.SetWorkspaceManager(workspaceManager)
 	web.SetRegistry(registry)
+	web.SetWorkspaceState(workspaceManager, memoryManager)
 	renderer, err := agent.LoadTemplate(filepath.Join(paths.Application, "prompts", "system.md"))
 	if err != nil {
 		log.Fatal(err)
