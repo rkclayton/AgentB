@@ -94,6 +94,54 @@ func TestCloseIsDurableMetadataAndNeverStopsARun(t *testing.T) {
 	}
 }
 
+func TestRenameAuthorsPinUserAndLeaveAuxUnpinned(t *testing.T) {
+	logs := t.TempDir()
+	writers, err := events.NewWriters(logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writers.Close()
+	bus := events.NewBus()
+	profile := &config.Profile{ID: "main", Label: "Coder", Context: config.Context{NCtx: 32768, ReserveOutput: 8192}, Capabilities: config.Capabilities{Streaming: true, ToolCalls: true, OverflowBehavior: "error"}}
+	cfg := config.Defaults(t.TempDir())
+	registry := NewRegistry(bus, writers, func(id string) (*config.Profile, bool) { return profile, id == profile.ID }, 40, func() config.Config { return cfg })
+	item, err := registry.Create("main", profile.ID, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventsOut, cancel := bus.Subscribe()
+	defer cancel()
+	if err := registry.RenameBy(item.ID, "Aux suggestion", "aux"); err != nil {
+		t.Fatal(err)
+	}
+	aux := <-eventsOut
+	if aux.Type != events.SessionRenamed || aux.Data.(map[string]any)["by"] != "aux" || item.Snapshot().NamePinned {
+		t.Fatalf("aux event=%+v snapshot=%+v", aux, item.Snapshot())
+	}
+	if err := registry.Rename(item.ID, "User title"); err != nil {
+		t.Fatal(err)
+	}
+	user := <-eventsOut
+	if user.Data.(map[string]any)["by"] != "user" || !item.Snapshot().NamePinned {
+		t.Fatalf("user event=%+v", user)
+	}
+	if err := registry.RenameBy(item.ID, "Ignored", "aux"); err != nil {
+		t.Fatal(err)
+	}
+	if item.Snapshot().Label != "User title" {
+		t.Fatalf("pin lost: %+v", item.Snapshot())
+	}
+	if err := registry.Close(item.ID); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Rename(item.ID, "Closed title"); err != nil {
+		t.Fatal(err)
+	}
+	if item.Snapshot().Label != "Closed title" {
+		t.Fatalf("closed rename=%+v", item.Snapshot())
+	}
+}
+
 func TestCreateLikeKeepsProfileWorkspaceAndExactToolsetAfterClose(t *testing.T) {
 	logs := t.TempDir()
 	writers, err := events.NewWriters(logs)

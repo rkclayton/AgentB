@@ -44,6 +44,7 @@ type Runner struct {
 	identityChatGrants map[string]string
 	policyGrantMu      sync.Mutex
 	policyChatGrants   map[string]map[string]bool
+	renameSession      func(string, string, string) error
 	ids                atomic.Int64
 }
 
@@ -59,7 +60,8 @@ func (r *Runner) SetToolActivity(fn func(string)) { r.toolActivity = fn }
 func (r *Runner) SetDeliverer(fn func(*session.Session, string, []delivery.Source)) {
 	r.deliver = fn
 }
-func (r *Runner) id(prefix string) string { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
+func (r *Runner) SetSessionRenamer(fn func(string, string, string) error) { r.renameSession = fn }
+func (r *Runner) id(prefix string) string                                 { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
 func (r *Runner) AddUser(ctx context.Context, s *session.Session, text string) (events.Message, error) {
 	return r.AddUserAttachments(ctx, s, text, nil)
 }
@@ -217,6 +219,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		responseEvent.Raw = redactToolCallHeaders(string(response.Raw), toolCalls)
 		s.RecordModelTurn()
 		r.bus.Publish(responseEvent)
+		r.maybeAutoRename(ctx, s)
 		r.stage(s, runID, turn, "parse", func() {})
 		if response.FinishReason == "length" && len(toolCalls) > 0 {
 			r.appendTruncatedToolReply(ctx, s, runID, profile, turn, request.MaxTokens, response.Content, response.Reasoning, durableToolCalls, currentReasoning)

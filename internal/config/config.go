@@ -23,6 +23,7 @@ type Config struct {
 	Servers       []Profile          `json:"servers"`
 	Services      map[string]Service `json:"services"`
 	Roles         Roles              `json:"roles"`
+	Chat          Chat               `json:"chat"`
 	Run           RunConfig          `json:"run"`
 	Approval      Approval           `json:"approval"`
 	Context       GlobalContext      `json:"context"`
@@ -37,6 +38,24 @@ type Config struct {
 type Roles struct {
 	Main string `json:"main"`
 	Aux  string `json:"aux"`
+}
+
+type Chat struct {
+	AutoRename  bool `json:"auto_rename"`
+	initialized bool
+}
+
+func defaultChat() Chat { return Chat{AutoRename: true, initialized: true} }
+
+func (c *Chat) UnmarshalJSON(data []byte) error {
+	type plain Chat
+	value := plain(defaultChat())
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*c = Chat(value)
+	c.initialized = true
+	return nil
 }
 
 type Profile struct {
@@ -294,7 +313,7 @@ func Defaults(workspace string) Config {
 	return Config{
 		ConfigVersion: CurrentConfigVersion,
 		Listen:        "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
-		Servers: []Profile{profile}, Roles: Roles{Main: "local"},
+		Servers: []Profile{profile}, Roles: Roles{Main: "local"}, Chat: defaultChat(),
 		Services: map[string]Service{},
 		Run:      RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(),
 		Tools:   Tools{ReadFile: ReadFileTool{DefaultLimit: 16 << 10, MaxLimit: 64 << 10}, Attachments: AttachmentTool{MaxBytes: 8 << 20}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Shell: ShellTool{OperatorCommands: []string{"git"}}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, DenyDomains: []string{"ipinfo.io", "ipapi.co", "ip-api.com", "ifconfig.me", "ipify.org", "geojs.io", "ipgeolocation.io", "icanhazip.com"}, AllowInternalHosts: []string{}}, FindFiles: FindFilesTool{SkipRoots: []string{"Windows", "$Recycle.Bin", "System Volume Information", `ProgramData\Microsoft\Windows Defender*`, `Program Files\Windows Defender*`}}},
@@ -710,6 +729,9 @@ func applyDefaults(c *Config) {
 	}
 	if c.Services == nil {
 		c.Services = map[string]Service{}
+	}
+	if !c.Chat.initialized {
+		c.Chat = d.Chat
 	}
 	if !c.Deliver.initialized {
 		c.Deliver = d.Deliver

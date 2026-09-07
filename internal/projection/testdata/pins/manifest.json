@@ -2,6 +2,30 @@
   "schema_version": 2,
   "cases": [
     {
+      "id": "agent-tabs-multi-run",
+      "source": "sources/agent-tabs-multi-run.events",
+      "golden": "golden/agent-tabs-multi-run.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/agent-tabs-multi-run.events",
+      "origin_sha256": "86ca78cc12383be69db118ef04296dff06d5c7bd1c2f69575deaf9c555493316",
+      "origin_records": 5,
+      "decompressed_bytes": 1572,
+      "synthetic": true,
+      "shapes": ["agent-tabs", "multiple-runs", "waiting-state"],
+      "rationale": "Two sequential runs under one Agent B chat end with a durable pending decision; it pins the session-derived state that the shared agent tab must summarize as waiting."
+    },
+    {
+      "id": "chat-renamed",
+      "source": "sources/chat-renamed.events",
+      "golden": "golden/chat-renamed.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/chat-renamed.events",
+      "origin_sha256": "5a3054a909fbc7cfb32c53957c552965ae846b3e8268d7a961eedee344944ccc",
+      "origin_records": 3,
+      "decompressed_bytes": 1112,
+      "synthetic": true,
+      "shapes": ["session-renamed", "aux-rename", "user-pin"],
+      "rationale": "An auxiliary proposal followed by a user rename pins the replayed name and prevents later automatic replacement."
+    },
+    {
       "id": "bound-directory",
       "source": "sources/bound-directory.events",
       "golden": "golden/bound-directory.golden.json",

@@ -33,6 +33,7 @@ type Snapshot struct {
 	MainProfile          string                     `json:"main_profile"`
 	CreatedAt            string                     `json:"created_at"`
 	Closed               bool                       `json:"closed"`
+	NamePinned           bool                       `json:"name_pinned"`
 	Workspace            string                     `json:"workspace"`
 	WorkspaceDir         string                     `json:"workspace_dir"`
 	WorkspaceMissing     bool                       `json:"workspace_missing"`
@@ -69,6 +70,7 @@ type Session struct {
 	ProjectTouch                   func(string)
 	AgentName, MainProfile         string
 	Closed                         bool
+	NamePinned                     bool
 	Messages                       []events.Message
 	Budget                         events.Budget
 	Run                            RunState
@@ -104,7 +106,7 @@ func (s *Session) Snapshot() Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name], MarginalTokens: s.MarginalTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, AgentName: s.AgentName, MainProfile: s.MainProfile, CreatedAt: s.CreatedAt.Format(time.RFC3339Nano), Closed: s.Closed, Workspace: s.Workspace, WorkspaceDir: s.Workspace, WorkspaceMissing: s.WorkspaceMissing, ProjectContent: s.ProjectBlock, ProjectFiles: append([]string(nil), s.ProjectFiles...), ProjectNotes: append([]string(nil), s.ProjectNotes...), PendingRepoPolicy: clonePolicyState(s.PendingRepoPolicy), RepoPolicy: clonePolicyState(s.RepoPolicy), Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
+	return Snapshot{ID: s.ID, Label: s.Label, ServerID: s.ServerID, AgentName: s.AgentName, MainProfile: s.MainProfile, CreatedAt: s.CreatedAt.Format(time.RFC3339Nano), Closed: s.Closed, NamePinned: s.NamePinned, Workspace: s.Workspace, WorkspaceDir: s.Workspace, WorkspaceMissing: s.WorkspaceMissing, ProjectContent: s.ProjectBlock, ProjectFiles: append([]string(nil), s.ProjectFiles...), ProjectNotes: append([]string(nil), s.ProjectNotes...), PendingRepoPolicy: clonePolicyState(s.PendingRepoPolicy), RepoPolicy: clonePolicyState(s.RepoPolicy), Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
 }
 func clonePolicyState(value *workspaceinfo.PolicyState) *workspaceinfo.PolicyState {
 	if value == nil {

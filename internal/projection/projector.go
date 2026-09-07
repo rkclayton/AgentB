@@ -139,6 +139,7 @@ type Snapshot struct {
 	Chat                 []ChatEntry                `json:"chat"`
 	PendingApproval      *ChatEntry                 `json:"pending_approval,omitempty"`
 	Closed               bool                       `json:"closed"`
+	NamePinned           bool                       `json:"name_pinned,omitempty"`
 	Stale                bool                       `json:"projection_stale,omitempty"`
 	StaleReason          string                     `json:"projection_stale_reason,omitempty"`
 }
@@ -197,6 +198,9 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		}
 	case events.SessionRenamed:
 		next.Label = stringValue(data["label"])
+		if stringValue(data["by"]) == "user" {
+			next.NamePinned = true
+		}
 	case events.SessionUpdated:
 		next.ServerID = stringValue(data["server_id"])
 		if value := stringValue(data["agent_name"]); value != "" {
@@ -226,7 +230,12 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 			next.RepoPolicy = &policy
 			next.PendingRepoPolicy = nil
 		}
-		if data["tools"] != nil { var tools []Tool; if decode(data["tools"], &tools)==nil { next.Tools=tools } }
+		if data["tools"] != nil {
+			var tools []Tool
+			if decode(data["tools"], &tools) == nil {
+				next.Tools = tools
+			}
+		}
 	case events.PolicyRevoked:
 		next.RepoPolicy = nil
 	case events.PolicyDenied:
@@ -605,6 +614,7 @@ type seed struct {
 	MainProfile          string                     `json:"main_profile"`
 	CreatedAt            string                     `json:"created_at"`
 	Closed               bool                       `json:"closed"`
+	NamePinned           bool                       `json:"name_pinned,omitempty"`
 	Workspace            string                     `json:"workspace"`
 	WorkspaceDir         string                     `json:"workspace_dir"`
 	WorkspaceMissing     bool                       `json:"workspace_missing"`
@@ -634,7 +644,7 @@ type seed struct {
 func (value seed) snapshot(cursor Cursor) Snapshot {
 	return Snapshot{
 		SchemaVersion: SchemaVersion, Cursor: cursor, Complete: true,
-		ID: value.ID, Label: value.Label, ServerID: value.ServerID, AgentName: value.AgentName, MainProfile: value.MainProfile, CreatedAt: value.CreatedAt, Closed: value.Closed, Workspace: value.Workspace, WorkspaceDir: firstString(value.WorkspaceDir, value.Workspace), WorkspaceMissing: value.WorkspaceMissing, ProjectContent: value.ProjectContent, ProjectFiles: append([]string(nil), value.ProjectFiles...), ProjectNotes: append([]string(nil), value.ProjectNotes...), PendingRepoPolicy: value.PendingRepoPolicy, RepoPolicy: value.RepoPolicy,
+		ID: value.ID, Label: value.Label, ServerID: value.ServerID, AgentName: value.AgentName, MainProfile: value.MainProfile, CreatedAt: value.CreatedAt, Closed: value.Closed, NamePinned: value.NamePinned, Workspace: value.Workspace, WorkspaceDir: firstString(value.WorkspaceDir, value.Workspace), WorkspaceMissing: value.WorkspaceMissing, ProjectContent: value.ProjectContent, ProjectFiles: append([]string(nil), value.ProjectFiles...), ProjectNotes: append([]string(nil), value.ProjectNotes...), PendingRepoPolicy: value.PendingRepoPolicy, RepoPolicy: value.RepoPolicy,
 		Run: value.Run, Tools: cloneTools(value.Tools), Messages: cloneMessages(value.Messages), Budget: value.Budget,
 		QueuedMessages: value.QueuedMessages, Runnable: value.Runnable, NotRunnableReason: value.NotRunnableReason,
 		MemoryPath: value.MemoryPath, MemoryContent: value.MemoryContent, LogPath: value.LogPath,
@@ -664,7 +674,7 @@ func diff(before, after Snapshot) Patch {
 		{"compaction_model_calls", before.CompactionModelCalls, after.CompactionModelCalls},
 		{"compaction_prompt_tokens", before.CompactionPrompt, after.CompactionPrompt},
 		{"compaction_completion_tokens", before.CompactionCompletion, after.CompactionCompletion},
-		{"activity", before.Activity, after.Activity}, {"pending_approval", before.PendingApproval, after.PendingApproval}, {"closed", before.Closed, after.Closed},
+		{"activity", before.Activity, after.Activity}, {"pending_approval", before.PendingApproval, after.PendingApproval}, {"closed", before.Closed, after.Closed}, {"name_pinned", before.NamePinned, after.NamePinned},
 		{"projection_stale", before.Stale, after.Stale}, {"projection_stale_reason", before.StaleReason, after.StaleReason},
 	}
 	patch.Operations = append(patch.Operations, diffRun(before.Run, after.Run)...)

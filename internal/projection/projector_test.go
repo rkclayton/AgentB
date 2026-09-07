@@ -168,6 +168,28 @@ func TestShellGrantAndLapseProjectAsReplayableNotices(t *testing.T) {
 	}
 }
 
+func TestSessionRenameReplaysAuthorAndUserPin(t *testing.T) {
+	state := seeded(t)
+	aux, _, err := Next(state, Record{Cursor: Cursor{Generation: "main-a.jsonl", Offset: 30}, Event: events.Event{
+		Seq: 9, SessionID: "main", Type: events.SessionRenamed, Data: map[string]any{"label": "Aux title", "by": "aux"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aux.Label != "Aux title" || aux.NamePinned {
+		t.Fatalf("aux rename=%+v", aux)
+	}
+	user, _, err := Next(aux, Record{Cursor: Cursor{Generation: "main-a.jsonl", Offset: 60}, Event: events.Event{
+		Seq: 10, SessionID: "main", Type: events.SessionRenamed, Data: map[string]any{"label": "Pinned title", "by": "user"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Label != "Pinned title" || !user.NamePinned {
+		t.Fatalf("user rename=%+v", user)
+	}
+}
+
 func TestReadFileUsesDurableByteBoundary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "main-a.jsonl")

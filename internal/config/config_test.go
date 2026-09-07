@@ -171,6 +171,39 @@ func TestServicesAdditiveSchemaFiveDefaultsEmpty(t *testing.T) {
 	}
 }
 
+func TestChatAutoRenameDefaultsOnButPersistsOff(t *testing.T) {
+	cfg := Defaults(t.TempDir())
+	if !cfg.Chat.AutoRename {
+		t.Fatal("default auto rename is off")
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	delete(document, "chat")
+	data, _ = json.Marshal(document)
+	var absent Config
+	if err := json.Unmarshal(data, &absent); err != nil {
+		t.Fatal(err)
+	}
+	ApplyDefaults(&absent)
+	if !absent.Chat.AutoRename {
+		t.Fatal("absent chat config did not default on")
+	}
+	data, _ = json.Marshal(map[string]any{"auto_rename": false})
+	var disabled Chat
+	if err := json.Unmarshal(data, &disabled); err != nil {
+		t.Fatal(err)
+	}
+	if disabled.AutoRename {
+		t.Fatal("explicit off was not preserved")
+	}
+}
+
 func TestServiceAllowlistValidation(t *testing.T) {
 	valid := Service{BaseURL: "https://broker.example/api", Auth: "exec:entra-token --scope broker", AllowedMethods: []string{"GET", "post"}, TimeoutS: 30, MaxBodyKB: 256, RequireConfirmation: true}
 	cfg := Defaults(t.TempDir())

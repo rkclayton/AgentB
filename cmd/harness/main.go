@@ -167,6 +167,7 @@ func main() {
 		tools.NewCallService(cfg.Services),
 	)
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
+	runner.SetSessionRenamer(registry.RenameBy)
 	deliveryManager := delivery.New(bus, web.ConfigSnapshot)
 	runner.SetDeliverer(func(item *session.Session, runID string, files []delivery.Source) {
 		deliveryManager.Deliver(item, runID, files)

@@ -6,6 +6,7 @@
   "servers": [],
   "services": {},
   "roles": { "main": "", "aux": "" },
+  "chat": { "auto_rename": true },
   "run": { "max_turns": 40, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },
   "approval": { "mode": "boundary-only" },
   "deliver": { "mode": "both", "exchange_folder": "%USERPROFILE%\\Agent_b" },

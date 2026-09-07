@@ -232,19 +232,33 @@ func (r *Registry) List() []*Session {
 	sort.Slice(values, func(i, j int) bool { return values[i].ID < values[j].ID })
 	return values
 }
-func (r *Registry) Rename(id, label string) error {
+func (r *Registry) Rename(id, label string) error { return r.RenameBy(id, label, "user") }
+func (r *Registry) RenameBy(id, label, by string) error {
 	s, ok := r.Get(id)
 	if !ok {
 		return fmt.Errorf("session not found")
 	}
+	label = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(label, "\r", " "), "\n", " "))
+	if label == "" {
+		return fmt.Errorf("label is required")
+	}
+	if len([]rune(label)) > 80 {
+		label = string([]rune(label)[:80])
+	}
+	if by != "user" && by != "aux" {
+		return fmt.Errorf("rename author is invalid")
+	}
 	s.mu.Lock()
-	if s.Closed {
+	if by == "aux" && s.NamePinned {
 		s.mu.Unlock()
-		return fmt.Errorf("session is closed")
+		return nil
 	}
 	s.Label = label
+	if by == "user" {
+		s.NamePinned = true
+	}
 	s.mu.Unlock()
-	r.bus.Publish(events.New(events.SessionRenamed, id, "", map[string]any{"session_id": id, "label": label}))
+	r.bus.Publish(events.New(events.SessionRenamed, id, "", map[string]any{"session_id": id, "label": label, "by": by}))
 	return nil
 }
 func (r *Registry) SetServer(id, serverID string) error {

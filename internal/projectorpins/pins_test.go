@@ -17,7 +17,7 @@ func TestProjectorGoldenMasters(t *testing.T) {
 	}
 }
 
-func TestManifestPinsTenDistinctRealLogs(t *testing.T) {
+func TestManifestPinsCuratedDistinctLogs(t *testing.T) {
 	root, err := RepoRoot(".")
 	if err != nil {
 		t.Fatal(err)
@@ -26,8 +26,8 @@ func TestManifestPinsTenDistinctRealLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Cases) < 10 || len(manifest.Cases) > 16 {
-		t.Fatalf("curated cases = %d, want 10..16", len(manifest.Cases))
+	if len(manifest.Cases) < 10 || len(manifest.Cases) > 20 {
+		t.Fatalf("curated cases = %d, want 10..20", len(manifest.Cases))
 	}
 	origins := map[string]bool{}
 	shapes := map[string]bool{}
