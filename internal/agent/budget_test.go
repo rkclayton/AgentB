@@ -73,6 +73,43 @@ func TestExactAccountingUsesProfileTimeoutAfterConnect(t *testing.T) {
 	}
 }
 
+func TestSlowTokenizeDegradesForOneMeasurementThenReturnsToExact(t *testing.T) {
+	var slow atomic.Bool
+	slow.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/apply-template":
+			_, _ = w.Write([]byte(`{"prompt":"rendered"}`))
+		case "/tokenize":
+			if slow.CompareAndSwap(true, false) {
+				time.Sleep(1200 * time.Millisecond)
+			}
+			_, _ = w.Write([]byte(`{"tokens":[1]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	profile := config.Profile{BaseURL: server.URL, RequestTimeoutS: 1, Capabilities: config.Capabilities{Tokenize: true, ApplyTemplate: true, ApplyTemplateTools: true}}
+	item := &session.Session{ID: "degraded", SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	input := budgetInput{SystemBase: "system", System: "system"}
+	budgeter := NewBudgeter()
+	degraded, err := budgeter.MeasureWithBusy(context.Background(), &profile, item, config.GlobalContext{}, input, false, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if degraded.Mode != "estimated" || !degraded.Estimated {
+		t.Fatalf("degraded budget=%+v", degraded)
+	}
+	exact, err := budgeter.Measure(context.Background(), &profile, item, config.GlobalContext{}, input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exact.Mode != "exact" || exact.Estimated {
+		t.Fatalf("recovered budget=%+v", exact)
+	}
+}
+
 func TestExactSchemaAttributionReturnsTokenizerFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

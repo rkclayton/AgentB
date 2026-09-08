@@ -124,7 +124,7 @@ function renderBudget(session) {
   const ratio = ceiling ? used / ceiling : 0;
   budget.className = `chat-budget ${ratio > 1 ? "over" : ratio > 0.85 ? "warn" : ""}`;
   budget.querySelector(".chat-budget-fill").style.width = `${Math.min(100, ratio * 100)}%`;
-  budget.querySelector(".chat-budget-tip").textContent = `${value.estimated ? "~" : ""}${format(used)} / ${format(ceiling)}`;
+  budget.querySelector(".chat-budget-tip").textContent = `${value.estimated ? "estimated · " : ""}${format(used)} / ${format(ceiling)}`;
 }
 
 function renderLog(session) {

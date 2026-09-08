@@ -55,6 +55,10 @@ test("Composer sends during an active run and reports projected queue count", ()
 	assert.match(chat, /const queueText = queued \? `queued \(\$\{queued\}\)/);
 });
 
+test("Degraded accounting is labeled estimated in the Chat occupancy bar", () => {
+  assert.match(chat, /value\.estimated \? "estimated · " : ""/);
+});
+
 test("State strip owns queue operator pending and unreachable state without chat rows", () => {
   assert.match(html, /id="chat-status-strip"[\s\S]*id="chat-run-as-you"[\s\S]*id="chat-notice"[\s\S]*id="chat-retry-model"/);
   assert.match(chat, /model unreachable · \$\{unreachable\.host/);

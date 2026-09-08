@@ -134,7 +134,11 @@ func (b *Budgeter) saveMessageWeight(sessionID, messageID, key string, tokens in
 	b.mu.Unlock()
 }
 func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
-	return b.measure(ctx, profile, s, global, in, markRequest)
+	result, err := b.measure(ctx, profile, s, global, in, markRequest)
+	if err == nil || ctx.Err() != nil || llm.TransportKindOf(err) != llm.TransportConnected {
+		return result, err
+	}
+	return b.estimate(profile, s, global, in, markRequest)
 }
 
 func (b *Budgeter) MeasureWithBusy(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool, onBusy func(error)) (events.Budget, error) {
@@ -145,7 +149,12 @@ func (b *Budgeter) MeasureWithBusy(ctx context.Context, profile *config.Profile,
 	if onBusy != nil {
 		onBusy(err)
 	}
-	return result, err
+	return b.estimate(profile, s, global, in, markRequest)
+}
+
+func (b *Budgeter) estimate(profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
+	global.Accounting = "estimated"
+	return b.measure(context.Background(), profile, s, global, in, markRequest)
 }
 
 func (b *Budgeter) measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
