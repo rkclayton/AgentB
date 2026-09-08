@@ -108,7 +108,7 @@ func TestSnapshotToolInventoryUsesPublicNames(t *testing.T) {
 		if item["description"] == "" {
 			t.Errorf("tool %q has no description", item["name"])
 		}
-		if item["name"] == "shell" && !strings.HasSuffix(item["description"], "Use PowerShell syntax.") {
+		if item["name"] == "shell" && !strings.HasSuffix(item["description"], "Windows PowerShell 5: use `;` to chain commands, not `&&`.") {
 			t.Errorf("shell description = %q", item["description"])
 		}
 	}

@@ -20,6 +20,8 @@ let model;
 let modelPort;
 let releaseQueue = null;
 let releaseBusy = null;
+let slowAccountingArmed = false;
+let slowAccountingSkips = 0;
 const terminateChildren = () => {
   try { model?.closeAllConnections?.(); } catch {}
   for (const child of [...children].reverse()) { try { child.kill(); } catch {} }
@@ -49,19 +51,39 @@ const hasToolAfterLatestUser = (body) => {
   return messages.slice(index + 1).some((message) => message.role === "tool");
 };
 const fakeHandler = async (request, response) => {
+  if (request.url === "/arm-slow-accounting") {
+    slowAccountingArmed = true;
+    slowAccountingSkips = 1;
+    return void response.end(JSON.stringify({ armed: true }));
+  }
   if (request.url === "/props") return void response.end(JSON.stringify({ server: "agentb-fake", n_ctx: 8192 }));
   if (request.url === "/v1/models") return void response.end(JSON.stringify({ data: [{ id: "agentb-fake" }] }));
   let raw = "";
   for await (const chunk of request) raw += chunk;
   const body = raw ? JSON.parse(raw) : {};
   response.agentbPromptTokens = Math.max(1, Math.ceil(JSON.stringify(body.messages || []).length / 4));
-  if (request.url === "/tokenize") return void response.end(JSON.stringify({ tokens: Array.from({ length: Math.max(1, Math.ceil(String(body.content || body.prompt || "").length / 4)) }, (_, i) => i) }));
+  if (slowAccountingArmed && (request.url === "/tokenize" || request.url === "/apply-template")) {
+    if (slowAccountingSkips > 0) {
+      slowAccountingSkips--;
+    } else {
+      slowAccountingArmed = false;
+      await sleep(4000);
+    }
+  }
+  if (request.url === "/tokenize") {
+    const content = String(body.content || body.prompt || "");
+    return void response.end(JSON.stringify({ tokens: Array.from({ length: Math.max(1, Math.ceil(content.length / 4)) }, (_, i) => i) }));
+  }
   if (request.url === "/apply-template") return void response.end(JSON.stringify({ prompt: JSON.stringify(body.messages || []) }));
   if (request.url !== "/v1/chat/completions") { response.statusCode = 404; return void response.end(); }
   const user = latestUser(body);
   if (user.includes("Summarize the work so far")) {
+    const slowAccounting = (body.messages || []).some((message) => String(message.content || "").includes("acceptance: slow accounting"));
     response.setHeader("Content-Type", "application/json");
-    return void response.end(JSON.stringify({ choices: [{ message: { content: "Earlier acceptance steps completed; keep the stable system and tool prefix." }, finish_reason: "stop" }], usage: { prompt_tokens: 300, completion_tokens: 18, prompt_tokens_details: { cached_tokens: 200 } } }));
+    const content = slowAccounting
+      ? "acceptance: slow accounting completed read; answer the pending request now."
+      : "Earlier acceptance steps completed; keep the stable system and tool prefix.";
+    return void response.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }], usage: { prompt_tokens: 300, completion_tokens: 18, prompt_tokens_details: { cached_tokens: 200 } } }));
   }
   if (user.includes("acceptance: stop")) return;
 	if (user.includes("acceptance: inbox stop") && !hasToolAfterLatestUser(body)) {
@@ -84,6 +106,11 @@ const fakeHandler = async (request, response) => {
   if (user.includes("acceptance: queued follower")) return stream(response, { content: "Queued follower completed." });
   if (user.includes("acceptance: attachment")) return stream(response, { content: "Attachment received and rendered." });
   if (user.includes("acceptance: recovered")) return stream(response, { content: "Recovered after Retry." });
+  if (user.includes("acceptance: slow accounting completed read")) return stream(response, { content: "Slow accounting recovered with an estimate." });
+  if (user.includes("acceptance: slow accounting") && !hasToolAfterLatestUser(body)) {
+    return stream(response, { tool_calls: [{ index: 0, id: "slow-read", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "AGENTS.md" }) } }] }, "tool_calls");
+  }
+  if (user.includes("acceptance: slow accounting")) { await sleep(700); return stream(response, { content: "Slow accounting recovered with an estimate." }); }
   if (user.includes("acceptance: compaction")) return stream(response, { content: `Compaction answer ${"stable ".repeat(180)}` });
   return stream(response, { content: "Acceptance response." });
 };
@@ -203,10 +230,10 @@ const profileName = realModel ? args["real-model-name"] : "agentb-fake";
 const toolset = ["read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "run_script", "call_service"];
 const config = {
   config_version: 6, listen: `127.0.0.1:${appPort}`, workspace: args.workspace, log_dir: join(args.data, "logs"),
-  servers: [{ id: "acceptance", label: "Acceptance", base_url: profileURL, model: profileName, credential: "", request_timeout_s: 15, probe_mode: "off",
+  servers: [{ id: "acceptance", label: "Acceptance", base_url: profileURL, model: profileName, credential: "", request_timeout_s: 3, probe_mode: "off",
     sampling: { thinking: { temperature: .6, top_p: .95, top_k: 20, min_p: 0, presence_penalty: 0, repeat_penalty: 1 }, nonthinking: { temperature: .7, top_p: .8, top_k: 20, min_p: 0, presence_penalty: 0, repeat_penalty: 1 } },
     reasoning: { control: "auto", enabled: false, effort: "medium", valid_efforts: [], preserve: false }, context: { n_ctx: 8192, reserve_output: 1024 }, system_prompt_override: "",
-    capabilities: { server: "agentb-fake", props: true, n_ctx: 8192, tokenize: true, apply_template: false, apply_template_tools: false, streaming: true, tool_calls: true, grammar_constrained: false, cached_tokens: true, timings: false, prompt_progress: false, document_input: false, image_input: false, reasoning_control: "", valid_efforts: [], overflow_behavior: "error", probed_at: new Date().toISOString(), findings: ["acceptance fake"] } }],
+    capabilities: { server: "agentb-fake", props: true, n_ctx: 8192, tokenize: true, apply_template: true, apply_template_tools: true, streaming: true, tool_calls: true, grammar_constrained: false, cached_tokens: true, timings: false, prompt_progress: false, document_input: false, image_input: false, reasoning_control: "", valid_efforts: [], overflow_behavior: "error", probed_at: new Date().toISOString(), findings: ["acceptance fake"] } }],
   services: {}, agents: [{ name: "Acceptance", b: "acceptance", toolset }], chat: { auto_rename: false },
   run: { max_turns: 12, cycle_window: 8, max_consecutive_tool_errors: 3, max_concurrent: 2, queue_depth: 0 }, approval: { mode: "boundary-only" },
   deliver: { mode: "chips", exchange_folder: join(args.workspace, "exchange") }, context: { soft_pct: .75, summary_pct: .85, accounting: "auto" }, memory: { enabled: false, dir: join(args.data, "memory"), max_tokens: 1500 },
@@ -223,6 +250,9 @@ app.stderr.on("data", (chunk) => process.stderr.write(chunk));
 await waitHTTP(`http://127.0.0.1:${appPort}/api/state`);
 const loadedConfig = await json(`http://127.0.0.1:${appPort}/api/config`);
 assert.equal(loadedConfig.shell?.service_account?.enabled, true, "disposable install must exercise split identity");
+assert.equal(loadedConfig.servers?.[0]?.request_timeout_s, 3, "slow-accounting fixture needs a three-second request timeout");
+assert.equal(loadedConfig.servers?.[0]?.capabilities?.tokenize, true, "slow-accounting fixture needs exact tokenization");
+assert.equal(loadedConfig.context?.accounting, "auto", "slow-accounting fixture needs automatic exact accounting");
 const edge = process.env["ProgramFiles(x86)"] ? join(process.env["ProgramFiles(x86)"], "Microsoft", "Edge", "Application", "msedge.exe") : "msedge.exe";
 const browserData = await mkdtemp(join(tmpdir(), "agentb-edge-"));
 const edgeProcess = spawn(edge, ["--headless=new", `--remote-debugging-port=${browserPort}`, `--user-data-dir=${browserData}`, "--no-first-run", "--disable-extensions", `--app=http://127.0.0.1:${appPort}/chat`], { windowsHide: true, stdio: "ignore" });
@@ -358,6 +388,20 @@ if (realModel) {
   await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Attachment received and rendered.')`, "chat reopen");
   assert.equal((await browserText("#chat-log")).slice(0, 120), beforeReload);
   record("chat-reopen-preserves-screen-and-jsonl");
+
+  events = await sessionEvents(sessionID);
+  const beforeSlowAccounting = events.at(-1)?.seq || 0;
+  await json(`${profileURL}/arm-slow-accounting`, { method: "POST" });
+  await setTask(`acceptance: slow accounting ${"payload ".repeat(800)}`);
+  const estimatedBudget = await waitEvent(sessionID, (event) => event.type === "budget" && event.seq > beforeSlowAccounting && event.data?.estimated === true, "estimated slow-accounting budget", 12000);
+  await browser.wait(`document.querySelector('.chat-budget-tip')?.innerText.includes('estimated')`, "estimated occupancy label");
+  const slowStop = await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > estimatedBudget.seq, "slow-accounting run stopped", 20000);
+  assert.equal(slowStop.data.reason, "done");
+  events = await sessionEvents(sessionID);
+  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Slow accounting recovered with an estimate.')`, "slow-accounting answer", 20000);
+  assert.ok(events.some((event) => event.type === "model.busy" && event.seq > beforeSlowAccounting));
+  assert.ok(events.some((event) => event.type === "budget" && event.seq > estimatedBudget.seq && event.data?.estimated === false));
+  record("long-run-slow-accounting");
 
   await stopFake();
   await setTask("acceptance: unreachable");

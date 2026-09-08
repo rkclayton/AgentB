@@ -2,15 +2,20 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"harness/internal/config"
 	"harness/internal/events"
+	"harness/internal/llm"
 	"harness/internal/session"
 	"harness/internal/tools"
 )
@@ -174,31 +179,55 @@ func TestModelUnreachableHoldsQueueDeduplicatesAndProbeReleases(t *testing.T) {
 	}
 }
 
-func TestAccountingSlowConnectedServerReportsBusyWithoutStopping(t *testing.T) {
-	release := make(chan struct{})
-	var slow sync.Once
+func TestLongRunSlowAccountingCompletesEstimatedAndCompacts(t *testing.T) {
+	var slow atomic.Bool
+	var chatCalls atomic.Int32
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.URL.Path == "/apply-template" {
-			slow.Do(func() {
-				select {
-				case <-request.Context().Done():
-				case <-release:
-				}
-			})
+		switch request.URL.Path {
+		case "/apply-template":
+			var body struct {
+				Messages []llm.Message `json:"messages"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			var prompt strings.Builder
+			for _, message := range body.Messages {
+				prompt.WriteString(messageText(message.Content))
+				prompt.WriteString(message.ReasoningContent)
+			}
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"prompt":"prompt"}`))
-			return
-		}
-		if request.URL.Path == "/tokenize" {
+			_ = json.NewEncoder(w).Encode(map[string]string{"prompt": prompt.String()})
+		case "/tokenize":
+			var body struct {
+				Content string `json:"content"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if len(body.Content) > 1000 && strings.Contains(body.Content, "busy") && slow.CompareAndSwap(true, false) {
+				time.Sleep(3200 * time.Millisecond)
+			}
+			tokens := make([]int, max(1, len(body.Content)/4))
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(`{"tokens":[1]}`))
-			return
+			_ = json.NewEncoder(w).Encode(map[string]any{"tokens": tokens})
+		case "/v1/chat/completions":
+			w.Header().Set("Content-Type", "text/event-stream")
+			if chatCalls.Add(1) == 1 {
+				_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call-missing\",\"type\":\"function\",\"function\":{\"name\":\"missing\",\"arguments\":\"{}\"}}]},\"finish_reason\":\"tool_calls\"}],\"usage\":{\"prompt_tokens\":3000,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
+				return
+			}
+			_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":1000,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
+		default:
+			http.NotFound(w, request)
 		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
 	}))
 	defer model.Close()
 	_, profile, item, scheduler := schedulerFixture(t, model.URL)
+	profile.RequestTimeoutS = 3
+	profile.Context.NCtx, profile.Context.ReserveOutput = 8192, 1024
 	profile.Capabilities.Tokenize = true
 	profile.Capabilities.ApplyTemplate = true
 	profile.Capabilities.ApplyTemplateTools = true
@@ -208,34 +237,46 @@ func TestAccountingSlowConnectedServerReportsBusyWithoutStopping(t *testing.T) {
 		cfg.Servers[0] = *profile
 		return cfg
 	}
+	for index := 0; index < 8; index++ {
+		callID := fmt.Sprintf("old-call-%d", index)
+		item.Append(events.Message{ID: fmt.Sprintf("old-assistant-%d", index), Role: "assistant", Category: "history", Tokens: 10, Turn: index + 1, ToolCalls: []events.ToolCall{{ID: callID, Name: "read_file", Arguments: `{"path":"old.txt","offset":1,"limit":1000}`}}})
+		item.Append(events.Message{ID: fmt.Sprintf("old-result-%d", index), Role: "tool", Name: "read_file", ToolCallID: callID, Category: "files", Content: strings.Repeat("old result ", 400), Tokens: 1300, Turn: index + 1})
+	}
 	eventsSeen, unsubscribe := scheduler.bus.Subscribe()
 	defer unsubscribe()
+	slow.Store(true)
+	started := time.Now()
 	if _, err := scheduler.Submit(context.Background(), item.ID, "busy"); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.After(4 * time.Second)
+	var sawBusy, sawEstimated, sawCompaction bool
+	deadline := time.After(12 * time.Second)
 	for {
 		select {
 		case event := <-eventsSeen:
-			if event.Type == events.ModelBusy {
-				if !scheduler.Active(item.ID) || item.Snapshot().Run.LastStopReason != "" {
-					t.Fatalf("busy request stopped: %+v", item.Snapshot().Run)
+			switch event.Type {
+			case events.ModelBusy:
+				sawBusy = true
+			case events.BudgetEvent:
+				if budget, ok := event.Data.(events.Budget); ok && budget.Estimated {
+					sawEstimated = true
 				}
-				close(release)
-				goto released
+			case events.Compaction:
+				sawCompaction = true
+			case events.RunStopped:
+				goto stopped
 			}
 		case <-deadline:
-			t.Fatal("connected timeout did not publish model.busy")
+			t.Fatalf("slow-accounting run timed out: %+v", item.Snapshot().Run)
 		}
 	}
 
-released:
-	deadlineAt := time.Now().Add(3 * time.Second)
-	for scheduler.Active(item.ID) && time.Now().Before(deadlineAt) {
-		time.Sleep(time.Millisecond)
+stopped:
+	if elapsed := time.Since(started); elapsed < 3*time.Second {
+		t.Fatalf("slow /tokenize elapsed=%s, want over 3s", elapsed)
 	}
-	if scheduler.Active(item.ID) || item.Snapshot().Run.LastStopReason != "done" {
-		t.Fatalf("released busy request=%+v", item.Snapshot().Run)
+	if snapshot := item.Snapshot(); snapshot.Run.LastStopReason != "done" || !sawBusy || !sawEstimated || !sawCompaction || snapshot.CompactionCount == 0 {
+		t.Fatalf("run=%+v busy=%t estimated=%t compaction=%t count=%d", snapshot.Run, sawBusy, sawEstimated, sawCompaction, snapshot.CompactionCount)
 	}
 }
 

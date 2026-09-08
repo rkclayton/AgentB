@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"harness/internal/config"
 	"harness/internal/events"
 	"harness/internal/llm"
+	"harness/internal/projection"
 	"harness/internal/session"
 )
 
@@ -326,6 +328,53 @@ func TestMessageWeightsCacheByIDAndInvalidateOnContentChange(t *testing.T) {
 	measure()
 	if got := weightCalls.Load(); got != 22 {
 		t.Fatalf("elided-message weight calls=%d, want one invalidated call", got)
+	}
+}
+
+func TestOperatorR5TapeReplaysThroughResilientAccounting(t *testing.T) {
+	path := os.Getenv("AGENTB_R5_TAPE")
+	if path == "" {
+		t.Skip("set AGENTB_R5_TAPE to the operator's main-20260908T134338 tape")
+	}
+	replay, err := projection.LoadReplay([]string{path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, ok := replay.Sessions["main"]
+	if !ok || len(snapshot.Messages) < 19 {
+		t.Fatalf("replayed messages=%d main=%t", len(snapshot.Messages), ok)
+	}
+	var slow atomic.Bool
+	slow.Store(true)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/apply-template":
+			_, _ = w.Write([]byte(`{"prompt":"rendered"}`))
+		case "/tokenize":
+			if slow.CompareAndSwap(true, false) {
+				time.Sleep(1200 * time.Millisecond)
+			}
+			_, _ = w.Write([]byte(`{"tokens":[1]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	profile := config.Profile{BaseURL: server.URL, Model: "r5-replay", RequestTimeoutS: 1, Context: config.Context{NCtx: 32768, ReserveOutput: 10240}, Capabilities: config.Capabilities{Tokenize: true, ApplyTemplate: true}}
+	item := &session.Session{ID: "r5-replay", Messages: append([]events.Message(nil), snapshot.Messages...), SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	messages := make([]llm.Message, 0, len(snapshot.Messages))
+	for _, message := range snapshot.Messages {
+		messages = append(messages, requestMessage(&profile, item, message))
+	}
+	input := budgetInput{SystemBase: "system", System: "system", Messages: messages, Records: snapshot.Messages}
+	budgeter := NewBudgeter()
+	degraded, err := budgeter.MeasureWithBusy(context.Background(), &profile, item, config.GlobalContext{}, input, false, nil)
+	if err != nil || degraded.Mode != "estimated" {
+		t.Fatalf("degraded=%+v err=%v", degraded, err)
+	}
+	exact, err := budgeter.Measure(context.Background(), &profile, item, config.GlobalContext{}, input, false)
+	if err != nil || exact.Mode != "exact" {
+		t.Fatalf("exact=%+v err=%v", exact, err)
 	}
 }
 
