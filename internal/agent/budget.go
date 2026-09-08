@@ -35,9 +35,10 @@ type budgetState struct {
 	hasMeasured, hasCached bool
 }
 type Budgeter struct {
-	mu        sync.Mutex
-	states    map[string]*budgetState
-	toolCosts map[string]cachedToolCosts
+	mu             sync.Mutex
+	states         map[string]*budgetState
+	toolCosts      map[string]cachedToolCosts
+	messageWeights map[string]map[string]cachedMessageWeight
 }
 
 type cachedToolCosts struct {
@@ -46,8 +47,13 @@ type cachedToolCosts struct {
 	marginal map[string]int
 }
 
+type cachedMessageWeight struct {
+	key    string
+	tokens int
+}
+
 func NewBudgeter() *Budgeter {
-	return &Budgeter{states: map[string]*budgetState{}, toolCosts: map[string]cachedToolCosts{}}
+	return &Budgeter{states: map[string]*budgetState{}, toolCosts: map[string]cachedToolCosts{}, messageWeights: map[string]map[string]cachedMessageWeight{}}
 }
 func (b *Budgeter) state(id string) *budgetState {
 	b.mu.Lock()
@@ -105,6 +111,26 @@ func (b *Budgeter) cachedCosts(id, key string) (map[string]int, map[string]int, 
 func (b *Budgeter) saveCosts(id, key string, schema, marginal map[string]int) {
 	b.mu.Lock()
 	b.toolCosts[id] = cachedToolCosts{key: key, schema: cloneCounts(schema), marginal: cloneCounts(marginal)}
+	b.mu.Unlock()
+}
+func (b *Budgeter) cachedMessageWeight(sessionID, messageID, key string) (int, bool) {
+	if messageID == "" {
+		return 0, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	entry, ok := b.messageWeights[sessionID][messageID]
+	return entry.tokens, ok && entry.key == key
+}
+func (b *Budgeter) saveMessageWeight(sessionID, messageID, key string, tokens int) {
+	if messageID == "" {
+		return
+	}
+	b.mu.Lock()
+	if b.messageWeights[sessionID] == nil {
+		b.messageWeights[sessionID] = map[string]cachedMessageWeight{}
+	}
+	b.messageWeights[sessionID][messageID] = cachedMessageWeight{key: key, tokens: tokens}
 	b.mu.Unlock()
 }
 func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
@@ -339,18 +365,24 @@ func (b *Budgeter) measure(ctx context.Context, profile *config.Profile, s *sess
 			weights, totalWeight := make([]int, groupEnd-index+1), 0
 			for offset := range weights {
 				candidate := in.Messages[index+offset]
-				weight, err := client.Tokenize(ctx, messageText(candidate.Content)+candidate.ReasoningContent, false)
-				if err != nil {
-					return events.Budget{}, fmt.Errorf("weight message %d: %w", index+offset, err)
-				}
-				for _, call := range candidate.ToolCalls {
-					value, err := client.Tokenize(ctx, call.Function.Arguments, false)
+				record := in.Records[index+offset]
+				weightKey := messageWeightKey(profile, candidate)
+				weight, cached := b.cachedMessageWeight(s.ID, record.ID, weightKey)
+				if !cached {
+					weight, err = client.Tokenize(ctx, messageText(candidate.Content)+candidate.ReasoningContent, false)
 					if err != nil {
-						return events.Budget{}, fmt.Errorf("weight tool call %s: %w", call.Function.Name, err)
+						return events.Budget{}, fmt.Errorf("weight message %d: %w", index+offset, err)
 					}
-					weight += value
+					for _, call := range candidate.ToolCalls {
+						value, err := client.Tokenize(ctx, call.Function.Arguments, false)
+						if err != nil {
+							return events.Budget{}, fmt.Errorf("weight tool call %s: %w", call.Function.Name, err)
+						}
+						weight += value
+					}
+					weight += 1
+					b.saveMessageWeight(s.ID, record.ID, weightKey, weight)
 				}
-				weight += 1
 				weights[offset], totalWeight = weight, totalWeight+weight
 			}
 			assigned := 0
@@ -406,6 +438,16 @@ func toolCostKey(profile *config.Profile, global config.GlobalContext, cpt float
 		AllSchemas         map[string]any
 		WithoutToolSystems map[string]string
 	}{profile, global.Accounting, cpt, in.System, in.Schemas, in.AllSchemas, in.WithoutToolSystems}
+	data, _ := json.Marshal(value)
+	sum := sha256.Sum256(data)
+	return fmt.Sprintf("%x", sum)
+}
+func messageWeightKey(profile *config.Profile, message llm.Message) string {
+	value := struct {
+		BaseURL string
+		Model   string
+		Message llm.Message
+	}{profile.BaseURL, profile.Model, message}
 	data, _ := json.Marshal(value)
 	sum := sha256.Sum256(data)
 	return fmt.Sprintf("%x", sum)

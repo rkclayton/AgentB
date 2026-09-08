@@ -215,6 +215,83 @@ func TestExactToolCostsAreMarginalAndCached(t *testing.T) {
 	}
 }
 
+func TestMessageWeightsCacheByIDAndInvalidateOnContentChange(t *testing.T) {
+	var weightCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/apply-template":
+			var body struct {
+				Messages []llm.Message `json:"messages"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			data, _ := json.Marshal(map[string]string{"prompt": strings.Repeat("p", len(body.Messages)*10)})
+			_, _ = w.Write(data)
+		case "/tokenize":
+			var body struct {
+				Content string `json:"content"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if strings.HasPrefix(body.Content, "weight-") || body.Content == "[elided]" {
+				weightCalls.Add(1)
+			}
+			tokens := make([]int, max(1, len(body.Content)))
+			data, _ := json.Marshal(map[string]any{"tokens": tokens})
+			_, _ = w.Write(data)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	profile := config.Profile{BaseURL: server.URL, Model: "model", RequestTimeoutS: 5, Capabilities: config.Capabilities{Tokenize: true, ApplyTemplate: true}}
+	item := &session.Session{ID: "message-cache", SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	input := budgetInput{SystemBase: "system", System: "system"}
+	for index := 0; index < 19; index++ {
+		content := fmt.Sprintf("weight-%02d", index)
+		input.Messages = append(input.Messages, llm.Message{Role: "user", Content: content})
+		input.Records = append(input.Records, events.Message{ID: fmt.Sprintf("m-%02d", index), Role: "user", Content: content, Category: "history"})
+	}
+	budgeter := NewBudgeter()
+	measure := func() {
+		t.Helper()
+		if _, err := budgeter.Measure(context.Background(), &profile, item, config.GlobalContext{}, input, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	measure()
+	if got := weightCalls.Load(); got != 19 {
+		t.Fatalf("cold weight calls=%d, want 19", got)
+	}
+	measure()
+	if got := weightCalls.Load(); got != 19 {
+		t.Fatalf("warm weight calls=%d, want no new calls", got)
+	}
+
+	input.Messages = append(input.Messages, llm.Message{Role: "user", Content: "weight-new"})
+	input.Records = append(input.Records, events.Message{ID: "m-new", Role: "user", Content: "weight-new", Category: "history"})
+	measure()
+	if got := weightCalls.Load(); got != 20 {
+		t.Fatalf("appended-message weight calls=%d, want one new call", got)
+	}
+
+	input.Messages[0].Content, input.Records[0].Content = "weight-edited", "weight-edited"
+	measure()
+	if got := weightCalls.Load(); got != 21 {
+		t.Fatalf("edited-message weight calls=%d, want one invalidated call", got)
+	}
+	input.Messages[1].Content, input.Records[1].Content = "[elided]", "[elided]"
+	measure()
+	if got := weightCalls.Load(); got != 22 {
+		t.Fatalf("elided-message weight calls=%d, want one invalidated call", got)
+	}
+}
+
 func testSchema(name string) map[string]any {
 	return map[string]any{"type": "function", "function": map[string]any{"name": name, "description": "test", "parameters": map[string]any{"type": "object"}}}
 }
