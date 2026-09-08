@@ -64,7 +64,11 @@ func (s *Shell) Description() string {
 	if len(cfg.Command) > 0 {
 		dialect = shellDialect(cfg.Command[0])
 	}
-	description := "Run an unconfined inline command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation. Agent-written Windows host scripts cannot be executed; use run_script for multi-line source. Use " + dialect + " syntax."
+	syntax := "Use " + dialect + " syntax."
+	if len(cfg.Command) > 0 && shellCommandName(cfg.Command[0]) == "powershell" {
+		syntax = "Windows PowerShell 5: use `;` to chain commands, not `&&`."
+	}
+	description := "Run an unconfined inline command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation. Agent-written Windows host scripts cannot be executed; use run_script for multi-line source. " + syntax
 	if cfg.ServiceAccount.Enabled && len(operatorCommands) > 0 {
 		description += " Git and other configured operator commands run as the operator after one decision per run; expect one prompt, not one per call."
 	}

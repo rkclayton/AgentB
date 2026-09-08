@@ -38,7 +38,7 @@ func (exitedShellProcess) KillTree()            {}
 
 func TestShellDescriptionNamesConfiguredDialect(t *testing.T) {
 	shell := NewShell(config.Shell{Command: []string{`C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe`}})
-	if got := shell.Description(); !strings.HasSuffix(got, "Use PowerShell syntax.") {
+	if got := shell.Description(); !strings.HasSuffix(got, "Windows PowerShell 5: use `;` to chain commands, not `&&`.") {
 		t.Fatalf("PowerShell description = %q", got)
 	}
 
