@@ -108,6 +108,7 @@ const fakeHandler = async (request, response) => {
   if (user.includes("acceptance: recovered")) return stream(response, { content: "Recovered after Retry." });
   if (user.includes("acceptance: slow accounting completed read")) return stream(response, { content: "Slow accounting recovered with an estimate." });
   if (user.includes("acceptance: slow accounting") && !hasToolAfterLatestUser(body)) {
+    await sleep(700);
     return stream(response, { tool_calls: [{ index: 0, id: "slow-read", type: "function", function: { name: "read_file", arguments: JSON.stringify({ path: "AGENTS.md" }) } }] }, "tool_calls");
   }
   if (user.includes("acceptance: slow accounting")) { await sleep(700); return stream(response, { content: "Slow accounting recovered with an estimate." }); }
