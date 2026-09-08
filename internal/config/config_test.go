@@ -140,6 +140,17 @@ func TestApprovalModeDefaultsWhenAbsentOrEmpty(t *testing.T) {
 	}
 }
 
+func TestOperatorFilesDefaultOffWithThirtyDayRetention(t *testing.T) {
+	cfg := Defaults(t.TempDir())
+	if cfg.OperatorFiles.AllowMailboxApprovals || cfg.OperatorFiles.LogRetentionDays != 30 {
+		t.Fatalf("operator files defaults = %+v", cfg.OperatorFiles)
+	}
+	cfg.OperatorFiles.LogRetentionDays = 3651
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "operator_files.log_retention_days") {
+		t.Fatalf("validation error = %v", err)
+	}
+}
+
 func TestServicesAdditiveCurrentSchemaDefaultsEmpty(t *testing.T) {
 	cfg := Defaults(t.TempDir())
 	if cfg.ConfigVersion != CurrentConfigVersion || cfg.Services == nil || len(cfg.Services) != 0 {

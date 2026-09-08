@@ -161,9 +161,11 @@ func LoadInstructions(boundDir, touchedDir string) (Instructions, error) {
 	}
 	parts, files, notes := []string{}, []string{}, []string{}
 	for _, dir := range dirs {
-		agents, claude := filepath.Join(dir, "AGENTS.md"), filepath.Join(dir, "CLAUDE.md")
+		agentB, agents, claude := filepath.Join(dir, "AGENT_B.md"), filepath.Join(dir, "AGENTS.md"), filepath.Join(dir, "CLAUDE.md")
 		selected := ""
-		if regular(agents) {
+		if regular(agentB) {
+			selected = agentB
+		} else if regular(agents) {
 			selected = agents
 		} else if regular(claude) {
 			selected = claude
@@ -171,8 +173,14 @@ func LoadInstructions(boundDir, touchedDir string) (Instructions, error) {
 		if selected == "" {
 			continue
 		}
-		if regular(agents) && regular(claude) {
-			notes = append(notes, dir+": AGENTS.md used; CLAUDE.md ignored")
+		present := []string{}
+		for _, candidate := range []string{agentB, agents, claude} {
+			if regular(candidate) {
+				present = append(present, filepath.Base(candidate))
+			}
+		}
+		if len(present) > 1 {
+			notes = append(notes, dir+": "+filepath.Base(selected)+" used; "+strings.Join(present[1:], ", ")+" ignored")
 		}
 		data, readErr := os.ReadFile(selected)
 		if readErr != nil {

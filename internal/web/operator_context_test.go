@@ -421,6 +421,18 @@ func TestOperatorCommandPolicyConfigRequiresVerifiedOperator(t *testing.T) {
 	}
 }
 
+func TestMailboxApprovalConfigRequiresVerifiedOperator(t *testing.T) {
+	server, _, _ := operatorTestServer(t)
+	server.operatorRequest = func(*http.Request) error { return errors.New("not operator") }
+	request := httptest.NewRequest(http.MethodPost, "/api/config", strings.NewReader(`{"operator_files":{"allow_mailbox_approvals":true}}`))
+	authorizeMutation(request, server)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "operator_files.allow_mailbox_approvals") {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body)
+	}
+}
+
 func TestRunAsYouRevokeRequiresVerifiedOperator(t *testing.T) {
 	server, _, _ := operatorTestServer(t)
 	cfg := server.ConfigSnapshot()

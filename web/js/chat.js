@@ -627,7 +627,7 @@ async function refreshExchangeFiles() {
     }));
     if (!files.length) {
       const empty = document.createElement("span");
-      empty.textContent = "Exchange folder is empty";
+      empty.textContent = "Attachments folder is empty";
       exchangeFileList.append(empty);
     }
   } catch (error) {
@@ -641,7 +641,7 @@ async function queueExchangeFile(item) {
   const session = store.sessions[selectedID()];
   if (!session || !item) return;
   attachmentsBusy = true;
-  localNotice = "Copying from exchange folder…";
+  localNotice = "Copying from attachments…";
   localAlarm = false;
   renderComposer(session);
   try {

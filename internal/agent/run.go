@@ -46,7 +46,15 @@ type Runner struct {
 	policyGrantMu      sync.Mutex
 	policyChatGrants   map[string]map[string]bool
 	renameSession      func(string, string, string) error
+	mailboxBoundary    func(context.Context, string, bool) BoundaryAction
 	ids                atomic.Int64
+}
+
+type BoundaryAction struct {
+	Stop     bool
+	Revision string
+	Delay    time.Duration
+	Err      error
 }
 
 func NewRunner(bus *events.Bus, registry *tools.Registry, prompt *PromptRenderer, profile func(string) (*config.Profile, bool), cfg func() config.Config) *Runner {
@@ -62,7 +70,10 @@ func (r *Runner) SetDeliverer(fn func(*session.Session, string, []delivery.Sourc
 	r.deliver = fn
 }
 func (r *Runner) SetSessionRenamer(fn func(string, string, string) error) { r.renameSession = fn }
-func (r *Runner) id(prefix string) string                                 { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
+func (r *Runner) SetMailboxBoundary(fn func(context.Context, string, bool) BoundaryAction) {
+	r.mailboxBoundary = fn
+}
+func (r *Runner) id(prefix string) string { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
 func (r *Runner) AddUser(ctx context.Context, s *session.Session, text string) (events.Message, error) {
 	return r.AddUserAttachments(ctx, s, text, nil)
 }
@@ -101,6 +112,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	}()
 	defer r.lapseShellGrants(s, runID)
 	defer r.lapseFileRunGrant(s, runID)
+	if stop, detail := r.applyMailboxBoundary(ctx, s, runID, false); stop {
+		return "mailbox_stop", detail, 0
+	}
 	profile, ok := r.profile(s.ServerID)
 	if !ok {
 		return "profile_not_runnable", "profile not found", 0
@@ -124,6 +138,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	for {
 		if ctx.Err() != nil {
 			return "user_stop", "", turn
+		}
+		if stop, detail := r.applyMailboxBoundary(ctx, s, runID, false); stop {
+			return "mailbox_stop", detail, turn
 		}
 		cfg := r.cfg()
 		if agent, found := cfg.Agent(s.Snapshot().AgentID); found {
@@ -412,6 +429,34 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		}
 		r.compactAfterTurn(ctx, s, runID, turn, profile, currentReasoning)
 	}
+}
+
+func (r *Runner) applyMailboxBoundary(ctx context.Context, s *session.Session, runID string, approvalPending bool) (bool, string) {
+	if r.mailboxBoundary == nil {
+		return false, ""
+	}
+	action := r.mailboxBoundary(ctx, s.ID, approvalPending)
+	if action.Err != nil {
+		r.bus.Publish(events.New(events.Error, s.ID, runID, map[string]any{"where": "mailbox", "message": action.Err.Error()}))
+	}
+	if action.Stop {
+		return true, "STOP read from INBOX.md"
+	}
+	if action.Revision != "" {
+		if _, err := r.AddUser(ctx, s, action.Revision); err != nil {
+			r.bus.Publish(events.New(events.Error, s.ID, runID, map[string]any{"where": "mailbox", "message": err.Error()}))
+		}
+	}
+	if action.Delay > 0 {
+		timer := time.NewTimer(action.Delay)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return true, ctx.Err().Error()
+		case <-timer.C:
+		}
+	}
+	return false, ""
 }
 
 func producedFileMetadata(s *session.Session, name string, args map[string]any) map[string]any {

@@ -1,11 +1,13 @@
 import { api, reduce, setSelection, store, subscribe } from "./bus.js";
 import { chatRowText, closeConfirmText, firstUserLine, isRunning } from "./chat-lifecycle.js";
 import { agentTabLayout } from "./agent-tabs.js";
+import { installUIErrorRelay } from "./ui-error-relay.js";
 
 const activeRunStates = new Set(["running", "queued", "stopping"]);
 const agentKey = (agent) => String(agent?.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 export function initShell(options = {}) {
+	installUIErrorRelay({ token: () => store.mutation_token, sessionID: () => store.active });
   const root = document.getElementById("app-shell");
   if (!root) return null;
   const page = options.page || root.dataset.page || "console";

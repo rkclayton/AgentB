@@ -24,6 +24,7 @@ import (
 	"harness/internal/hardening"
 	"harness/internal/llm"
 	"harness/internal/memory"
+	"harness/internal/operatorfiles"
 	"harness/internal/projection"
 	"harness/internal/serviceaccount"
 	"harness/internal/session"
@@ -125,6 +126,26 @@ func main() {
 	registry.SetWorkspaceManager(workspaceManager)
 	web.SetRegistry(registry)
 	web.SetWorkspaceState(workspaceManager, memoryManager)
+	operatorFiles := operatorfiles.New(paths.Data, logDir, web.ConfigSnapshot)
+	if err := operatorFiles.Ensure(); err != nil {
+		log.Fatal(err)
+	}
+	web.SetOperatorFiles(operatorFiles)
+	operatorContext, cancelOperatorFiles := context.WithCancel(context.Background())
+	defer cancelOperatorFiles()
+	go operatorFiles.RunRetention(operatorContext)
+	operatorEvents, unsubscribeOperatorEvents := bus.Subscribe()
+	defer unsubscribeOperatorEvents()
+	go func() {
+		for event := range operatorEvents {
+			var snapshot *session.Snapshot
+			if item, ok := registry.Get(event.SessionID); ok {
+				value := item.Snapshot()
+				snapshot = &value
+			}
+			operatorFiles.HandleEvent(event, snapshot)
+		}
+	}()
 	statsManager := stats.New(paths.Data, registry, bus)
 	web.SetStats(statsManager)
 	renderer, err := agent.LoadTemplate(filepath.Join(paths.Application, "prompts", "system.md"))
@@ -177,6 +198,18 @@ func main() {
 		deliveryManager.Deliver(item, runID, files)
 	})
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)
+	runner.SetMailboxBoundary(func(_ context.Context, sessionID string, approvalPending bool) agent.BoundaryAction {
+		action, err := operatorFiles.CheckInbox(sessionID, approvalPending)
+		return agent.BoundaryAction{Stop: action.Stop, Revision: action.Revision, Delay: action.Delay, Err: err}
+	})
+	runner.Gate().SetMailboxDecision(func(sessionID string) (string, error) {
+		action, err := operatorFiles.CheckInbox(sessionID, true)
+		if action.Stop {
+			scheduler.Stop(sessionID, false)
+			return "deny", err
+		}
+		return action.Decision, err
+	})
 	web.SetRuntime(scheduler, runner, renderer)
 	if len(cfg.Servers) == 0 {
 		log.Printf("first-run setup required: no model profiles are configured")

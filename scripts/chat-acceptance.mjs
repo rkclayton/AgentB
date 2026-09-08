@@ -27,6 +27,9 @@ const terminateChildren = () => {
 process.on("exit", terminateChildren);
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const waitForChildExit = (child, timeout = 5000) => child?.exitCode !== null
+  ? Promise.resolve()
+  : Promise.race([new Promise((resolve) => child.once("exit", resolve)), sleep(timeout)]);
 const record = (name) => { scenarios.push(name); process.stdout.write(`PASS ${name}\n`); };
 const freePort = async () => {
   const probe = createServer();
@@ -61,6 +64,11 @@ const fakeHandler = async (request, response) => {
     return void response.end(JSON.stringify({ choices: [{ message: { content: "Earlier acceptance steps completed; keep the stable system and tool prefix." }, finish_reason: "stop" }], usage: { prompt_tokens: 300, completion_tokens: 18, prompt_tokens_details: { cached_tokens: 200 } } }));
   }
   if (user.includes("acceptance: stop")) return;
+	if (user.includes("acceptance: inbox stop") && !hasToolAfterLatestUser(body)) {
+		await sleep(500);
+		return stream(response, { tool_calls: [{ index: 0, id: "inbox-list", type: "function", function: { name: "list_dir", arguments: JSON.stringify({ path: ".", depth: 1 }) } }] }, "tool_calls");
+	}
+	if (user.includes("acceptance: inbox stop")) return stream(response, { content: "INBOX STOP was missed." });
   if (user.includes("acceptance: queue leader")) {
     await new Promise((resolve) => { releaseQueue = resolve; response.on("close", resolve); });
     return stream(response, { content: "Queue leader completed." });
@@ -103,6 +111,14 @@ const waitHTTP = async (url, timeout = 15000) => {
     try { return await json(url); } catch { await sleep(50); }
   }
   throw new Error(`timed out waiting for ${url}`);
+};
+const waitFileContains = async (path, text, timeout = 12000) => {
+	const deadline = Date.now() + timeout;
+	while (Date.now() < deadline) {
+		try { if ((await readFile(path, "utf8")).includes(text)) return; } catch {}
+		await sleep(50);
+	}
+	throw new Error(`file timeout: ${path} did not contain ${text}`);
 };
 
 class CDP {
@@ -178,6 +194,9 @@ await mkdir(bound, { recursive: true });
 spawnSync("git.exe", ["init", "--quiet", bound], { stdio: "inherit" });
 const attachment = join(args.workspace, "acceptance-attachment.txt");
 await writeFile(attachment, "attachment acceptance bytes\n");
+await mkdir(join(args.data, "attachments"), { recursive: true });
+await writeFile(join(args.data, "attachments", "phone-note.txt"), "operator attachment bytes\n");
+await writeFile(join(bound, "AGENTS.md"), "Use the acceptance rules.\n");
 if (!realModel) await startFake();
 const profileURL = realModel ? args["real-model-url"] : `http://127.0.0.1:${modelPort}`;
 const profileName = realModel ? args["real-model-name"] : "agentb-fake";
@@ -191,6 +210,7 @@ const config = {
   services: {}, agents: [{ name: "Acceptance", b: "acceptance", toolset }], chat: { auto_rename: false },
   run: { max_turns: 12, cycle_window: 8, max_consecutive_tool_errors: 3, max_concurrent: 2, queue_depth: 0 }, approval: { mode: "boundary-only" },
   deliver: { mode: "chips", exchange_folder: join(args.workspace, "exchange") }, context: { soft_pct: .75, summary_pct: .85, accounting: "auto" }, memory: { enabled: false, dir: join(args.data, "memory"), max_tokens: 1500 },
+	operator_files: { allow_mailbox_approvals: false, log_retention_days: 30 },
   tools: { read_file: { default_limit: 16384, max_limit: 65536 }, attachments: { max_bytes: 8388608 }, list_dir: { max_entries: 300, ignore: [".git"] }, grep: { max_matches: 50, max_line_chars: 200 }, shell: { operator_commands: [gitPath] }, fetch: { timeout_s: 20, max_bytes: 2097152, max_redirects: 5, default_limit: 16384, max_limit: 65536, allow_domains: [], deny_domains: [], allow_internal_hosts: [] }, find_files: { skip_roots: [] } },
   shell: { command: ["powershell", "-NoProfile", "-NonInteractive", "-Command"], timeout_s: 60, max_timeout_s: 600, max_output_lines_head: 60, max_output_lines_tail: 40, file_routing_guard: true, operator_context: false, operator_context_idle_timeout_minutes: 20, service_account: { enabled: true, account: "agentb-svc", domain: "." }, deny: [] },
   signing: { thumbprint: "", timestamp_url: "http://timestamp.digicert.com" }
@@ -255,6 +275,10 @@ if (realModel) {
   assert.equal(await clickText(".workspace-bind-card button", "Yes"), true);
   await waitEvent(sessionID, (event) => event.type === "workspace.bound", "workspace.bound");
   await waitEvent(sessionID, (event) => event.type === "approval.required", "approval.required");
+  await browser.call("Page.reload", { ignoreCache: true });
+  await browser.wait(`performance.getEntriesByType('navigation')[0]?.type==='reload' && document.querySelector('#chat-task')`, "pending approval refresh");
+  await waitFileContains(join(args.data, "OUTBOX.md"), "needs you: approval is waiting");
+  record("outbox-line-on-pause");
   await browser.wait(`[...document.querySelectorAll('.approval-card')].some(item=>item.innerText.toLowerCase().includes('run as you'))`, "Run as you card");
   assert.equal(await clickText(".approval-card button", "Yes, for this chat"), true);
   await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Acceptance answer rendered after the approved shell call.')`, "answer rendered");
@@ -265,6 +289,28 @@ if (realModel) {
   assert.match(gutter, /^90px$/);
   record("bind-run-as-you-tool-answer-gutter");
 
+  await browser.call("Page.navigate", { url: `http://127.0.0.1:${appPort}/?session=${sessionID}` });
+  await browser.wait(`location.pathname==='/' && document.querySelector('#settings-page') && document.querySelector('.shell-settings')?.getAttribute('href')`, "Console settings control");
+  await browser.evaluate(`(() => { document.querySelector('.shell-settings').click(); return true; })()`);
+  await browser.wait(`!document.querySelector('#settings-page').hidden`, "Settings open");
+  assert.equal(await clickText(".settings-nav button", "Workspace"), true);
+  await browser.wait(`!document.querySelector('#settings-page').hidden && document.querySelector('.settings-content')?.innerText.includes('Adopt repository instructions')`, "operator-file Workspace settings");
+  const workspaceSettings = await browserText(".settings-content");
+  for (const text of ["attachments", "Empty", "log retention (days)", "Adopt repository instructions", "Also remove AGENTS.md / CLAUDE.md"]) assert.ok(workspaceSettings.includes(text), `Workspace settings missing ${text}`);
+  assert.equal(await browser.evaluate(`document.querySelector('#adopt-instruction-cleanup')?.checked`), false);
+  assert.equal(await browser.evaluate(`document.querySelector('[data-path="operator_files.allow_mailbox_approvals"]')?.getAttribute('aria-checked')`), "false");
+  assert.equal(await clickText(".settings-content button", "Adopt"), true);
+  await waitFileContains(join(bound, "AGENT_B.md"), "Use the acceptance rules.");
+  assert.equal(await readFile(join(bound, "AGENTS.md"), "utf8"), "Use the acceptance rules.\n");
+  record("workspace-operator-files-and-adopt");
+	await browser.call("Page.navigate", { url: `http://127.0.0.1:${appPort}/chat?session=${sessionID}` });
+	await browser.wait(`document.querySelector('#chat-task')`, "chat restored after settings");
+	events = await sessionEvents(sessionID);
+	const beforeUIError = events.at(-1)?.seq || 0;
+	await browser.evaluate(`(() => { console.error('acceptance UI relay'); return true; })()`);
+	await waitEvent(sessionID, (event) => event.type === "error" && event.seq > beforeUIError && event.data?.where === "ui" && event.data?.message?.includes("acceptance UI relay"), "UI error relay");
+	record("ui-error-relay-session-jsonl");
+
   await setTask("acceptance: stop");
   await browser.wait(`!document.querySelector('#chat-stop').disabled`, "stop enabled");
   const stopStart = Date.now();
@@ -273,6 +319,17 @@ if (realModel) {
   assert.ok(Date.now() - stopStart < 1000, `Stop took ${Date.now() - stopStart} ms`);
   await waitEvent(sessionID, (event) => event.type === "run.stopped" && ["safe", "emergency", "user_stop"].includes(event.data.reason), "stopped run");
   record("stop-under-one-second");
+
+	events = await sessionEvents(sessionID);
+	const beforeInboxStop = events.at(-1)?.seq || 0;
+	await setTask("acceptance: inbox stop");
+	await waitEvent(sessionID, (event) => event.type === "model.request" && event.seq > beforeInboxStop, "inbox-stop model request");
+	await writeFile(join(args.data, "INBOX.md"), "STOP\n");
+	await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > beforeInboxStop && event.data.reason === "mailbox_stop", "INBOX STOP", 15000);
+	assert.equal(await readFile(join(args.data, "INBOX.md"), "utf8"), "");
+	await waitFileContains(join(args.data, "OUTBOX.md"), "stopped: STOP read from INBOX.md");
+	assert.ok((await browserText("#chat-log")).includes("acceptance: inbox stop"));
+	record("inbox-stop-mid-run");
 
   await setTask("acceptance: queue leader");
   await browser.wait(`!document.querySelector('#chat-stop').disabled`, "queue leader running");
@@ -286,14 +343,14 @@ if (realModel) {
   assert.ok(queueUsers.indexOf("acceptance: queue leader") < queueUsers.indexOf("acceptance: queued follower"));
   record("active-run-queue-fifo");
 
-  const root = await browser.call("DOM.getDocument");
-  const picker = await browser.call("DOM.querySelector", { nodeId: root.root.nodeId, selector: "#chat-file-picker" });
-  await browser.call("DOM.setFileInputFiles", { nodeId: picker.nodeId, files: [attachment] });
-  await browser.evaluate(`(() => { document.querySelector('#chat-file-picker').dispatchEvent(new Event('change',{bubbles:true})); return true; })()`);
+  await browser.evaluate(`(() => { document.querySelector('#chat-attach').click(); document.querySelector('#chat-attach-exchange').click(); return true; })()`);
+  await browser.wait(`[...document.querySelectorAll('#chat-exchange-files button')].some(item=>item.innerText.includes('phone-note.txt'))`, "operator attachment listed");
+  assert.equal(await clickText("#chat-exchange-files button", "phone-note.txt · 26 B"), true);
   await browser.wait(`document.querySelector('.chat-pending-file')`, "pending attachment");
   await setTask("acceptance: attachment");
   await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Attachment received and rendered.')`, "attachment answer");
   await waitEvent(sessionID, (event) => event.type === "message.appended" && event.data.message?.attachments?.length === 1, "attachment JSONL");
+  record("operator-attachments-paperclip-source");
   record("attachment-screen-jsonl");
 
   const beforeReload = (await browserText("#chat-log")).slice(0, 120);
@@ -341,6 +398,30 @@ if (realModel) {
   record("compaction-keeps-model-prefix-stable");
 
   const screenshot = await browser.call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
+	await browser.call("Page.navigate", { url: `http://127.0.0.1:${appPort}/?session=${sessionID}` });
+	await browser.wait(`location.pathname==='/' && document.querySelector('#settings-page') && document.querySelector('.shell-settings')?.getAttribute('href')`, "Console settings control before Empty");
+	await browser.evaluate(`(() => { document.querySelector('.shell-settings').click(); return true; })()`);
+	await browser.wait(`document.querySelector('#settings-page') && !document.querySelector('#settings-page').hidden`, "Settings open before Empty");
+	assert.equal(await clickText(".settings-nav button", "Workspace"), true);
+	await browser.wait(`!document.querySelector('#settings-page').hidden && [...document.querySelectorAll('.settings-content button')].some(item=>item.textContent.trim()==='Empty')`, "attachments Empty action");
+	assert.equal(await clickText(".settings-content button", "Empty"), true);
+	assert.equal(await clickText(".settings-content button", "Confirm empty"), true);
+	for (let attempt = 0; attempt < 100; attempt++) {
+		if ((await readdir(join(args.data, "attachments"))).length === 0) break;
+		await sleep(50);
+	}
+	assert.deepEqual(await readdir(join(args.data, "attachments")), []);
+	record("settings-confirmed-empty-attachments");
+	await browser.call("Page.navigate", { url: `http://127.0.0.1:${appPort}/chat?session=${sessionID}` });
+	await browser.wait(`document.querySelector('#chat-task')`, "chat restored after empty attachments");
+	const finalState = await state();
+	await json(`http://127.0.0.1:${appPort}/api/sessions/${sessionID}`, { method: "DELETE", headers: { "X-AgentB-Mutation-Token": finalState.mutation_token } });
+	const exported = await waitEvent(sessionID, (event) => event.type === "chat.exported", "chat export");
+	const exportedMarkdown = await readFile(exported.data.path, "utf8");
+	assert.ok(exportedMarkdown.includes("## Transcript"));
+	assert.ok(exportedMarkdown.includes("- tool `shell` · ok"));
+	assert.ok(exportedMarkdown.includes("- attachment: `attachments/phone-note.txt`"));
+	record("chat-close-markdown-export");
   const evidenceRun = join(args.evidence, `run-${new Date().toISOString().replaceAll(":", "-")}`);
   await mkdir(evidenceRun, { recursive: true });
   await writeFile(join(evidenceRun, "chat-final.png"), Buffer.from(screenshot.data, "base64"));
@@ -357,4 +438,5 @@ process.stdout.write(`CHAT ACCEPTANCE PASS ${Date.now() - startedAt} ms\n`);
 
 try { browser?.ws?.close(); } catch {}
 terminateChildren();
+await Promise.all(children.map((child) => waitForChildExit(child)));
 await stopFake();

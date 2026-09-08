@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"harness/internal/config"
 	"harness/internal/events"
@@ -39,12 +40,14 @@ type Gate struct {
 	pendingBySession map[string]string
 	bus              *events.Bus
 	cfg              func() config.Config
+	mailboxDecision  func(string) (string, error)
 }
 
 func NewGate(bus *events.Bus, cfg func() config.Config) *Gate {
 	return &Gate{waiting: map[string]*approvalWait{}, pendingBySession: map[string]string{}, bus: bus, cfg: cfg}
 }
-func approvalKey(sessionID, callID string) string { return sessionID + "\x00" + callID }
+func (g *Gate) SetMailboxDecision(fn func(string) (string, error)) { g.mailboxDecision = fn }
+func approvalKey(sessionID, callID string) string                  { return sessionID + "\x00" + callID }
 func (g *Gate) required(name string) bool {
 	return approvalRequired(g.cfg().Approval.Mode, name)
 }
@@ -180,19 +183,42 @@ func (g *Gate) publishBoundaryEscapeRequired(s *session.Session, runID, callID, 
 
 func (g *Gate) awaitDecision(ctx context.Context, s *session.Session, runID, callID string, wait *approvalWait) (string, error) {
 	var signal approvalSignal
-	select {
-	case <-ctx.Done():
-		g.mu.Lock()
-		if wait.decided {
-			g.mu.Unlock()
-			signal = <-wait.decision
-		} else {
-			wait.decided = true
-			g.mu.Unlock()
-			g.publishDecision(wait, "dismissed")
-			return "dismissed", ctx.Err()
+	var ticker *time.Ticker
+	var mailbox <-chan time.Time
+	if g.mailboxDecision != nil {
+		ticker = time.NewTicker(500 * time.Millisecond)
+		defer ticker.Stop()
+		mailbox = ticker.C
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			g.mu.Lock()
+			if wait.decided {
+				g.mu.Unlock()
+				signal = <-wait.decision
+			} else {
+				wait.decided = true
+				g.mu.Unlock()
+				g.publishDecision(wait, "dismissed")
+				return "dismissed", ctx.Err()
+			}
+		case signal = <-wait.decision:
+		case <-mailbox:
+			decision, err := g.mailboxDecision(s.ID)
+			if err != nil {
+				g.bus.Publish(events.New(events.Error, s.ID, runID, map[string]any{"where": "mailbox", "message": err.Error()}))
+			}
+			if decision == "" {
+				continue
+			}
+			if err := g.Decide(s.ID, callID, decision); err != nil {
+				g.bus.Publish(events.New(events.Error, s.ID, runID, map[string]any{"where": "mailbox", "message": err.Error()}))
+				continue
+			}
+			continue
 		}
-	case signal = <-wait.decision:
+		break
 	}
 	if !signal.logged {
 		g.publishDecision(wait, signal.decision)

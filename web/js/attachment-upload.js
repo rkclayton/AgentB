@@ -14,7 +14,7 @@ export async function uploadAttachment(file, sessionID, options = {}) {
 }
 
 export async function exchangeFiles(options = {}) {
-  const response = await (options.fetchImpl || fetch)("/api/exchange-files", { cache: "no-store" });
+  const response = await (options.fetchImpl || fetch)("/api/operator-attachments", { cache: "no-store" });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
   return data.files || [];
@@ -24,8 +24,8 @@ export async function exchangeUpload(item, sessionID, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   if (options.maxBytes && item.bytes > options.maxBytes) throw new Error(`${item.path} exceeds the attachment size limit`);
   const query = new URLSearchParams({ path: item.path });
-  const response = await fetchImpl(`/api/exchange-files?${query}`, { cache: "no-store" });
-  if (!response.ok) throw new Error(`Could not read ${item.path} from exchange folder`);
+  const response = await fetchImpl(`/api/operator-attachments?${query}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Could not read ${item.path} from attachments`);
   const blob = await response.blob();
   const makeFile = options.makeFile || ((parts, name, init) => new File(parts, name, init));
   const file = makeFile([blob], item.path, { type: blob.type || "application/octet-stream" });

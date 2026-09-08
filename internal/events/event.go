@@ -21,6 +21,7 @@ const (
 	SessionUpdated        = "session.updated"
 	SessionReset          = "session.reset"
 	SessionClosed         = "session.closed"
+	ChatExported          = "chat.exported"
 	ServerProbed          = "server.probed"
 	ConfigChanged         = "config.changed"
 	ShellIdentity         = "shell.identity"
@@ -73,7 +74,7 @@ const (
 )
 
 var Stages = []string{"assemble", "call_model", "parse", "dispatch", "execute", "append", "compact", "wait_user"}
-var StopReasons = []string{"done", "safe", "emergency", "user_stop", "turn_ceiling", "cycle", "tool_errors", "context_ceiling", "length", "model_error", "model_unreachable", "profile_not_runnable"}
+var StopReasons = []string{"done", "safe", "emergency", "user_stop", "mailbox_stop", "turn_ceiling", "cycle", "tool_errors", "context_ceiling", "length", "model_error", "model_unreachable", "profile_not_runnable"}
 
 type ToolCall struct {
 	ID        string `json:"id"`

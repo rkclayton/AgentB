@@ -48,6 +48,39 @@ func TestInstructionsAncestorOrderFallbackCapAndLazySubdir(t *testing.T) {
 	}
 }
 
+func TestInstructionReadOrderPrefersAgentBThenAgentsThenClaude(t *testing.T) {
+	root := t.TempDir()
+	for _, item := range []struct{ name, body string }{{"AGENT_B.md", "agent b"}, {"AGENTS.md", "agents"}, {"CLAUDE.md", "claude"}} {
+		if err := os.WriteFile(filepath.Join(root, item.name), []byte(item.body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loaded, err := LoadInstructions(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.Files) != 1 || filepath.Base(loaded.Files[0]) != "AGENT_B.md" || !strings.Contains(loaded.Block, "agent b") || strings.Contains(loaded.Block, "agents") || strings.Contains(loaded.Block, "claude") {
+		t.Fatalf("loaded=%+v", loaded)
+	}
+	if !strings.Contains(strings.Join(loaded.Notes, "\n"), "AGENT_B.md used") {
+		t.Fatalf("notes=%v", loaded.Notes)
+	}
+	if err := os.Remove(filepath.Join(root, "AGENT_B.md")); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = LoadInstructions(root, "")
+	if err != nil || filepath.Base(loaded.Files[0]) != "AGENTS.md" {
+		t.Fatalf("fallback=%+v err=%v", loaded, err)
+	}
+	if err := os.Remove(filepath.Join(root, "AGENTS.md")); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err = LoadInstructions(root, "")
+	if err != nil || filepath.Base(loaded.Files[0]) != "CLAUDE.md" || !strings.Contains(loaded.Block, "claude") {
+		t.Fatalf("claude fallback=%+v err=%v", loaded, err)
+	}
+}
+
 func TestPolicyTOFUChangeRevokeUnknownAndForbiddenKeys(t *testing.T) {
 	root, data := t.TempDir(), t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, ".agentb"), 0o755); err != nil {

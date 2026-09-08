@@ -22,12 +22,12 @@ test("attachment upload sends multipart session and file under mutation guard", 
   assert.deepEqual(attachmentMetadata(result), { path: "attachments/note.txt", bytes: 5, sha256: "abc" });
 });
 
-test("exchange selection reads server-projected bytes then feeds attachment ingest", async () => {
+test("operator attachments selection reads server-projected bytes then feeds attachment ingest", async () => {
   const calls = [];
   const fetchImpl = async (url, options = {}) => {
     calls.push({ url, options });
-    if (url === "/api/exchange-files") return { ok: true, json: async () => ({ files: [{ path: "ready.txt", bytes: 5, sha256: "one" }] }) };
-    if (String(url).startsWith("/api/exchange-files?")) return { ok: true, blob: async () => new Blob(["ready"]) };
+    if (url === "/api/operator-attachments") return { ok: true, json: async () => ({ files: [{ path: "ready.txt", bytes: 5, sha256: "one" }] }) };
+    if (String(url).startsWith("/api/operator-attachments?")) return { ok: true, blob: async () => new Blob(["ready"]) };
     return { ok: true, json: async () => ({ path: "attachments/ready.txt", bytes: 5, sha256: "two" }) };
   };
   assert.equal((await exchangeFiles({ fetchImpl }))[0].path, "ready.txt");

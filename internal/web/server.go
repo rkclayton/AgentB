@@ -24,6 +24,7 @@ import (
 	"harness/internal/events"
 	"harness/internal/hardening"
 	"harness/internal/memory"
+	"harness/internal/operatorfiles"
 	"harness/internal/probe"
 	"harness/internal/projection"
 	"harness/internal/serviceaccount"
@@ -75,6 +76,7 @@ type Server struct {
 	workspaceState   *workspaceinfo.Manager
 	memoryState      *memory.Manager
 	statsState       *stats.Manager
+	operatorFiles    *operatorfiles.Manager
 	pickFolder       func(string) (string, error)
 	probeMu          sync.Mutex
 	probeCancels     map[string]*probeRun
@@ -123,8 +125,9 @@ func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry
 func (s *Server) SetWorkspaceState(manager *workspaceinfo.Manager, memories *memory.Manager) {
 	s.workspaceState, s.memoryState = manager, memories
 }
-func (s *Server) SetStats(manager *stats.Manager)     { s.statsState = manager }
-func (s *Server) SetReplay(replay *projection.Replay) { s.replay = replay }
+func (s *Server) SetStats(manager *stats.Manager)                 { s.statsState = manager }
+func (s *Server) SetOperatorFiles(manager *operatorfiles.Manager) { s.operatorFiles = manager }
+func (s *Server) SetReplay(replay *projection.Replay)             { s.replay = replay }
 func (s *Server) SetProjection(projector *projection.Store, writers *events.Writers) {
 	s.projector, s.writers = projector, writers
 }
@@ -175,6 +178,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/open-folder", s.openFileFolder)
 	mux.HandleFunc("/api/attachments", s.replayGuard(s.attachments))
 	mux.HandleFunc("/api/exchange-files", s.exchangeFiles)
+	mux.HandleFunc("/api/operator-attachments", s.operatorAttachments)
+	mux.HandleFunc("/api/operator-files", s.replayGuard(s.operatorFileState))
+	mux.HandleFunc("/api/ui-errors", s.replayGuard(s.uiError))
 	mux.HandleFunc("/api/sessions", s.replayGuard(s.sessions))
 	mux.HandleFunc("/api/sessions/", s.replayGuard(s.session))
 	mux.HandleFunc("/api/workspaces", s.replayGuard(s.workspaces))
@@ -1013,6 +1019,15 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		}
 		if s.runner != nil {
 			s.runner.LapseSessionGrants(id)
+		}
+		if s.operatorFiles != nil {
+			if item, ok := s.registry.Get(id); ok {
+				if path, err := s.operatorFiles.ExportChat(item.Snapshot()); err != nil {
+					s.bus.Publish(events.New(events.Error, id, "", map[string]any{"where": "chat_export", "message": err.Error()}))
+				} else {
+					s.bus.Publish(events.New(events.ChatExported, id, "", map[string]any{"path": path}))
+				}
+			}
 		}
 		writeJSON(w, 200, map[string]string{"session_id": id})
 	default:

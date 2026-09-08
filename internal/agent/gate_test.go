@@ -246,3 +246,34 @@ func TestCycleDecisionPausesAndAcceptsOnlyContinueOrStop(t *testing.T) {
 		t.Fatalf("decision=%q", got)
 	}
 }
+
+func TestPendingApprovalCanBeAnsweredFromMailboxCallback(t *testing.T) {
+	bus := events.NewBus()
+	eventsCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	cfg := config.Defaults(t.TempDir())
+	gate := NewGate(bus, func() config.Config { return cfg })
+	gate.SetMailboxDecision(func(sessionID string) (string, error) {
+		if sessionID != "session" {
+			t.Fatalf("session=%q", sessionID)
+		}
+		return "session", nil
+	})
+	s := &session.Session{ID: "session", Run: session.RunState{Status: "running"}}
+	done := make(chan string, 1)
+	go func() {
+		decision, _ := gate.WaitBoundaryDecision(context.Background(), s, "run", "mailbox-call", "read_file.operator_override", map[string]any{})
+		done <- decision
+	}()
+	if event := <-eventsCh; event.Type != events.ApprovalRequired {
+		t.Fatalf("first=%s", event.Type)
+	}
+	select {
+	case decision := <-done:
+		if decision != "session" {
+			t.Fatalf("decision=%q", decision)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("mailbox answer did not resume approval")
+	}
+}

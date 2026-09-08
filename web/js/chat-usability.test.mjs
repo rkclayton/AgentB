@@ -31,7 +31,7 @@ test("Whole Chat is the only attachment drop target and is invisible at rest", (
   assert.match(chat, /document\.body\.classList\.add\("drop-target"\)/);
   assert.doesNotMatch(html, /chat-attachment-controls|<select[^>]+chat-exchange/);
   assert.match(html, />Browse…<\/button>/);
-  assert.match(html, />From exchange folder<\/button>/);
+  assert.match(html, />From attachments<\/button>/);
   assert.match(css, /\.chat-page\.drop-target::after/);
 });
 
