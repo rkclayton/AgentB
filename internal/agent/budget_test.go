@@ -7,8 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"harness/internal/config"
 	"harness/internal/events"
@@ -43,6 +45,31 @@ func TestColdPrefillSuppressesImmediateCompaction(t *testing.T) {
 	budget.RecordUsage("session", 20000, 18000)
 	if budget.ColdPrefill("session") {
 		t.Fatal("warm prefix was classified cold")
+	}
+}
+
+func TestExactAccountingUsesProfileTimeoutAfterConnect(t *testing.T) {
+	var slow sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/apply-template":
+			slow.Do(func() { time.Sleep(2700 * time.Millisecond) })
+			_, _ = w.Write([]byte(`{"prompt":"rendered"}`))
+		case "/tokenize":
+			_, _ = w.Write([]byte(`{"tokens":[1]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	profile := config.Profile{BaseURL: server.URL, RequestTimeoutS: 5, Capabilities: config.Capabilities{Tokenize: true, ApplyTemplate: true, ApplyTemplateTools: true}}
+	item := &session.Session{ID: "normal-timeout", SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	started := time.Now()
+	if _, err := NewBudgeter().Measure(context.Background(), &profile, item, config.GlobalContext{}, budgetInput{SystemBase: "system", System: "system"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed < 2500*time.Millisecond {
+		t.Fatalf("accounting returned before the old fast-fail boundary: %s", elapsed)
 	}
 }
 

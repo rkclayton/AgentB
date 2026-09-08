@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptrace"
 	"strings"
@@ -21,8 +22,17 @@ type Client struct {
 	http    *http.Client
 }
 
+const dialTimeout = 2500 * time.Millisecond
+
+var sharedTransport = func() *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	dialer := &net.Dialer{Timeout: dialTimeout, KeepAlive: 30 * time.Second}
+	transport.DialContext = dialer.DialContext
+	return transport
+}()
+
 func New(profile *config.Profile) *Client {
-	return &Client{profile: profile, http: &http.Client{Timeout: time.Duration(profile.RequestTimeoutS) * time.Second}}
+	return &Client{profile: profile, http: &http.Client{Timeout: time.Duration(profile.RequestTimeoutS) * time.Second, Transport: sharedTransport}}
 }
 
 func (c *Client) Chat(ctx context.Context, request Request) (Response, error) {
