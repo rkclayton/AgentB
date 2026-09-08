@@ -34,6 +34,7 @@ const (
 	Error               = "error"
 	RunQueued           = "run.queued"
 	RunStarted          = "run.started"
+	RunStopping         = "run.stopping"
 	RunStopped          = "run.stopped"
 	Stage               = "stage"
 	ModelRequest        = "model.request"
@@ -53,6 +54,8 @@ const (
 	WorkspaceConflict   = "workspace.conflict"
 	MemoryNoted         = "memory.noted"
 	MemoryCleared       = "memory.cleared"
+	MemoryFlushed       = "memory.flushed"
+	StatsCleared        = "stats.cleared"
 	ProjectInstructions = "project.instructions_loaded"
 	PolicyApproved      = "policy.approved"
 	PolicyDenied        = "policy.denied"
@@ -64,7 +67,7 @@ const (
 )
 
 var Stages = []string{"assemble", "call_model", "parse", "dispatch", "execute", "append", "compact", "wait_user"}
-var StopReasons = []string{"done", "user_stop", "turn_ceiling", "cycle", "tool_errors", "context_ceiling", "length", "model_error", "profile_not_runnable"}
+var StopReasons = []string{"done", "safe", "emergency", "user_stop", "turn_ceiling", "cycle", "tool_errors", "context_ceiling", "length", "model_error", "profile_not_runnable"}
 
 type ToolCall struct {
 	ID        string `json:"id"`

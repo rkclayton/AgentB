@@ -4,7 +4,8 @@ const categoryGroups = [
   { key: "schemas", label: "tool schemas", sources: ["tools"] },
   { key: "tool-results", label: "tool results", sources: ["files", "results", "fetched"] },
   { key: "history", label: "history", sources: ["history", "summary"] },
-  { key: "memory", label: "memory", sources: ["memory"] },
+  { key: "workspace-memory", label: "workspace memory", sources: ["workspace_memory", "memory"] },
+  { key: "agent-memory", label: "agent memory", sources: ["agent_memory"] },
 ];
 
 export function contextOccupancy(budget = {}) {

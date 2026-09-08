@@ -13,14 +13,14 @@ import (
 	"harness/internal/session"
 )
 
-func TestSessionServerReassignment(t *testing.T) {
+func TestSessionAgentReassignment(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root)
 	cfg.Servers[0] = runnableTestProfile("first")
-	cfg.Roles.Main = "first"
 	second := runnableTestProfile("second")
 	second.Context.ReserveOutput = 2048
 	cfg.Servers = append(cfg.Servers, second, config.Profile{ID: "incomplete", Label: "Incomplete"})
+	cfg.Agents = []config.Agent{{Name: "First", B: "first", Toolset: config.FullToolset()}, {Name: "Second", B: "second", Toolset: config.FullToolset()}, {Name: "Incomplete", B: "incomplete", Toolset: config.FullToolset()}}
 
 	bus := events.NewBus()
 	eventStream, unsubscribe := bus.Subscribe()
@@ -40,7 +40,7 @@ func TestSessionServerReassignment(t *testing.T) {
 	}
 	item.Append(events.Message{ID: "m1", Role: "user", Content: "keep me"})
 
-	response := postSessionUpdate(t, server, `{"server_id":"second"}`)
+	response := postSessionUpdate(t, server, `{"agent_id":"second"}`)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
@@ -68,7 +68,7 @@ func TestSessionServerReassignment(t *testing.T) {
 	}
 
 	item.SetRun(session.RunState{Status: "running"})
-	response = postSessionUpdate(t, server, `{"server_id":"first"}`)
+	response = postSessionUpdate(t, server, `{"agent_id":"first"}`)
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "session is running") {
 		t.Fatalf("running status=%d body=%s", response.Code, response.Body)
 	}
@@ -77,7 +77,7 @@ func TestSessionServerReassignment(t *testing.T) {
 	}
 
 	item.SetRun(session.RunState{Status: "idle"})
-	response = postSessionUpdate(t, server, `{"server_id":"incomplete"}`)
+	response = postSessionUpdate(t, server, `{"agent_id":"incomplete"}`)
 	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "base_url is empty") {
 		t.Fatalf("incomplete status=%d body=%s", response.Code, response.Body)
 	}
@@ -87,7 +87,7 @@ func TestDropLastMessageEndpoint(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root)
 	cfg.Servers[0] = runnableTestProfile("main")
-	cfg.Roles.Main = "main"
+	cfg.Agents = []config.Agent{{Name: "Main", B: "main", Toolset: config.FullToolset()}}
 	bus := events.NewBus()
 	writers, err := events.NewWriters(filepath.Join(root, "logs"))
 	if err != nil {

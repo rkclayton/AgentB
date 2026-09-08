@@ -37,45 +37,46 @@ func (r *Runner) summarize(ctx context.Context, s *session.Session, runID string
 		return false
 	}
 	cfg := r.cfg()
-	if cfg.Roles.Aux == "" {
-		accepted, _ := r.trySummary(ctx, s, runID, main, main, "main", "", 0, false)
+	agent, hasAgent := cfg.Agent(s.Snapshot().AgentID)
+	if !hasAgent || agent.C == "" {
+		accepted, _ := r.trySummary(ctx, s, runID, main, main, "b", "", 0, false)
 		return accepted
 	}
-	aux, ok := cfg.Profile(cfg.Roles.Aux)
+	worker, ok := cfg.Profile(agent.C)
 	if !ok {
-		accepted, _ := r.trySummary(ctx, s, runID, main, main, "main", "aux_profile", 0, false)
+		accepted, _ := r.trySummary(ctx, s, runID, main, main, "b", "c_profile", 0, false)
 		return accepted
 	}
-	if aux.ID == main.ID {
-		accepted, _ := r.trySummary(ctx, s, runID, main, aux, "aux", "", 0, false)
+	if worker.ID == main.ID {
+		accepted, _ := r.trySummary(ctx, s, runID, main, worker, "c", "", 0, false)
 		return accepted
 	}
 
-	auxRequestProfile := summaryProfile(aux)
-	auxMessages := r.summaryMessages(&auxRequestProfile, s)
-	promptTokens, estimated, err := compactionPromptTokens(ctx, &auxRequestProfile, auxMessages, cfg.Context.Accounting)
+	workerRequestProfile := summaryProfile(worker)
+	workerMessages := r.summaryMessages(&workerRequestProfile, s)
+	promptTokens, estimated, err := compactionPromptTokens(ctx, &workerRequestProfile, workerMessages, cfg.Context.Accounting)
 	if err != nil {
-		r.publishSummaryAttempt(s, runID, events.CompactionSummaryData{Role: "aux", ProfileID: aux.ID, Model: aux.Model, Outcome: "error", Reason: "fit check: " + err.Error(), NCtx: aux.Context.NCtx})
-		accepted, _ := r.trySummary(ctx, s, runID, main, main, "main", "aux_fit_error", 0, false)
+		r.publishSummaryAttempt(s, runID, events.CompactionSummaryData{Role: "c", ProfileID: worker.ID, Model: worker.Model, Outcome: "error", Reason: "fit check: " + err.Error(), NCtx: worker.Context.NCtx})
+		accepted, _ := r.trySummary(ctx, s, runID, main, main, "b", "c_fit_error", 0, false)
 		return accepted
 	}
 	guard := promptTokens
 	if estimated {
 		guard = int(math.Ceil(float64(guard) * 1.10))
 	}
-	if aux.Context.NCtx <= 0 || guard+compactionMaxTokens > aux.Context.NCtx {
-		reason := fmt.Sprintf("prompt %d%s + reserve %d exceeds n_ctx %d", promptTokens, estimatedLabel(estimated), compactionMaxTokens, aux.Context.NCtx)
-		r.publishSummaryAttempt(s, runID, events.CompactionSummaryData{Role: "aux", ProfileID: aux.ID, Model: aux.Model, Outcome: "skipped", Reason: reason, EstimatedPromptTokens: promptTokens, Estimated: estimated, NCtx: aux.Context.NCtx})
-		accepted, _ := r.trySummary(ctx, s, runID, main, main, "main", "aux_context", 0, false)
+	if worker.Context.NCtx <= 0 || guard+compactionMaxTokens > worker.Context.NCtx {
+		reason := fmt.Sprintf("prompt %d%s + reserve %d exceeds n_ctx %d", promptTokens, estimatedLabel(estimated), compactionMaxTokens, worker.Context.NCtx)
+		r.publishSummaryAttempt(s, runID, events.CompactionSummaryData{Role: "c", ProfileID: worker.ID, Model: worker.Model, Outcome: "skipped", Reason: reason, EstimatedPromptTokens: promptTokens, Estimated: estimated, NCtx: worker.Context.NCtx})
+		accepted, _ := r.trySummary(ctx, s, runID, main, main, "b", "c_context", 0, false)
 		return accepted
 	}
 
-	accepted, failure := r.trySummary(ctx, s, runID, main, aux, "aux", "", promptTokens, estimated)
+	accepted, failure := r.trySummary(ctx, s, runID, main, worker, "c", "", promptTokens, estimated)
 	if accepted {
 		return true
 	}
-	fallback := "aux_" + failure
-	accepted, _ = r.trySummary(ctx, s, runID, main, main, "main", fallback, 0, false)
+	fallback := "c_" + failure
+	accepted, _ = r.trySummary(ctx, s, runID, main, main, "b", fallback, 0, false)
 	return accepted
 }
 
@@ -88,7 +89,7 @@ func (r *Runner) trySummary(ctx context.Context, s *session.Session, runID strin
 	if err != nil {
 		s.RecordCompactionModel(0, 0)
 		r.publishSummaryAttempt(s, runID, events.CompactionSummaryData{Role: role, ProfileID: profile.ID, Model: profile.Model, Outcome: "error", Reason: err.Error(), FallbackReason: fallback, Dispatched: true, EstimatedPromptTokens: estimatedPromptTokens, Estimated: estimated, NCtx: profile.Context.NCtx, DurationMS: duration})
-		if role == "main" {
+		if role == "b" {
 			r.operationalError(s, runID, "compaction_summary", err)
 		}
 		return false, "error"

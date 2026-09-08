@@ -24,7 +24,7 @@ Commands, run from the repository root:
   named raw files and exact hashes are present. It refuses paths outside the approved roots,
   including the protected alpha tree.
 - `go test -tags projector_slow ./internal/projectorpins` runs the recursive 12,699-record
-  pin. The default test contains the nine bounded curated cases so it remains practical on
+  pin. The default test contains the bounded curated cases so it remains practical on
   every edit; the all-log sweep remains the separate non-blocking wide check.
 
 To add a case, first identify a missing event shape, add one manifest entry with its rationale

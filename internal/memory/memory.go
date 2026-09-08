@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"harness/internal/config"
+	"harness/internal/events"
 )
 
 type Counter func(context.Context, string, string) (int, error)
@@ -57,8 +58,18 @@ func (m *Manager) Path(workspace string) string {
 	}
 	return path
 }
+func (m *Manager) AgentPath(agentID string) string {
+	return filepath.Join(m.Dir(), "agent-"+config.AgentID(agentID)+".md")
+}
 func (m *Manager) Load(ctx context.Context, workspace, serverID string) (string, string, error) {
 	path := m.Path(workspace)
+	return m.load(ctx, path, serverID, "Notes from earlier sessions in this workspace:")
+}
+func (m *Manager) LoadAgent(ctx context.Context, agentID, serverID string) (string, string, error) {
+	path := m.AgentPath(agentID)
+	return m.load(ctx, path, serverID, "Notes about how this agent works with the operator:")
+}
+func (m *Manager) load(ctx context.Context, path, serverID, heading string) (string, string, error) {
 	if !m.cfg().Memory.Enabled {
 		return "", path, nil
 	}
@@ -90,7 +101,7 @@ func (m *Manager) Load(ctx context.Context, workspace, serverID string) (string,
 	maxTokens := m.cfg().Memory.MaxTokens
 	dropped := 0
 	for len(lines) > 0 {
-		body := memoryBlock(lines, dropped)
+		body := memoryBlock(heading, lines, dropped)
 		tokens, countErr := m.count(ctx, serverID, body)
 		if countErr != nil {
 			tokens = (len([]rune(body)) + 3) / 4
@@ -105,9 +116,15 @@ func (m *Manager) Load(ctx context.Context, workspace, serverID string) (string,
 }
 
 func (m *Manager) Read(workspace string) (string, error) {
+	return m.readPath(m.Path(workspace))
+}
+func (m *Manager) ReadAgent(agentID string) (string, error) {
+	return m.readPath(m.AgentPath(agentID))
+}
+func (m *Manager) readPath(path string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	data, err := os.ReadFile(m.Path(workspace))
+	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return "", nil
 	}
@@ -118,20 +135,109 @@ func (m *Manager) Read(workspace string) (string, error) {
 }
 
 func (m *Manager) Clear(workspace string) error {
+	return m.clearPath(m.Path(workspace))
+}
+func (m *Manager) ClearAgent(agentID string) error {
+	return m.clearPath(m.AgentPath(agentID))
+}
+
+func (m *Manager) Count(workspace string) (int, error) {
+	return m.countPath(m.Path(workspace))
+}
+func (m *Manager) CountAgent(agentID string) (int, error) {
+	return m.countPath(m.AgentPath(agentID))
+}
+func (m *Manager) countPath(path string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	err := os.Remove(m.Path(workspace))
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	count := 0
+	for _, line := range strings.Split(normalize(string(data)), "\n") {
+		if strings.TrimSpace(line) != "" {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *Manager) DropSessionWrites(writes []events.MemoryWrite) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	byPath := map[string]map[string]bool{}
+	root := m.Dir()
+	for _, write := range writes {
+		path := filepath.Clean(write.Path)
+		relative, err := filepath.Rel(root, path)
+		if err != nil || relative == ".." || filepath.IsAbs(relative) || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return 0, fmt.Errorf("memory write path is outside the memory root")
+		}
+		if byPath[path] == nil {
+			byPath[path] = map[string]bool{}
+		}
+		byPath[path][strings.TrimSpace(write.Note)] = true
+	}
+	dropped := 0
+	for path, notes := range byPath {
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return dropped, err
+		}
+		kept := []string{}
+		for _, line := range strings.Split(strings.TrimRight(normalize(string(data)), "\n"), "\n") {
+			plain := strings.TrimPrefix(strings.TrimSpace(line), "- ")
+			parts := strings.SplitN(plain, " ", 2)
+			note := plain
+			if len(parts) == 2 && len(parts[0]) == 10 && parts[0][4] == '-' && parts[0][7] == '-' {
+				note = parts[1]
+			}
+			if notes[strings.TrimSpace(note)] {
+				dropped++
+				continue
+			}
+			if strings.TrimSpace(line) != "" {
+				kept = append(kept, line)
+			}
+		}
+		if len(kept) == 0 {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return dropped, err
+			}
+			continue
+		}
+		temporary := path + ".tmp"
+		if err := os.WriteFile(temporary, []byte(strings.Join(kept, "\n")+"\n"), 0o600); err != nil {
+			return dropped, err
+		}
+		if err := os.Rename(temporary, path); err != nil {
+			return dropped, err
+		}
+	}
+	return dropped, nil
+}
+func (m *Manager) clearPath(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	err := os.Remove(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	return err
 }
 
-func memoryBlock(lines []string, dropped int) string {
+func memoryBlock(heading string, lines []string, dropped int) string {
 	if len(lines) == 0 {
 		return ""
 	}
-	out := []string{"Notes from earlier sessions in this workspace:"}
+	out := []string{heading}
 	if dropped > 0 {
 		out = append(out, fmt.Sprintf("[%d older notes omitted; the file is over the memory budget — prune it by hand]", dropped))
 	}
@@ -139,6 +245,12 @@ func memoryBlock(lines []string, dropped int) string {
 	return strings.Join(out, "\n")
 }
 func (m *Manager) Note(workspace, note string) (string, bool, error) {
+	return m.notePath(m.Path(workspace), note)
+}
+func (m *Manager) NoteAgent(agentID, note string) (string, bool, error) {
+	return m.notePath(m.AgentPath(agentID), note)
+}
+func (m *Manager) notePath(path, note string) (string, bool, error) {
 	note = strings.TrimSpace(note)
 	if note == "" {
 		return "", false, fmt.Errorf("note is empty")
@@ -148,7 +260,6 @@ func (m *Manager) Note(workspace, note string) (string, bool, error) {
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	path := m.Path(workspace)
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return path, false, err

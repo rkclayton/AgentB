@@ -463,10 +463,10 @@ function noticeContent(session, entry, actionable) {
 			decide: actionable ? (callID, decision) => api("/api/approve", { session_id: session.id, call_id: callID, decision }) : null,
 		});
   }
-  if (entry.agentRole === "aux") {
+  if (entry.agentRole === "c") {
     const label = document.createElement("span");
     label.className = "chat-notice-author";
-    label.textContent = `${agentAuthor(session, "aux")} · `;
+    label.textContent = `${agentAuthor(session, "c")} · `;
     content.prepend(label);
   }
   return content;

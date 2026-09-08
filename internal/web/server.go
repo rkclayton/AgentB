@@ -29,6 +29,7 @@ import (
 	"harness/internal/serviceaccount"
 	"harness/internal/session"
 	"harness/internal/signing"
+	"harness/internal/stats"
 	"harness/internal/tools"
 	workspaceinfo "harness/internal/workspace"
 )
@@ -73,8 +74,13 @@ type Server struct {
 	detectLocal      func(context.Context, string) (any, error)
 	workspaceState   *workspaceinfo.Manager
 	memoryState      *memory.Manager
+	statsState       *stats.Manager
 	pickFolder       func(string) (string, error)
+	probeMu          sync.Mutex
+	probeCancels     map[string]*probeRun
 }
+
+type probeRun struct{ cancel context.CancelFunc }
 
 type RuntimeRoots struct {
 	Application string
@@ -97,6 +103,7 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 			return time.AfterFunc(duration, fn)
 		},
 		openFolder:    openContainingFolder,
+		probeCancels:  map[string]*probeRun{},
 		extractClient: &http.Client{},
 		detectLocal: func(ctx context.Context, account string) (any, error) {
 			return detection.Local(ctx, filepath.Join(roots.Application, "scripts", "detect-local-capabilities.ps1"), account)
@@ -108,6 +115,7 @@ func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry
 func (s *Server) SetWorkspaceState(manager *workspaceinfo.Manager, memories *memory.Manager) {
 	s.workspaceState, s.memoryState = manager, memories
 }
+func (s *Server) SetStats(manager *stats.Manager)     { s.statsState = manager }
 func (s *Server) SetReplay(replay *projection.Replay) { s.replay = replay }
 func (s *Server) SetProjection(projector *projection.Store, writers *events.Writers) {
 	s.projector, s.writers = projector, writers
@@ -175,6 +183,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/stop", s.replayGuard(s.stop))
 	mux.HandleFunc("/api/approve", s.replayGuard(s.approve))
 	mux.HandleFunc("/api/tools/", s.replayGuard(s.toggleTool))
+	mux.HandleFunc("/api/stats/", s.replayGuard(s.stats))
+	mux.HandleFunc("/api/agents/", s.replayGuard(s.agentAction))
 	return s.securityHeaders(s.mutationGuard(mux))
 }
 
@@ -183,7 +193,9 @@ func (s *Server) hardeningRequest(serverID string) (hardening.Request, error) {
 	cfg := *s.cfg
 	s.mu.RUnlock()
 	if serverID == "" {
-		serverID = cfg.Roles.Main
+		if agent, ok := cfg.Agent(cfg.DefaultAgentID()); ok {
+			serverID = agent.B
+		}
 	}
 	var profile *config.Profile
 	for index := range cfg.Servers {
@@ -615,6 +627,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	case http.MethodPost:
 		var body struct {
 			Label           string `json:"label"`
+			AgentID         string `json:"agent_id"`
 			ServerID        string `json:"server_id"`
 			Workspace       string `json:"workspace"`
 			SourceSessionID string `json:"source_session_id"`
@@ -623,7 +636,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if body.SourceSessionID != "" {
-			if body.Label != "" || body.ServerID != "" {
+			if body.Label != "" || body.AgentID != "" || body.ServerID != "" {
 				writeError(w, 400, "source_session_id cannot be combined with overrides", "session")
 				return
 			}
@@ -638,23 +651,33 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, 201, map[string]any{"session": item.Snapshot()})
 			return
 		}
+		if body.AgentID == "" && body.ServerID != "" {
+			s.mu.RLock()
+			for _, candidate := range s.cfg.Agents {
+				if candidate.B == body.ServerID {
+					body.AgentID = config.AgentID(candidate.Name)
+					break
+				}
+			}
+			s.mu.RUnlock()
+		}
 		if body.Workspace == "" {
 			s.mu.RLock()
 			body.Workspace = s.cfg.Workspace
-			if body.ServerID == "" {
-				body.ServerID = s.cfg.Roles.Main
+			if body.AgentID == "" {
+				body.AgentID = s.cfg.DefaultAgentID()
 			}
 			s.mu.RUnlock()
-		} else if body.ServerID == "" {
+		} else if body.AgentID == "" {
 			s.mu.RLock()
-			body.ServerID = s.cfg.Roles.Main
+			body.AgentID = s.cfg.DefaultAgentID()
 			s.mu.RUnlock()
 		}
-		if runnable, reason := s.registry.ProfileRunnable(body.ServerID); !runnable {
-			writeError(w, 400, reason, "server_id")
+		if runnable, reason := s.registry.AgentRunnable(body.AgentID); !runnable {
+			writeError(w, 400, reason, "agent_id")
 			return
 		}
-		item, err := s.registry.Create(body.Label, body.ServerID, body.Workspace)
+		item, err := s.registry.Create(body.Label, body.AgentID, body.Workspace)
 		if err != nil {
 			writeError(w, 400, err.Error(), "session")
 			return
@@ -848,23 +871,84 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"log_path": path})
 		return
 	}
+	if len(parts) == 2 && parts[1] == "delete" && r.Method == http.MethodPost {
+		if err := s.operatorRequest(r); err != nil {
+			writeError(w, http.StatusForbidden, "full chat deletion requires a verified local operator process", "session_id")
+			return
+		}
+		item, ok := s.registry.Get(id)
+		if !ok {
+			writeError(w, http.StatusNotFound, "session not found", "session_id")
+			return
+		}
+		if !item.IsClosed() {
+			writeError(w, http.StatusConflict, "session must be closed before deletion", "session_id")
+			return
+		}
+		var body struct {
+			Confirm    bool `json:"confirm"`
+			DropMemory bool `json:"drop_memory"`
+		}
+		if !decode(w, r, &body) {
+			return
+		}
+		inventory, err := s.writers.SessionInventory(id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error(), "session_id")
+			return
+		}
+		if !body.Confirm {
+			writeJSON(w, http.StatusOK, map[string]any{"session_id": id, "inventory": inventory})
+			return
+		}
+		inventory, err = s.registry.Delete(id)
+		if err != nil {
+			writeError(w, http.StatusConflict, err.Error(), "session_id")
+			return
+		}
+		if s.projector != nil {
+			s.projector.Delete(id)
+		}
+		dropped := 0
+		if body.DropMemory && s.memoryState != nil {
+			dropped, err = s.memoryState.DropSessionWrites(inventory.MemoryWrites)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error(), "memory")
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"session_id": id, "inventory": inventory, "memory_entries_dropped": dropped})
+		return
+	}
 	switch r.Method {
 	case http.MethodPost:
 		var body struct {
 			Label    *string `json:"label"`
+			AgentID  *string `json:"agent_id"`
 			ServerID *string `json:"server_id"`
 		}
 		if !decode(w, r, &body) {
 			return
 		}
-		if body.Label == nil && body.ServerID == nil {
-			writeError(w, 400, "label or server_id is required", "session")
+		if body.Label == nil && body.AgentID == nil && body.ServerID == nil {
+			writeError(w, 400, "label or agent_id is required", "session")
 			return
 		}
-		if body.ServerID != nil {
-			if err := s.registry.SetServer(id, *body.ServerID); err != nil {
+		if body.AgentID == nil && body.ServerID != nil {
+			s.mu.RLock()
+			for _, candidate := range s.cfg.Agents {
+				if candidate.B == *body.ServerID {
+					value := config.AgentID(candidate.Name)
+					body.AgentID = &value
+					break
+				}
+			}
+			s.mu.RUnlock()
+		}
+		if body.AgentID != nil {
+			if err := s.registry.SetAgent(id, *body.AgentID); err != nil {
 				status := http.StatusBadRequest
-				field := "server_id"
+				field := "agent_id"
 				if strings.Contains(err.Error(), "not found") {
 					status, field = http.StatusNotFound, "session"
 				} else if strings.Contains(err.Error(), "running") || strings.Contains(err.Error(), "closed") {
@@ -889,7 +973,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 404, "session not found", "session")
 			return
 		}
-		if body.ServerID != nil && s.runner != nil {
+		if body.AgentID != nil && s.runner != nil {
 			s.runner.PublishBudget(r.Context(), item)
 		}
 		writeJSON(w, 200, map[string]any{"session": item.Snapshot()})
@@ -929,9 +1013,16 @@ func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.mu.Lock()
-		if s.cfg.Roles.Main == tail || s.cfg.Roles.Aux == tail {
+		assigned := false
+		for _, agent := range s.cfg.Agents {
+			if agent.B == tail || agent.C == tail || agent.D == tail {
+				assigned = true
+				break
+			}
+		}
+		if assigned {
 			s.mu.Unlock()
-			writeError(w, 409, "profile is assigned to a model role", "roles")
+			writeError(w, 409, "profile is assigned to an agent role", "agents")
 			return
 		}
 		if len(s.cfg.Servers) == 1 {
@@ -979,11 +1070,23 @@ func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, reason, "servers."+id)
 		return
 	}
-	go s.runProbe(profile)
+	s.probeMu.Lock()
+	if prior := s.probeCancels[id]; prior != nil {
+		prior.cancel()
+	}
+	probeContext, cancel := context.WithCancel(context.Background())
+	current := &probeRun{cancel: cancel}
+	s.probeCancels[id] = current
+	s.probeMu.Unlock()
+	go s.runProbe(probeContext, profile, current)
 	writeJSON(w, 202, map[string]string{"status": "probing", "server_id": id})
 }
-func (s *Server) runProbe(profile *config.Profile) {
-	caps, findings, err := probe.Probe(contextBackground{}, profile)
+func (s *Server) runProbe(ctx context.Context, profile *config.Profile, current *probeRun) {
+	caps, findings, err := probe.Probe(ctx, profile)
+	s.clearProbe(profile.ID, current)
+	if ctx.Err() != nil {
+		return
+	}
 	if err != nil {
 		caps, findings = failedProbeCapabilities(profile, err)
 	}
@@ -1007,6 +1110,14 @@ func (s *Server) runProbe(profile *config.Profile) {
 		s.registry.RefreshRunnable()
 	}
 	s.bus.Publish(events.New(events.ServerProbed, "", "", map[string]any{"server_id": profile.ID, "capabilities": caps, "findings": findings}))
+}
+
+func (s *Server) clearProbe(profileID string, current *probeRun) {
+	s.probeMu.Lock()
+	if s.probeCancels[profileID] == current {
+		delete(s.probeCancels, profileID)
+	}
+	s.probeMu.Unlock()
 }
 
 func failedProbeCapabilities(profile *config.Profile, err error) (config.Capabilities, []string) {
@@ -1163,7 +1274,24 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	s.cancelProbes(body.SessionID, body.All)
 	writeJSON(w, 200, map[string]any{"stopped": s.scheduler.Stop(body.SessionID, body.All)})
+}
+
+func (s *Server) cancelProbes(sessionID string, all bool) {
+	s.probeMu.Lock()
+	defer s.probeMu.Unlock()
+	if all {
+		for _, probe := range s.probeCancels {
+			probe.cancel()
+		}
+		return
+	}
+	if item, ok := s.registry.Get(sessionID); ok {
+		if probe := s.probeCancels[item.ServerID]; probe != nil {
+			probe.cancel()
+		}
+	}
 }
 func (s *Server) approve(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1208,27 +1336,191 @@ func (s *Server) toggleTool(w http.ResponseWriter, r *http.Request) {
 	name := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/tools/"), "/")
 	var body struct {
 		SessionID string `json:"session_id"`
+		AgentID   string `json:"agent_id"`
 		Enabled   bool   `json:"enabled"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	item, ok := s.registry.Get(body.SessionID)
-	if !ok {
-		writeError(w, 404, "session not found", "session_id")
+	if body.AgentID == "" {
+		item, ok := s.registry.Get(body.SessionID)
+		if !ok {
+			writeError(w, 404, "session not found", "session_id")
+			return
+		}
+		if item.IsClosed() {
+			writeError(w, 409, "session is closed", "session_id")
+			return
+		}
+		body.AgentID = item.AgentID
+	}
+	s.mu.Lock()
+	foundAgent, foundTool := false, false
+	for i := range s.cfg.Agents {
+		if config.AgentID(s.cfg.Agents[i].Name) != body.AgentID {
+			continue
+		}
+		foundAgent = true
+		selected := map[string]bool{}
+		for _, tool := range s.cfg.Agents[i].Toolset {
+			selected[tool] = true
+		}
+		if _, known := selected[name]; known {
+			foundTool = true
+		}
+		for _, known := range config.FullToolset() {
+			if known == name {
+				foundTool = true
+			}
+		}
+		if body.Enabled {
+			selected[name] = true
+		} else {
+			delete(selected, name)
+		}
+		next := []string{}
+		for _, known := range config.FullToolset() {
+			if selected[known] {
+				next = append(next, known)
+			}
+		}
+		s.cfg.Agents[i].Toolset = next
+		break
+	}
+	var saveErr error
+	if foundAgent && foundTool {
+		saveErr = s.cfg.Save(s.configPath)
+	}
+	s.mu.Unlock()
+	if !foundAgent {
+		writeError(w, 404, "agent not found", "agent_id")
 		return
 	}
-	if item.IsClosed() {
-		writeError(w, 409, "session is closed", "session_id")
-		return
-	}
-	if !item.ToggleTool(name, body.Enabled) {
+	if !foundTool {
 		writeError(w, 404, "tool not found", "name")
 		return
 	}
-	s.bus.Publish(events.New(events.ToolToggled, item.ID, "", map[string]any{"name": name, "enabled": body.Enabled}))
-	s.runner.PublishBudget(r.Context(), item)
-	writeJSON(w, 200, map[string]any{"name": name, "enabled": body.Enabled})
+	if saveErr != nil {
+		writeError(w, 500, saveErr.Error(), "config")
+		return
+	}
+	if s.runner != nil {
+		s.runner.Configure(s.ConfigSnapshot())
+	}
+	enabled := map[string]bool{}
+	cfg := s.ConfigSnapshot()
+	agent, _ := cfg.Agent(body.AgentID)
+	for _, tool := range agent.Toolset {
+		enabled[tool] = true
+	}
+	s.registry.ApplyAgentToolset(body.AgentID, enabled)
+	for _, affected := range s.registry.List() {
+		if affected.AgentID == body.AgentID {
+			s.bus.Publish(events.New(events.ToolToggled, affected.ID, "", map[string]any{"agent_id": body.AgentID, "name": name, "enabled": body.Enabled}))
+			s.runner.PublishBudget(r.Context(), affected)
+		}
+	}
+	writeJSON(w, 200, map[string]any{"agent_id": body.AgentID, "name": name, "enabled": body.Enabled})
+}
+
+func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/stats/"), "/"), "/")
+	if len(parts) == 0 || parts[0] == "" || s.statsState == nil {
+		writeError(w, http.StatusNotFound, "agent stats not found", "agent_id")
+		return
+	}
+	agentID := parts[0]
+	if _, ok := s.ConfigSnapshot().Agent(agentID); !ok {
+		writeError(w, http.StatusNotFound, "agent not found", "agent_id")
+		return
+	}
+	if r.Method == http.MethodGet && len(parts) == 1 {
+		writeJSON(w, http.StatusOK, s.statsState.Snapshot(agentID))
+		return
+	}
+	if r.Method == http.MethodPost && len(parts) == 2 && parts[1] == "clear" {
+		if err := s.operatorRequest(r); err != nil {
+			writeError(w, http.StatusForbidden, "clearing stats requires a verified local operator process", "agent_id")
+			return
+		}
+		var body struct {
+			Confirm bool `json:"confirm"`
+		}
+		if !decode(w, r, &body) {
+			return
+		}
+		if !body.Confirm {
+			writeError(w, http.StatusBadRequest, "confirmation is required", "confirm")
+			return
+		}
+		if err := s.statsState.Clear(agentID); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error(), "stats")
+			return
+		}
+		s.bus.Publish(events.New(events.StatsCleared, "", "", map[string]any{"agent_id": agentID}))
+		writeJSON(w, http.StatusOK, s.statsState.Snapshot(agentID))
+		return
+	}
+	method(w)
+}
+
+func (s *Server) agentAction(w http.ResponseWriter, r *http.Request) {
+	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/agents/"), "/"), "/")
+	if len(parts) != 3 || parts[1] != "memory" || parts[2] != "flush" || r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	if err := s.operatorRequest(r); err != nil {
+		writeError(w, http.StatusForbidden, "flushing memory requires a verified local operator process", "agent_id")
+		return
+	}
+	if s.memoryState == nil || s.registry == nil {
+		writeError(w, http.StatusServiceUnavailable, "memory runtime unavailable", "memory")
+		return
+	}
+	agentID := parts[0]
+	if _, ok := s.ConfigSnapshot().Agent(agentID); !ok {
+		writeError(w, http.StatusNotFound, "agent not found", "agent_id")
+		return
+	}
+	var body struct {
+		Workspace string `json:"workspace"`
+		Confirm   bool   `json:"confirm"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	workspace := filepath.Clean(strings.TrimSpace(body.Workspace))
+	if workspace == "." || !filepath.IsAbs(workspace) {
+		writeError(w, http.StatusBadRequest, "workspace must be an absolute path", "workspace")
+		return
+	}
+	agentEntries, err := s.memoryState.CountAgent(agentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "memory")
+		return
+	}
+	workspaceEntries, err := s.memoryState.Count(workspace)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "memory")
+		return
+	}
+	if !body.Confirm {
+		writeJSON(w, http.StatusOK, map[string]any{"agent_id": agentID, "workspace": workspace, "agent_entries": agentEntries, "workspace_entries": workspaceEntries})
+		return
+	}
+	if err := s.memoryState.ClearAgent(agentID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "memory")
+		return
+	}
+	if err := s.memoryState.Clear(workspace); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error(), "memory")
+		return
+	}
+	s.registry.ClearAgentMemory(agentID)
+	s.registry.ClearWorkspaceMemory(workspace)
+	s.bus.Publish(events.New(events.MemoryFlushed, "", "", map[string]any{"agent_id": agentID, "workspace": workspace, "agent_entries": agentEntries, "workspace_entries": workspaceEntries}))
+	writeJSON(w, http.StatusOK, map[string]any{"agent_id": agentID, "workspace": workspace, "agent_entries": agentEntries, "workspace_entries": workspaceEntries})
 }
 func mergeConfig(dst, src map[string]any) {
 	for key, value := range src {

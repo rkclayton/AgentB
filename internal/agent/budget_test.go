@@ -131,8 +131,8 @@ func TestExactToolCostsAreMarginalAndCached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := templateCalls.Load(); got != 7 {
-		t.Fatalf("first template renders=%d, want 7 (3 budget + 2 isolated + 2 marginal)", got)
+	if got := templateCalls.Load(); got != 8 {
+		t.Fatalf("first template renders=%d, want 8 (4 budget + 2 isolated + 2 marginal)", got)
 	}
 	if first.ToolMarginalTokens["one"] <= 0 || first.ToolMarginalTokens["two"] <= 0 {
 		t.Fatalf("marginal costs=%v", first.ToolMarginalTokens)
@@ -146,11 +146,19 @@ func TestExactToolCostsAreMarginalAndCached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := templateCalls.Load(); got != 10 {
-		t.Fatalf("cached template renders=%d, want 10 (three regular renders added)", got)
+	if got := templateCalls.Load(); got != 12 {
+		t.Fatalf("cached template renders=%d, want 12 (four regular renders added)", got)
 	}
 	if fmt.Sprint(second.ToolMarginalTokens) != fmt.Sprint(first.ToolMarginalTokens) {
 		t.Fatalf("cached marginals changed: first=%v second=%v", first.ToolMarginalTokens, second.ToolMarginalTokens)
+	}
+	budgeter.InvalidateToolCosts()
+	_, err = budgeter.Measure(context.Background(), &profile, item, config.GlobalContext{}, input, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := templateCalls.Load(); got != 20 {
+		t.Fatalf("one prefix invalidation rendered costs again: calls=%d, want 20", got)
 	}
 
 	input.System = "system tools one"
@@ -160,8 +168,8 @@ func TestExactToolCostsAreMarginalAndCached(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := templateCalls.Load(); got != 16 {
-		t.Fatalf("tool-change template renders=%d, want 16 (3 budget + 2 isolated + 1 marginal added)", got)
+	if got := templateCalls.Load(); got != 27 {
+		t.Fatalf("tool-change template renders=%d, want 27 (4 budget + 2 isolated + 1 marginal added)", got)
 	}
 	if _, found := third.ToolMarginalTokens["two"]; found {
 		t.Fatalf("disabled tool acquired a marginal request cost: %v", third.ToolMarginalTokens)

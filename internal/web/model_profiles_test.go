@@ -17,7 +17,7 @@ import (
 	"harness/internal/session"
 )
 
-func TestConfigPOSTAssignsEitherProfileToEitherRole(t *testing.T) {
+func TestConfigPOSTAssignsProfilesToLetteredAgentRoles(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "harness.json")
 	cfg := config.Defaults(root)
@@ -36,7 +36,7 @@ func TestConfigPOSTAssignsEitherProfileToEitherRole(t *testing.T) {
 	t.Cleanup(func() { _ = writers.Close() })
 	server.SetRegistry(session.NewRegistry(events.NewBus(), writers, server.Profile, cfg.Run.MaxTurns, server.ConfigSnapshot))
 
-	response := postConfigPatch(t, server, `{"roles":{"main":"small","aux":"local"}}`)
+	response := postConfigPatch(t, server, `{"agents":[{"name":"Coder","b":"small","c":"local","toolset":[]}]}`)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body)
 	}
@@ -44,22 +44,22 @@ func TestConfigPOSTAssignsEitherProfileToEitherRole(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &returned); err != nil {
 		t.Fatal(err)
 	}
-	if returned.Roles.Main != "small" || returned.Roles.Aux != "local" {
-		t.Fatalf("roles=%+v", returned.Roles)
+	if len(returned.Agents) != 1 || returned.Agents[0].B != "small" || returned.Agents[0].C != "local" {
+		t.Fatalf("agents=%+v", returned.Agents)
 	}
 
-	response = postConfigPatch(t, server, `{"roles":{"main":"small","aux":"small"}}`)
+	response = postConfigPatch(t, server, `{"agents":[{"name":"Coder","b":"small","c":"small","toolset":[]}]}`)
 	if response.Code != http.StatusOK {
 		t.Fatalf("same-profile status=%d body=%s", response.Code, response.Body)
 	}
-	if got, _ := server.ConfigSnapshot().RoleProfile("aux"); got.ID != "small" {
-		t.Fatalf("aux resolved to %q", got.ID)
+	if got, _ := server.ConfigSnapshot().Agent("coder"); got.C != "small" {
+		t.Fatalf("c profile=%q", got.C)
 	}
 	request := httptest.NewRequest(http.MethodDelete, "/api/servers/small", nil)
 	authorizeMutation(request, server)
 	response = httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "assigned to a model role") {
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "assigned to an agent role") {
 		t.Fatalf("delete status=%d body=%s", response.Code, response.Body)
 	}
 

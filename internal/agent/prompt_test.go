@@ -31,3 +31,17 @@ func TestProjectInstructionsSitAfterToolNamesAndBeforeMemory(t *testing.T) {
 		t.Fatalf("byte delta=%d base=%q full=%q", delta, base, full)
 	}
 }
+
+func TestAgentAddendumAndTwoMemoryLayersHaveStableOrder(t *testing.T) {
+	renderer := &PromptRenderer{text: "tools={{tools}}\n{{agent}}\n{{project}}\n{{memory}}"}
+	item := &session.Session{Workspace: "workspace", PromptAddendum: "Prefer terse reports."}
+	value := renderer.RenderMemoryParts(&config.Profile{}, item, []string{"read_file"}, "PROJECT", "WORKSPACE MEMORY", "AGENT MEMORY")
+	toolsAt := strings.Index(value, "tools=read_file")
+	addendumAt := strings.Index(value, "BEGIN OPERATOR AGENT ADDENDUM")
+	projectAt := strings.Index(value, "PROJECT")
+	workspaceAt := strings.Index(value, "WORKSPACE MEMORY")
+	agentAt := strings.Index(value, "AGENT MEMORY")
+	if toolsAt < 0 || addendumAt <= toolsAt || projectAt <= addendumAt || workspaceAt <= projectAt || agentAt <= workspaceAt {
+		t.Fatalf("prompt order=%q", value)
+	}
+}

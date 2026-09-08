@@ -18,7 +18,8 @@ test("shared shell slot order is identical on Chat Console and Plan", () => {
 
 test("agent tabs are ordered and expose idle running waiting glyphs", () => {
   assert.match(shell, /const agents = \["agent_b"\]/);
-  assert.match(shell, /roles\?\.aux\) agents\.push\("agent_c"\)/);
+  assert.match(shell, /configured\?\.c\) agents\.push\("agent_c"\)/);
+  assert.match(shell, /configured\?\.d\) agents\.push\("agent_d"\)/);
   assert.doesNotMatch(shell, /agents\.push\("agent_a"\)/);
   assert.match(shell, /return "waiting"[\s\S]*return "running"[\s\S]*return "idle"/);
   assert.match(shell, /glyphState === "waiting" \? "!" : glyphState === "running" \? "●" : "○"/);

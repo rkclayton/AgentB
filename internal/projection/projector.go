@@ -106,9 +106,10 @@ type Snapshot struct {
 	Complete             bool                       `json:"complete"`
 	ID                   string                     `json:"id"`
 	Label                string                     `json:"label"`
+	AgentID              string                     `json:"agent_id"`
 	ServerID             string                     `json:"server_id"`
 	AgentName            string                     `json:"agent_name"`
-	MainProfile          string                     `json:"main_profile"`
+	BProfile             string                     `json:"b_profile"`
 	CreatedAt            string                     `json:"created_at"`
 	Workspace            string                     `json:"workspace"`
 	WorkspaceDir         string                     `json:"workspace_dir"`
@@ -127,6 +128,8 @@ type Snapshot struct {
 	NotRunnableReason    string                     `json:"not_runnable_reason"`
 	MemoryPath           string                     `json:"memory_path"`
 	MemoryContent        string                     `json:"memory_content"`
+	AgentMemoryPath      string                     `json:"agent_memory_path"`
+	AgentMemoryContent   string                     `json:"agent_memory_content"`
 	LogPath              string                     `json:"log_path"`
 	ModelTurns           int                        `json:"model_turns"`
 	CompactionCount      int                        `json:"compaction_count"`
@@ -202,12 +205,13 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 			next.NamePinned = true
 		}
 	case events.SessionUpdated:
+		next.AgentID = firstString(stringValue(data["agent_id"]), next.AgentID)
 		next.ServerID = stringValue(data["server_id"])
 		if value := stringValue(data["agent_name"]); value != "" {
 			next.AgentName = value
 		}
-		if value := stringValue(data["main_profile"]); value != "" {
-			next.MainProfile = value
+		if value := firstString(stringValue(data["b_profile"]), stringValue(data["main_profile"])); value != "" {
+			next.BProfile = value
 		}
 		next.Runnable = boolValue(data["runnable"])
 		next.NotRunnableReason = stringValue(data["not_runnable_reason"])
@@ -280,8 +284,14 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.Run.LastStopReason = ""
 		next.QueuedMessages = max(0, next.QueuedMessages-1)
 		next.Activity.DispatchAlarm = false
+	case events.RunStopping:
+		next.Run.Status = "stopping"
 	case events.RunStopped:
-		next.Run = Run{Status: "idle", MaxTurns: next.Run.MaxTurns, LastStopReason: stringValue(data["reason"])}
+		status := "idle"
+		if boolValue(data["queue_held"]) {
+			status = "held"
+		}
+		next.Run = Run{Status: status, MaxTurns: next.Run.MaxTurns, QueuePosition: next.QueuedMessages, LastStopReason: stringValue(data["reason"])}
 		next.Activity.Stage = "wait_user"
 		next.Activity.StageState = "enter"
 		next.Activity.ActiveTool = ""
@@ -306,7 +316,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 	case events.ModelRequest:
 		at := eventMillis(record.Event)
 		next.Activity.Stream = &StreamTelemetry{Key: turnKey(record.Event, data), StartedAt: at, LastChunkAt: at, RateStartedAt: at}
-		next.Chat = appendChat(next.Chat, ChatEntry{Type: "agent", Key: "turn:" + turnKey(record.Event, data), RunID: record.Event.RunID, Turn: intValue(data["turn"]), AgentRole: "main"})
+		next.Chat = appendChat(next.Chat, ChatEntry{Type: "agent", Key: "turn:" + turnKey(record.Event, data), RunID: record.Event.RunID, Turn: intValue(data["turn"]), AgentRole: "b"})
 	case events.ModelProgress:
 		next.Activity.Progress = cloneMap(data)
 		next.Activity.Stream = touchStream(next.Activity.Stream, record.Event, data, false)
@@ -341,7 +351,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.Chat = cloneChat(next.Chat)
 		entry := chatTurn(next.Chat, record.Event.RunID, intValue(data["turn"]))
 		if entry == nil {
-			next.Chat = append(next.Chat, ChatEntry{Type: "agent", Key: "turn:" + turnKey(record.Event, data), RunID: record.Event.RunID, Turn: intValue(data["turn"]), AgentRole: "main"})
+			next.Chat = append(next.Chat, ChatEntry{Type: "agent", Key: "turn:" + turnKey(record.Event, data), RunID: record.Event.RunID, Turn: intValue(data["turn"]), AgentRole: "b"})
 			entry = &next.Chat[len(next.Chat)-1]
 		}
 		if content := stringValue(data["content"]); content != "" {
@@ -534,14 +544,19 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 			next.CompactionCompletion += attempt.Usage.CompletionTokens
 		}
 	case events.MemoryNoted:
-		next.MemoryPath = firstString(data["path"], next.MemoryPath)
-		next.MemoryContent = strings.TrimRight(next.MemoryContent, "\r\n") + "\n- " + stringValue(data["note"]) + "\n"
+		if stringValue(data["target"]) == "agent" {
+			next.AgentMemoryPath = firstString(data["path"], next.AgentMemoryPath)
+			next.AgentMemoryContent = strings.TrimRight(next.AgentMemoryContent, "\r\n") + "\n- " + stringValue(data["note"]) + "\n"
+		} else {
+			next.MemoryPath = firstString(data["path"], next.MemoryPath)
+			next.MemoryContent = strings.TrimRight(next.MemoryContent, "\r\n") + "\n- " + stringValue(data["note"]) + "\n"
+		}
 	}
 	if chatNotice(record.Event.Type) {
 		event := stripDiagnostic(record.Event)
 		role := ""
-		if stringValue(data["role"]) == "aux" {
-			role = "aux"
+		if value := stringValue(data["role"]); value == "c" || value == "aux" {
+			role = "c"
 		}
 		next.Chat = appendChat(next.Chat, ChatEntry{Type: "notice", Key: "event:" + strconv.FormatInt(record.Event.Seq, 10), RunID: record.Event.RunID, Event: &event, AgentRole: role})
 	}
@@ -609,9 +624,11 @@ func turnKey(event events.Event, data map[string]any) string {
 type seed struct {
 	ID                   string                     `json:"id"`
 	Label                string                     `json:"label"`
+	AgentID              string                     `json:"agent_id"`
 	ServerID             string                     `json:"server_id"`
 	AgentName            string                     `json:"agent_name"`
 	MainProfile          string                     `json:"main_profile"`
+	BProfile             string                     `json:"b_profile"`
 	CreatedAt            string                     `json:"created_at"`
 	Closed               bool                       `json:"closed"`
 	NamePinned           bool                       `json:"name_pinned,omitempty"`
@@ -632,6 +649,8 @@ type seed struct {
 	NotRunnableReason    string                     `json:"not_runnable_reason"`
 	MemoryPath           string                     `json:"memory_path"`
 	MemoryContent        string                     `json:"memory_content"`
+	AgentMemoryPath      string                     `json:"agent_memory_path"`
+	AgentMemoryContent   string                     `json:"agent_memory_content"`
 	LogPath              string                     `json:"log_path"`
 	ModelTurns           int                        `json:"model_turns"`
 	CompactionCount      int                        `json:"compaction_count"`
@@ -644,10 +663,10 @@ type seed struct {
 func (value seed) snapshot(cursor Cursor) Snapshot {
 	return Snapshot{
 		SchemaVersion: SchemaVersion, Cursor: cursor, Complete: true,
-		ID: value.ID, Label: value.Label, ServerID: value.ServerID, AgentName: value.AgentName, MainProfile: value.MainProfile, CreatedAt: value.CreatedAt, Closed: value.Closed, NamePinned: value.NamePinned, Workspace: value.Workspace, WorkspaceDir: firstString(value.WorkspaceDir, value.Workspace), WorkspaceMissing: value.WorkspaceMissing, ProjectContent: value.ProjectContent, ProjectFiles: append([]string(nil), value.ProjectFiles...), ProjectNotes: append([]string(nil), value.ProjectNotes...), PendingRepoPolicy: value.PendingRepoPolicy, RepoPolicy: value.RepoPolicy,
+		ID: value.ID, Label: value.Label, AgentID: value.AgentID, ServerID: value.ServerID, AgentName: value.AgentName, BProfile: firstString(value.BProfile, value.MainProfile), CreatedAt: value.CreatedAt, Closed: value.Closed, NamePinned: value.NamePinned, Workspace: value.Workspace, WorkspaceDir: firstString(value.WorkspaceDir, value.Workspace), WorkspaceMissing: value.WorkspaceMissing, ProjectContent: value.ProjectContent, ProjectFiles: append([]string(nil), value.ProjectFiles...), ProjectNotes: append([]string(nil), value.ProjectNotes...), PendingRepoPolicy: value.PendingRepoPolicy, RepoPolicy: value.RepoPolicy,
 		Run: value.Run, Tools: cloneTools(value.Tools), Messages: cloneMessages(value.Messages), Budget: value.Budget,
 		QueuedMessages: value.QueuedMessages, Runnable: value.Runnable, NotRunnableReason: value.NotRunnableReason,
-		MemoryPath: value.MemoryPath, MemoryContent: value.MemoryContent, LogPath: value.LogPath,
+		MemoryPath: value.MemoryPath, MemoryContent: value.MemoryContent, AgentMemoryPath: value.AgentMemoryPath, AgentMemoryContent: value.AgentMemoryContent, LogPath: value.LogPath,
 		ModelTurns: value.ModelTurns, CompactionCount: value.CompactionCount, CompactionTokenDelta: value.CompactionTokenDelta,
 		CompactionModelCalls: value.CompactionModelCalls, CompactionPrompt: value.CompactionPrompt,
 		CompactionCompletion: value.CompactionCompletion, Activity: Activity{CompletedStages: []string{}},
@@ -663,12 +682,12 @@ func diff(before, after Snapshot) Patch {
 		before, now any
 	}{
 		{"complete", before.Complete, after.Complete}, {"id", before.ID, after.ID}, {"label", before.Label, after.Label},
-		{"server_id", before.ServerID, after.ServerID}, {"agent_name", before.AgentName, after.AgentName},
-		{"main_profile", before.MainProfile, after.MainProfile}, {"created_at", before.CreatedAt, after.CreatedAt}, {"workspace", before.Workspace, after.Workspace}, {"workspace_dir", before.WorkspaceDir, after.WorkspaceDir}, {"workspace_missing", before.WorkspaceMissing, after.WorkspaceMissing}, {"project_content", before.ProjectContent, after.ProjectContent}, {"project_files", before.ProjectFiles, after.ProjectFiles}, {"project_notes", before.ProjectNotes, after.ProjectNotes}, {"pending_repo_policy", before.PendingRepoPolicy, after.PendingRepoPolicy}, {"repo_policy", before.RepoPolicy, after.RepoPolicy},
+		{"agent_id", before.AgentID, after.AgentID}, {"server_id", before.ServerID, after.ServerID}, {"agent_name", before.AgentName, after.AgentName},
+		{"b_profile", before.BProfile, after.BProfile}, {"created_at", before.CreatedAt, after.CreatedAt}, {"workspace", before.Workspace, after.Workspace}, {"workspace_dir", before.WorkspaceDir, after.WorkspaceDir}, {"workspace_missing", before.WorkspaceMissing, after.WorkspaceMissing}, {"project_content", before.ProjectContent, after.ProjectContent}, {"project_files", before.ProjectFiles, after.ProjectFiles}, {"project_notes", before.ProjectNotes, after.ProjectNotes}, {"pending_repo_policy", before.PendingRepoPolicy, after.PendingRepoPolicy}, {"repo_policy", before.RepoPolicy, after.RepoPolicy},
 		{"tools", before.Tools, after.Tools}, {"messages", before.Messages, after.Messages}, {"budget", before.Budget, after.Budget},
 		{"queued_messages", before.QueuedMessages, after.QueuedMessages}, {"runnable", before.Runnable, after.Runnable},
 		{"not_runnable_reason", before.NotRunnableReason, after.NotRunnableReason}, {"memory_path", before.MemoryPath, after.MemoryPath},
-		{"memory_content", before.MemoryContent, after.MemoryContent}, {"log_path", before.LogPath, after.LogPath},
+		{"memory_content", before.MemoryContent, after.MemoryContent}, {"agent_memory_path", before.AgentMemoryPath, after.AgentMemoryPath}, {"agent_memory_content", before.AgentMemoryContent, after.AgentMemoryContent}, {"log_path", before.LogPath, after.LogPath},
 		{"model_turns", before.ModelTurns, after.ModelTurns}, {"compaction_count", before.CompactionCount, after.CompactionCount},
 		{"compaction_token_delta", before.CompactionTokenDelta, after.CompactionTokenDelta},
 		{"compaction_model_calls", before.CompactionModelCalls, after.CompactionModelCalls},
@@ -851,7 +870,7 @@ func toolCalls(value any) []events.ToolCall {
 }
 func chatNotice(value string) bool {
 	switch value {
-	case events.RunStopped, events.RunQueued, events.MessageQueued, events.Compaction, events.WorkspaceConflict, events.ApprovalRequired, events.MemoryNoted, events.MemoryCleared, events.ProjectInstructions, events.PolicyApproved, events.PolicyDenied, events.PolicyRevoked, events.OperatorContext, events.SigningApplied, events.FilesDelivered, events.ShellGrant, events.ShellGrantLapsed, events.FileGrant, events.FileGrantLapsed:
+	case events.RunStopping, events.RunStopped, events.RunQueued, events.MessageQueued, events.Compaction, events.WorkspaceConflict, events.ApprovalRequired, events.MemoryNoted, events.MemoryCleared, events.ProjectInstructions, events.PolicyApproved, events.PolicyDenied, events.PolicyRevoked, events.OperatorContext, events.SigningApplied, events.FilesDelivered, events.ShellGrant, events.ShellGrantLapsed, events.FileGrant, events.FileGrantLapsed:
 		return true
 	}
 	return false

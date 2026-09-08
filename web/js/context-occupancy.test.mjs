@@ -16,7 +16,8 @@ test("occupancy groups model categories and accounts for the whole context", () 
       fetched: 20,
       history: 80,
       summary: 10,
-      memory: 20,
+      workspace_memory: 20,
+      agent_memory: 10,
     },
   });
 
@@ -28,12 +29,13 @@ test("occupancy groups model categories and accounts for the whole context", () 
       ["schemas", 150],
       ["tool-results", 90],
       ["history", 90],
-      ["memory", 20],
-      ["free", 325],
+      ["workspace-memory", 20],
+      ["agent-memory", 10],
+      ["free", 315],
       ["reserve", 200],
     ],
   );
-  assert.equal(view.occupied, 475);
+  assert.equal(view.occupied, 485);
   assert.equal(view.items.reduce((sum, item) => sum + item.value, 0), 1000);
 });
 
@@ -58,11 +60,12 @@ test("estimated source categories mark their group and derived free space", () =
   });
   assert.deepEqual(
     whollyEstimated.items.filter((item) => item.estimated).map((item) => item.key),
-    ["system", "project", "schemas", "tool-results", "history", "memory", "free"],
+    ["system", "project", "schemas", "tool-results", "history", "workspace-memory", "agent-memory", "free"],
   );
 });
 
-test("project instructions remain a separate occupancy category", () => {
+test("project and both memory layers remain separate occupancy categories", () => {
   const view = contextOccupancy({ n_ctx: 100, categories: { system: 10, project: 7, memory: 3 } });
   assert.deepEqual(view.items.slice(0, 3).map(({key,value}) => [key,value]), [["system",10],["project",7],["schemas",0]]);
+  assert.deepEqual(view.items.slice(5, 7).map(({key,value}) => [key,value]), [["workspace-memory",3],["agent-memory",0]]);
 });

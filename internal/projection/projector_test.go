@@ -190,6 +190,20 @@ func TestSessionRenameReplaysAuthorAndUserPin(t *testing.T) {
 	}
 }
 
+func TestRunStoppingAndHeldQueueReplay(t *testing.T) {
+	state := Empty("main")
+	state.Run = Run{Status: "running", RunID: "r1", MaxTurns: 40}
+	stopping, _, err := Next(state, Record{Cursor: Cursor{Generation: "main.events", Offset: 10}, Event: events.Event{Seq: 1, SessionID: "main", RunID: "r1", Type: events.RunStopping, Data: map[string]any{"reason": "safe"}}})
+	if err != nil || stopping.Run.Status != "stopping" {
+		t.Fatalf("stopping=%+v err=%v", stopping.Run, err)
+	}
+	stopping.QueuedMessages = 2
+	held, _, err := Next(stopping, Record{Cursor: Cursor{Generation: "main.events", Offset: 20}, Event: events.Event{Seq: 2, SessionID: "main", RunID: "r1", Type: events.RunStopped, Data: map[string]any{"reason": "safe", "queue_held": true}}})
+	if err != nil || held.Run.Status != "held" || held.Run.LastStopReason != "safe" || held.Run.QueuePosition != 2 {
+		t.Fatalf("held=%+v err=%v", held.Run, err)
+	}
+}
+
 func TestReadFileUsesDurableByteBoundary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "main-a.jsonl")

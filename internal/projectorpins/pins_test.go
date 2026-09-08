@@ -26,8 +26,8 @@ func TestManifestPinsCuratedDistinctLogs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(manifest.Cases) < 10 || len(manifest.Cases) > 20 {
-		t.Fatalf("curated cases = %d, want 10..20", len(manifest.Cases))
+	if len(manifest.Cases) < 10 || len(manifest.Cases) > 24 {
+		t.Fatalf("curated cases = %d, want 10..24", len(manifest.Cases))
 	}
 	origins := map[string]bool{}
 	shapes := map[string]bool{}
@@ -46,7 +46,7 @@ func TestManifestPinsCuratedDistinctLogs(t *testing.T) {
 			t.Fatalf("case %q source: %v", item.ID, err)
 		}
 	}
-	for _, required := range []string{"predecessor-lineage", "historical-incomplete", "compaction-heavy", "glob-grep-fetch", "write_todos", "read_history", "approval", "long-stream", "tool-failure", "live-deep-equality"} {
+	for _, required := range []string{"predecessor-lineage", "historical-incomplete", "compaction-heavy", "glob-grep-fetch", "write_todos", "read_history", "approval", "long-stream", "tool-failure", "live-deep-equality", "agent-object", "closed-before-full-delete", "run-stopping-emergency"} {
 		if !shapes[required] {
 			t.Errorf("required shape %q is not pinned", required)
 		}

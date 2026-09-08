@@ -185,7 +185,7 @@ func truncationRunner(t *testing.T, baseURL, accounting string) (*Runner, *sessi
 	profile.Capabilities.ApplyTemplate = accounting == "exact"
 	profile.Capabilities.ApplyTemplateTools = accounting == "exact"
 	cfg.Servers = []config.Profile{profile}
-	cfg.Roles.Main = "main"
+	cfg.Agents = []config.Agent{{Name: "Main", B: "main", Toolset: config.FullToolset()}}
 	bus := newCapturedBus()
 	runner := NewRunner(bus.Bus, tools.New(), &PromptRenderer{text: "system {{workspace}} {{memory}} {{tools}}"}, cfg.Profile, func() config.Config { return cfg })
 	item := &session.Session{ID: "main", ServerID: "main", Workspace: t.TempDir(), Run: session.RunState{Status: "running", MaxTurns: cfg.Run.MaxTurns}, Runnable: true, ToolsEnabled: map[string]bool{}, ToolCalls: map[string]int{}, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}, Budget: events.Budget{NCtx: 32768, Reserve: 10240}}

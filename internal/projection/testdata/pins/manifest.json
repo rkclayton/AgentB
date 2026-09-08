@@ -2,6 +2,42 @@
   "schema_version": 2,
   "cases": [
     {
+      "id": "agent-objects-migrated",
+      "source": "sources/agent-objects-migrated.events",
+      "golden": "golden/agent-objects-migrated.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/agent-objects-migrated.events",
+      "origin_sha256": "40c287d6c50b5a350dd13123af6a4c940eb60c3cb7c8a5b01188ce193fc61296",
+      "origin_records": 1,
+      "decompressed_bytes": 1211,
+      "synthetic": true,
+      "shapes": ["agent-object", "agent-id", "lettered-b-profile", "two-layer-memory"],
+      "rationale": "A session seed shaped by the schema-5 to schema-6 migration pins the durable named-agent binding, lettered b profile, full replay identity, and distinct workspace and agent memory layers."
+    },
+    {
+      "id": "chat-deleted",
+      "source": "sources/chat-deleted.events",
+      "golden": "golden/chat-deleted.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/chat-deleted.events",
+      "origin_sha256": "f786bf78a3c13717a9113a01f3dc2f68cd9576783e45f1a608059017b661a525",
+      "origin_records": 2,
+      "decompressed_bytes": 1033,
+      "synthetic": true,
+      "shapes": ["closed-before-full-delete", "no-delete-tombstone"],
+      "rationale": "Full delete removes the JSONL, so its last projectable state is a closed agent-bound chat and there is deliberately no session.deleted tombstone; the API disk-scope test pins the subsequent absence."
+    },
+    {
+      "id": "stop-two-press",
+      "source": "sources/stop-two-press.events",
+      "golden": "golden/stop-two-press.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/stop-two-press.events",
+      "origin_sha256": "636f4256df523172216640acc3337c69a1374ba322e7261f54fadd2772152b20",
+      "origin_records": 6,
+      "decompressed_bytes": 1654,
+      "synthetic": true,
+      "shapes": ["run-stopping-safe", "run-stopping-emergency", "held-queue"],
+      "rationale": "Two Stop presses during one active run pin the durable safe-to-emergency transition and the final held queue without dispatching the message behind Stop."
+    },
+    {
       "id": "agent-tabs-multi-run",
       "source": "sources/agent-tabs-multi-run.events",
       "golden": "golden/agent-tabs-multi-run.golden.json",

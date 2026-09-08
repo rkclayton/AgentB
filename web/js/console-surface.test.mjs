@@ -29,9 +29,16 @@ test("Console header omits build identity and Settings owns About", () => {
   assert.match(settings, /function about\(\)/);
 });
 
+test("Settings navigation remains install-global while agent controls live on Console", () => {
+  assert.doesNotMatch(settings, /\["sessions", "Sessions"\]|\["tools", "Tools"\]|\["memory", "Memory"\]|\["session", "Current session"\]/);
+  assert.match(index, /id="console-agent"/);
+  assert.match(index, /id="console-tools"/);
+  assert.match(index, /id="flush-memory"/);
+});
+
 test("Console pins the current approval and shows waiting for you in state colour", () => {
 	assert.match(index, /id="console-pending-approval" class="pending-approval" hidden/);
-	assert.match(script, /renderPendingApproval\(s\)/);
+	assert.match(script, /renderPendingApproval\(session\)/);
 	assert.match(styles, /\.pending-approval\[hidden\]\s*\{\s*display:\s*none/);
 	const flow = fs.readFileSync(new URL("flow.js", import.meta.url), "utf8");
 	assert.match(flow, /session\.pending_approval \? "waiting for you"/);

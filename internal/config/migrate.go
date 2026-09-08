@@ -5,6 +5,51 @@ import (
 	"fmt"
 )
 
+func migrateAgentObjects(data []byte, version int) (bool, []byte, error) {
+	if version >= 6 {
+		return false, data, nil
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return false, nil, err
+	}
+	var servers []Profile
+	if value := raw["servers"]; value != nil {
+		if err := json.Unmarshal(value, &servers); err != nil {
+			return false, nil, fmt.Errorf("migrate agents profiles: %w", err)
+		}
+	}
+	var roles Roles
+	if value := raw["roles"]; value != nil {
+		if err := json.Unmarshal(value, &roles); err != nil {
+			return false, nil, fmt.Errorf("migrate agents roles: %w", err)
+		}
+	}
+	agents := []Agent{}
+	if len(servers) > 0 {
+		mainID := roles.Main
+		if mainID == "" {
+			mainID = servers[0].ID
+		}
+		name := mainID
+		for _, profile := range servers {
+			if profile.ID == mainID {
+				name = profile.Label
+				if name == "" {
+					name = profile.ID
+				}
+				break
+			}
+		}
+		agents = append(agents, Agent{Name: name, B: mainID, C: roles.Aux, Toolset: FullToolset()})
+	}
+	raw["agents"], _ = json.Marshal(agents)
+	delete(raw, "roles")
+	raw["config_version"], _ = json.Marshal(CurrentConfigVersion)
+	out, err := json.Marshal(raw)
+	return true, out, err
+}
+
 func migrateModelProfiles(data []byte, version int) (bool, []byte, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {

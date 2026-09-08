@@ -108,7 +108,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	if !snapshot.Runnable {
 		return "profile_not_runnable", snapshot.NotRunnableReason, 0
 	}
-	defer r.PublishBudget(context.Background(), s)
+	defer r.PublishBudget(ctx, s)
 	turn := 0
 	lengthSeen := false
 	accountingRepairTried := false
@@ -118,6 +118,12 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	for {
 		if ctx.Err() != nil {
 			return "user_stop", "", turn
+		}
+		cfg := r.cfg()
+		if agent, found := cfg.Agent(s.Snapshot().AgentID); found {
+			if bound, exists := cfg.Profile(agent.B); exists {
+				s.ApplyAgentConfig(s.Snapshot().AgentID, *agent, *bound)
+			}
 		}
 		turn++
 		profile, ok = r.profile(s.ServerID)
@@ -140,7 +146,8 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		r.stage(s, runID, turn, "assemble", func() {
 			systemBase := r.prompt.RenderParts(profile, s, toolNames, "", "")
 			systemProject := r.prompt.RenderParts(profile, s, toolNames, s.ProjectBlock, "")
-			system = r.prompt.Render(profile, s, toolNames, s.MemoryBlock)
+			systemWorkspaceMemory := r.prompt.RenderMemoryParts(profile, s, toolNames, s.ProjectBlock, s.MemoryBlock, "")
+			system = r.prompt.RenderMemoryParts(profile, s, toolNames, s.ProjectBlock, s.MemoryBlock, s.AgentMemoryBlock)
 			messages := []llm.Message{{Role: "system", Content: system}}
 			records := s.MessagesCopy()
 			for _, message := range records {
@@ -151,7 +158,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				messages = append(messages, converted)
 			}
 			request = llm.Request{Messages: messages, Tools: schemas, ToolChoice: "auto", Thinking: profile.Reasoning.Enabled}
-			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, SystemProject: systemProject, System: system, WithoutToolSystems: r.withoutToolSystems(profile, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false)
+			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, SystemProject: systemProject, SystemWorkspaceMemory: systemWorkspaceMemory, System: system, WithoutToolSystems: r.withoutToolSystems(profile, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false)
 			if budgetErr != nil {
 				return
 			}
@@ -302,6 +309,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 						}
 					}
 				}
+				if ctx.Err() != nil {
+					break
+				}
 				item.ms = time.Since(start).Milliseconds()
 				resultTokens := r.textTokens(ctx, profile, item.content)
 				item.content, item.ok, item.metadata, resultTokens = r.fitWindowResult(
@@ -313,6 +323,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				r.bus.Publish(events.New(events.ToolResult, s.ID, runID, data))
 			}
 		})
+		if ctx.Err() != nil {
+			return "user_stop", "", turn
+		}
 		r.stage(s, runID, turn, "append", func() {
 			s.Append(assistant)
 			r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": assistant}))
@@ -652,7 +665,8 @@ func (r *Runner) measureSession(ctx context.Context, p *config.Profile, s *sessi
 	schemas := r.tools.Schemas(enabled)
 	base := r.prompt.RenderParts(p, s, toolNames, "", "")
 	project := r.prompt.RenderParts(p, s, toolNames, s.ProjectBlock, "")
-	system := r.prompt.Render(p, s, toolNames, s.MemoryBlock)
+	workspaceMemory := r.prompt.RenderMemoryParts(p, s, toolNames, s.ProjectBlock, s.MemoryBlock, "")
+	system := r.prompt.RenderMemoryParts(p, s, toolNames, s.ProjectBlock, s.MemoryBlock, s.AgentMemoryBlock)
 	records := s.MessagesCopy()
 	messages := make([]llm.Message, 0, len(records))
 	for _, message := range records {
@@ -662,7 +676,7 @@ func (r *Runner) measureSession(ctx context.Context, p *config.Profile, s *sessi
 		}
 		messages = append(messages, converted)
 	}
-	return r.budget.Measure(ctx, p, s, r.cfg().Context, budgetInput{SystemBase: base, SystemProject: project, System: system, WithoutToolSystems: r.withoutToolSystems(p, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages, Records: records}, mark)
+	return r.budget.Measure(ctx, p, s, r.cfg().Context, budgetInput{SystemBase: base, SystemProject: project, SystemWorkspaceMemory: workspaceMemory, System: system, WithoutToolSystems: r.withoutToolSystems(p, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages, Records: records}, mark)
 }
 
 func (r *Runner) withoutToolSystems(p *config.Profile, s *session.Session, enabled map[string]bool, memory string) map[string]string {

@@ -79,6 +79,16 @@ func (s *Store) Snapshot(sources map[string]events.LogCursor) (map[string]Snapsh
 	return s.snapshotLocked(sources)
 }
 
+func (s *Store) Delete(sessionID string) {
+	s.mu.Lock()
+	delete(s.states, sessionID)
+	delete(s.sources, sessionID)
+	delete(s.initialized, sessionID)
+	delete(s.stale, sessionID)
+	s.cache.Clear()
+	s.mu.Unlock()
+}
+
 // SubscribeSnapshot establishes one atomic cut: the subscriber is registered while
 // the captured durable offsets are projected. Apply blocks until the snapshot is ready,
 // so every later patch is strictly after its cursor.

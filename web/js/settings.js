@@ -34,16 +34,12 @@ let workspaceState = [];
 
 const sectionLabels = [
   ["servers", "Connections"],
-  ["sessions", "Sessions"],
   ["workspace", "Workspace"],
-  ["tools", "Tools"],
-  ["memory", "Memory"],
   ["context", "Context"],
   ["run", "Run & approval"],
   ["delivery", "Delivery"],
   ["shell", "Security"],
   ["about", "About"],
-  ["session", "Current session"],
 ];
 
 export function initSettings() {
@@ -89,7 +85,7 @@ export function initSettings() {
 		"shell.credential",
         "server.probed",
       ].includes(event.type) || (event.type === "projection.patch" && (event.data?.operations || []).some((operation) =>
-        ["/label", "/server_id", "/runnable", "/not_runnable_reason", "/tools", "/memory_path", "/memory_content", "/budget", "/closed"].includes(operation.path))))
+        ["/label", "/agent_id", "/server_id", "/agent_name", "/b_profile", "/runnable", "/not_runnable_reason", "/tools", "/memory_path", "/memory_content", "/agent_memory_path", "/agent_memory_content", "/budget", "/closed"].includes(operation.path))))
     )
       render();
     if (open && event.type === "snapshot") {
@@ -206,11 +202,6 @@ function group(name, content) {
 }
 
 function servers() {
-	const roleOptions = store.servers.map((profile) => [profile.id, profile.label]);
-	const roles = `<div class="settings-subhead">Model roles</div>
-		${selectSetting("roles.main", "main", roleOptions, store.config.roles?.main || "")}
-		${selectSetting("roles.aux", "aux", [["", "main (fallback)"], ...roleOptions], store.config.roles?.aux || "")}
-		<p class="settings-note">Aux falls back to main when unset. Main seeds new sessions; existing sessions keep their assigned profile. Role assignment does not copy model parameters.</p>`;
   const rows = store.servers
     .map((profile) => {
       const isOpen = expanded.has(profile.id);
@@ -241,7 +232,7 @@ function servers() {
       </div>`;
     })
     .join("");
-  return `<div class="settings-actions"><button type="button" data-action="open-setup">Open setup guide</button></div>${roles}<div class="settings-subhead">Profiles</div>${rows}<button type="button" class="text-action" data-action="add-server">Add server</button>`;
+  return `<div class="settings-actions"><button type="button" data-action="open-setup">Open setup guide</button></div><div class="settings-subhead">Profiles</div>${rows}<button type="button" class="text-action" data-action="add-server">Add server</button>`;
 }
 
 function profileFields(profile, reason) {
@@ -283,7 +274,7 @@ function profileFields(profile, reason) {
     ${number(`${p}.context.reserve_output`, "reserve", profile.context.reserve_output)}
 	${number(`${p}.context.n_ctx`, "context size", profile.context.n_ctx, "1", false, "", !profile.context.n_ctx)}
     ${textarea(`${p}.system_prompt_override`, "system prompt override", profile.system_prompt_override || "")}
-    <p class="settings-note">variables: {{workspace}} {{tools}} {{project}} {{memory}}</p>
+    <p class="settings-note">variables: {{workspace}} {{tools}} {{agent}} {{project}} {{memory}}</p>
     <div class="settings-subhead">Capabilities</div>
     <div class="findings"><span class="settings-note">${html(caps.probed_at || "not probed")}</span><ul>${findings || "<li>no findings</li>"}</ul></div>
     ${reason ? `<p class="field-error">${html(reason)}</p>` : ""}
@@ -314,8 +305,9 @@ function sessions() {
       </div>${issue(`session.${item.id}`) ? `<p class="field-error">${html(issue(`session.${item.id}`))}</p>` : ""}`;
     })
     .join("");
+  const defaultProfile = store.config.agents?.[0]?.b || "";
   const options = profiles
-    .map((p) => `<option value="${attr(p.id)}" ${p.id === store.config.roles?.main ? "selected" : ""}>${html(p.label)}</option>`)
+    .map((p) => `<option value="${attr(p.id)}" ${p.id === defaultProfile ? "selected" : ""}>${html(p.label)}</option>`)
     .join("");
   return `${items}
     <div class="settings-subhead">New session</div>
@@ -423,8 +415,8 @@ function about() {
 function workspaces() {
 	if (!workspaceState.length) return '<p class="settings-note">No known workspace directories.</p>';
 	return workspaceState.map((item) => {
-		const memoryKey=`memory:${item.dir}`; const policyKey=`policy:${item.dir}`; const policy=item.policy;
-		return `<div class="session-row workspace-row"><span class="path" title="${attr(item.dir)}">${html(item.dir)}</span><span>${item.memory_count} memory ${item.memory_count===1?"entry":"entries"}</span><span>${html(relativeDate(item.last_used))}</span><button type="button" class="${armed.has(memoryKey)?"confirm":""}" data-action="clear-workspace-memory" data-id="${attr(item.dir)}">${armed.has(memoryKey)?"Confirm clear":"Clear memory"}</button></div>
+		const policyKey=`policy:${item.dir}`; const policy=item.policy;
+		return `<div class="session-row workspace-row"><span class="path" title="${attr(item.dir)}">${html(item.dir)}</span><span>${item.memory_count} memory ${item.memory_count===1?"entry":"entries"}</span><span>${html(relativeDate(item.last_used))}</span></div>
 		${policy ? `<div class="session-row workspace-policy-row"><span class="path" title="${attr(policy.path)}">${html(policy.path)}</span><code title="${attr(policy.hash)}">${html((policy.hash||"").slice(0,12))}</code><span>${html(policy.approved_at||"not approved")}</span><button type="button" class="${armed.has(policyKey)?"confirm":""}" data-action="revoke-workspace-policy" data-id="${attr(item.dir)}" ${policy.approved?"":"disabled"}>${armed.has(policyKey)?"Confirm revoke":"Revoke"}</button></div>`:""}`;
 	}).join("");
 }
@@ -706,10 +698,6 @@ async function click(event) {
   if (action === "new-session") return newSession();
   if (action === "close-session") return closeSession(id);
   if (action === "reset-session") return resetSession(id);
-  if (action === "clear-workspace-memory") {
-		const key=`memory:${id}`; if(!armed.has(key)){armed.add(key);return render()} armed.delete(key);
-		try{await api("/api/workspaces/memory-clear",{dir:id,confirm:true});await refreshWorkspaceState();reduce({type:"snapshot",data:await api("/api/state",undefined,"GET")})}catch(error){errors.set("workspace",error.message);render()} return;
-	}
   if (action === "revoke-workspace-policy") {
 		const key=`policy:${id}`; if(!armed.has(key)){armed.add(key);return render()} armed.delete(key);
 		try{await api("/api/workspaces/policy-revoke",{dir:id});await refreshWorkspaceState();reduce({type:"snapshot",data:await api("/api/state",undefined,"GET")})}catch(error){errors.set("workspace",error.message);render()} return;

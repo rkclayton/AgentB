@@ -28,6 +28,7 @@ import (
 	"harness/internal/serviceaccount"
 	"harness/internal/session"
 	"harness/internal/signing"
+	"harness/internal/stats"
 	"harness/internal/tools"
 	webserver "harness/internal/web"
 	workspaceinfo "harness/internal/workspace"
@@ -120,9 +121,12 @@ func main() {
 	workspaceManager := workspaceinfo.New(memoryManager.Dir(), memoryManager.Path)
 	registry := session.NewRegistry(bus, writers, web.Profile, cfg.Run.MaxTurns, web.ConfigSnapshot)
 	registry.SetMemoryLoader(memoryManager.Load)
+	registry.SetAgentMemoryLoader(memoryManager.LoadAgent)
 	registry.SetWorkspaceManager(workspaceManager)
 	web.SetRegistry(registry)
 	web.SetWorkspaceState(workspaceManager, memoryManager)
+	statsManager := stats.New(paths.Data, registry, bus)
+	web.SetStats(statsManager)
 	renderer, err := agent.LoadTemplate(filepath.Join(paths.Application, "prompts", "system.md"))
 	if err != nil {
 		log.Fatal(err)
@@ -177,13 +181,13 @@ func main() {
 	if len(cfg.Servers) == 0 {
 		log.Printf("first-run setup required: no model profiles are configured")
 	} else {
-		mainServerID := cfg.Roles.Main
-		if ready, reason := registry.ProfileRunnable(mainServerID); ready {
-			log.Printf("startup profile %s ready from saved capabilities", mainServerID)
+		mainAgentID := cfg.DefaultAgentID()
+		if ready, reason := registry.AgentRunnable(mainAgentID); ready {
+			log.Printf("startup agent %s ready from saved capabilities", mainAgentID)
 		} else {
-			log.Printf("startup profile %s not runnable: %s; use Connections > Test", mainServerID, reason)
+			log.Printf("startup agent %s not runnable: %s; use Connections > Test", mainAgentID, reason)
 		}
-		mainSession, createErr := registry.Create("main", mainServerID, cfg.Workspace)
+		mainSession, createErr := registry.Create("main", mainAgentID, cfg.Workspace)
 		if createErr != nil {
 			log.Fatal(createErr)
 		}

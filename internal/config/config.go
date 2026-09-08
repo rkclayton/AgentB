@@ -22,7 +22,7 @@ type Config struct {
 	LogDir        string             `json:"log_dir"`
 	Servers       []Profile          `json:"servers"`
 	Services      map[string]Service `json:"services"`
-	Roles         Roles              `json:"roles"`
+	Agents        []Agent            `json:"agents"`
 	Chat          Chat               `json:"chat"`
 	Run           RunConfig          `json:"run"`
 	Approval      Approval           `json:"approval"`
@@ -38,6 +38,26 @@ type Config struct {
 type Roles struct {
 	Main string `json:"main"`
 	Aux  string `json:"aux"`
+}
+
+type Agent struct {
+	Name           string   `json:"name"`
+	B              string   `json:"b"`
+	C              string   `json:"c,omitempty"`
+	D              string   `json:"d,omitempty"`
+	Toolset        []string `json:"toolset"`
+	PromptAddendum string   `json:"prompt_addendum,omitempty"`
+}
+
+var agentIDCleaner = regexp.MustCompile(`[^a-z0-9]+`)
+
+func AgentID(name string) string {
+	id := agentIDCleaner.ReplaceAllString(strings.ToLower(strings.TrimSpace(name)), "-")
+	return strings.Trim(id, "-")
+}
+
+func FullToolset() []string {
+	return []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "run_script", "call_service"}
 }
 
 type Chat struct {
@@ -209,7 +229,7 @@ func (d *Deliver) UnmarshalJSON(data []byte) error {
 }
 
 const (
-	CurrentConfigVersion     = 5
+	CurrentConfigVersion     = 6
 	DefaultReserveOutput     = 10240
 	ApprovalModeBoundaryOnly = "boundary-only"
 	ApprovalModeMutating     = "mutating"
@@ -224,6 +244,7 @@ const ApprovalDefaultMigrationNotice = "corrected inherited approval default fro
 const OperatorIdleTimeoutMigrationNotice = "migrated shell.operator_context_timeout_minutes to shell.operator_context_idle_timeout_minutes; operator mode now expires after agent inactivity"
 const ByteWindowMigrationNotice = "migrated read_file and fetch_url limits from line counts to UTF-8 byte windows"
 const ModelRolesMigrationNotice = "migrated model profiles to schema 5 with an explicit main role, optional aux role, and per-profile context size"
+const AgentObjectsMigrationNotice = "migrated profile roles to schema 6 with one named agent, bound b/c profiles, and the full toolset"
 
 type GlobalContext struct {
 	SoftPct    float64 `json:"soft_pct"`
@@ -313,7 +334,7 @@ func Defaults(workspace string) Config {
 	return Config{
 		ConfigVersion: CurrentConfigVersion,
 		Listen:        "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
-		Servers: []Profile{profile}, Roles: Roles{Main: "local"}, Chat: defaultChat(),
+		Servers: []Profile{profile}, Agents: []Agent{{Name: profile.Label, B: "local", Toolset: FullToolset()}}, Chat: defaultChat(),
 		Services: map[string]Service{},
 		Run:      RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(),
 		Tools:   Tools{ReadFile: ReadFileTool{DefaultLimit: 16 << 10, MaxLimit: 64 << 10}, Attachments: AttachmentTool{MaxBytes: 8 << 20}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Shell: ShellTool{OperatorCommands: []string{"git"}}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, DenyDomains: []string{"ipinfo.io", "ipapi.co", "ip-api.com", "ifconfig.me", "ipify.org", "geojs.io", "ipgeolocation.io", "icanhazip.com"}, AllowInternalHosts: []string{}}, FindFiles: FindFilesTool{SkipRoots: []string{"Windows", "$Recycle.Bin", "System Volume Information", `ProgramData\Microsoft\Windows Defender*`, `Program Files\Windows Defender*`}}},
@@ -364,7 +385,7 @@ func LoadWithRoots(path, examplePath, dataRoot string) (*Config, bool, bool, err
 		return nil, false, created, err
 	}
 	unstamped := metadata.ConfigVersion == nil
-	if !unstamped && *metadata.ConfigVersion != 2 && *metadata.ConfigVersion != 3 && *metadata.ConfigVersion != 4 && *metadata.ConfigVersion != CurrentConfigVersion {
+	if !unstamped && *metadata.ConfigVersion != 2 && *metadata.ConfigVersion != 3 && *metadata.ConfigVersion != 4 && *metadata.ConfigVersion != 5 && *metadata.ConfigVersion != CurrentConfigVersion {
 		return nil, false, created, fmt.Errorf("config_version: unsupported value %d (current %d)", *metadata.ConfigVersion, CurrentConfigVersion)
 	}
 	migrated, data, err := migrateV1(data)
@@ -387,6 +408,10 @@ func LoadWithRoots(path, examplePath, dataRoot string) (*Config, bool, bool, err
 	if err != nil {
 		return nil, false, created, err
 	}
+	agentsMigrated, data, err := migrateAgentObjects(data, version)
+	if err != nil {
+		return nil, false, created, err
+	}
 	var cfg Config
 	if err := json.Unmarshal(data, &cfg); err != nil {
 		return nil, false, created, err
@@ -405,7 +430,7 @@ func LoadWithRoots(path, examplePath, dataRoot string) (*Config, bool, bool, err
 	if err := ResolveProfileCredentials(&cfg, dataRoot); err != nil {
 		return nil, false, created, err
 	}
-	if migrated || schemaMigrated || byteWindowMigrated || modelRolesMigrated || unstamped {
+	if migrated || schemaMigrated || byteWindowMigrated || modelRolesMigrated || agentsMigrated || unstamped {
 		if err := cfg.Save(path); err != nil {
 			return nil, false, created, err
 		}
@@ -422,7 +447,10 @@ func LoadWithRoots(path, examplePath, dataRoot string) (*Config, bool, bool, err
 	if modelRolesMigrated && !unstamped {
 		cfg.LoadNotices = append(cfg.LoadNotices, ModelRolesMigrationNotice)
 	}
-	return &cfg, migrated || schemaMigrated || byteWindowMigrated || modelRolesMigrated, created, nil
+	if agentsMigrated && !unstamped {
+		cfg.LoadNotices = append(cfg.LoadNotices, AgentObjectsMigrationNotice)
+	}
+	return &cfg, migrated || schemaMigrated || byteWindowMigrated || modelRolesMigrated || agentsMigrated, created, nil
 }
 
 func (c Config) Save(path string) error {
@@ -542,14 +570,50 @@ func (c Config) Validate() error {
 			return fmt.Errorf("%s.context.n_ctx: required when probe_mode is off", prefix)
 		}
 	}
-	if len(c.Servers) == 0 && (c.Roles.Main != "" || c.Roles.Aux != "") {
-		return fmt.Errorf("roles: must be empty until a profile is configured")
+	if len(c.Servers) == 0 && len(c.Agents) != 0 {
+		return fmt.Errorf("agents: must be empty until a profile is configured")
 	}
-	if len(c.Servers) > 0 && (c.Roles.Main == "" || !seen[c.Roles.Main]) {
-		return fmt.Errorf("roles.main: must name an existing profile")
+	if len(c.Servers) > 0 && len(c.Agents) == 0 {
+		return fmt.Errorf("agents: at least one agent is required")
 	}
-	if c.Roles.Aux != "" && !seen[c.Roles.Aux] {
-		return fmt.Errorf("roles.aux: must be empty or name an existing profile")
+	agentIDs := map[string]bool{}
+	knownTools := map[string]bool{}
+	for _, name := range FullToolset() {
+		knownTools[name] = true
+	}
+	for i, agent := range c.Agents {
+		prefix := fmt.Sprintf("agents[%d]", i)
+		name := strings.TrimSpace(agent.Name)
+		if name == "" || AgentID(name) == "" {
+			return fmt.Errorf("%s.name: required", prefix)
+		}
+		if strings.EqualFold(name, "agent_a") {
+			return fmt.Errorf("%s.name: agent_a is reserved", prefix)
+		}
+		id := AgentID(name)
+		if agentIDs[id] {
+			return fmt.Errorf("%s.name: duplicate agent id %s", prefix, id)
+		}
+		agentIDs[id] = true
+		if !seen[agent.B] {
+			return fmt.Errorf("%s.b: must name an existing profile", prefix)
+		}
+		if agent.C != "" && !seen[agent.C] {
+			return fmt.Errorf("%s.c: must be empty or name an existing profile", prefix)
+		}
+		if agent.D != "" && !seen[agent.D] {
+			return fmt.Errorf("%s.d: must be empty or name an existing profile", prefix)
+		}
+		toolSeen := map[string]bool{}
+		for _, tool := range agent.Toolset {
+			if !knownTools[tool] {
+				return fmt.Errorf("%s.toolset: unknown tool %s", prefix, tool)
+			}
+			if toolSeen[tool] {
+				return fmt.Errorf("%s.toolset: duplicate tool %s", prefix, tool)
+			}
+			toolSeen[tool] = true
+		}
 	}
 	for name, service := range c.Services {
 		prefix := "services." + name
@@ -730,6 +794,9 @@ func applyDefaults(c *Config) {
 	if c.Services == nil {
 		c.Services = map[string]Service{}
 	}
+	if len(c.Servers) == 0 {
+		c.Agents = []Agent{}
+	}
 	if !c.Chat.initialized {
 		c.Chat = d.Chat
 	}
@@ -801,9 +868,6 @@ func applyDefaults(c *Config) {
 		if p.Capabilities.Findings == nil {
 			p.Capabilities.Findings = []string{}
 		}
-	}
-	if c.Roles.Main == "" && len(c.Servers) > 0 {
-		c.Roles.Main = c.Servers[0].ID
 	}
 }
 
@@ -899,12 +963,20 @@ func (c Config) Profile(id string) (*Profile, bool) {
 	return nil, false
 }
 
-func (c Config) RoleProfile(role string) (*Profile, bool) {
-	id := c.Roles.Main
-	if role == "aux" && c.Roles.Aux != "" {
-		id = c.Roles.Aux
-	} else if role != "main" && role != "aux" {
-		return nil, false
+func (c Config) Agent(id string) (*Agent, bool) {
+	for i := range c.Agents {
+		if AgentID(c.Agents[i].Name) == id {
+			agent := c.Agents[i]
+			agent.Toolset = append([]string(nil), agent.Toolset...)
+			return &agent, true
+		}
 	}
-	return c.Profile(id)
+	return nil, false
+}
+
+func (c Config) DefaultAgentID() string {
+	if len(c.Agents) == 0 {
+		return ""
+	}
+	return AgentID(c.Agents[0].Name)
 }

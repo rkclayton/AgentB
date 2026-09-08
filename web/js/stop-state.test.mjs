@@ -12,13 +12,15 @@ class FakeButton {
 test("Stop projection is red only for an active live run after snapshot refresh", () => {
   const button = new FakeButton();
   renderStopState(button, { run: { status: "idle" } }, false);
-  assert.deepEqual([button.dataset.state, button.disabled, button.className], ["idle", true, "stop-sign"]);
+  assert.deepEqual([button.dataset.state, button.disabled], ["idle", true]);
   renderStopState(button, { run: { status: "running" } }, false);
-  assert.deepEqual([button.dataset.state, button.disabled, button.className], ["active", false, "stop-sign active"]);
+  assert.deepEqual([button.dataset.state, button.disabled], ["active", false]);
+  renderStopState(button, { run: { status: "stopping" } }, false);
+  assert.deepEqual([button.dataset.state, button.disabled, button.attributes.get("title")], ["stopping", false, "Emergency stop — cancel immediately"]);
 });
 
 test("Stop projection remains grey and disabled in replay", () => {
   assert.deepEqual(projectStopState({ run: { status: "running" } }, true), {
-    active: false, disabled: true, label: "No active run to stop",
+    active: false, disabled: true, state: "idle", label: "No active run to stop",
   });
 });

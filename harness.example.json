@@ -1,11 +1,11 @@
 {
-  "config_version": 5,
+  "config_version": 6,
   "listen": "127.0.0.1:8790",
   "workspace": "./workspace",
   "log_dir": "logs",
   "servers": [],
   "services": {},
-  "roles": { "main": "", "aux": "" },
+  "agents": [],
   "chat": { "auto_rename": true },
   "run": { "max_turns": 40, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },
   "approval": { "mode": "boundary-only" },

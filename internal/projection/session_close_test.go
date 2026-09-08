@@ -16,15 +16,15 @@ func TestSessionClosePinReconstructsClosedStateChatAndRoleLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !snapshot.Complete || !snapshot.Closed || snapshot.AgentName != "Coder" || snapshot.MainProfile != "Home API" || snapshot.CreatedAt == "" {
+	if !snapshot.Complete || !snapshot.Closed || snapshot.AgentName != "Coder" || snapshot.BProfile != "Home API" || snapshot.CreatedAt == "" {
 		t.Fatalf("lifecycle fields=%+v", snapshot)
 	}
-	if len(snapshot.Chat) < 3 || snapshot.Chat[0].Type != "user" || snapshot.Chat[1].AgentRole != "main" {
+	if len(snapshot.Chat) < 3 || snapshot.Chat[0].Type != "user" || snapshot.Chat[1].AgentRole != "b" {
 		t.Fatalf("chat=%+v", snapshot.Chat)
 	}
 	auxFound := false
 	for _, entry := range snapshot.Chat {
-		if entry.Type == "notice" && entry.AgentRole == "aux" {
+		if entry.Type == "notice" && entry.AgentRole == "c" {
 			auxFound = true
 		}
 	}

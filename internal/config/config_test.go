@@ -140,9 +140,9 @@ func TestApprovalModeDefaultsWhenAbsentOrEmpty(t *testing.T) {
 	}
 }
 
-func TestServicesAdditiveSchemaFiveDefaultsEmpty(t *testing.T) {
+func TestServicesAdditiveCurrentSchemaDefaultsEmpty(t *testing.T) {
 	cfg := Defaults(t.TempDir())
-	if cfg.ConfigVersion != 5 || cfg.Services == nil || len(cfg.Services) != 0 {
+	if cfg.ConfigVersion != CurrentConfigVersion || cfg.Services == nil || len(cfg.Services) != 0 {
 		t.Fatalf("defaults version=%d services=%#v", cfg.ConfigVersion, cfg.Services)
 	}
 	data, err := json.Marshal(cfg)
@@ -163,7 +163,7 @@ func TestServicesAdditiveSchemaFiveDefaultsEmpty(t *testing.T) {
 		t.Fatal(err)
 	}
 	ApplyDefaults(&omitted)
-	if omitted.ConfigVersion != 5 || omitted.Services == nil || len(omitted.Services) != 0 {
+	if omitted.ConfigVersion != CurrentConfigVersion || omitted.Services == nil || len(omitted.Services) != 0 {
 		t.Fatalf("omitted services=%#v version=%d", omitted.Services, omitted.ConfigVersion)
 	}
 	if err := omitted.Validate(); err != nil {
@@ -261,7 +261,7 @@ func TestHarnessExampleShipsBoundaryOnlyIndependentlyOfDefaults(t *testing.T) {
 			} `json:"find_files"`
 		} `json:"tools"`
 		Servers []Profile `json:"servers"`
-		Roles   Roles     `json:"roles"`
+		Agents  []Agent   `json:"agents"`
 	}
 	if err := json.Unmarshal(data, &document); err != nil {
 		t.Fatal(err)
@@ -284,21 +284,21 @@ func TestHarnessExampleShipsBoundaryOnlyIndependentlyOfDefaults(t *testing.T) {
 	if len(document.Tools.Fetch.DenyDomains) != 8 || len(document.Tools.FindFiles.SkipRoots) != 5 {
 		t.Fatalf("template policy defaults: deny_domains=%v skip_roots=%v", document.Tools.Fetch.DenyDomains, document.Tools.FindFiles.SkipRoots)
 	}
-	if len(document.Servers) != 0 || document.Roles.Main != "" || document.Roles.Aux != "" {
-		t.Fatalf("first-run template must have no configured profiles: servers=%d roles=%+v", len(document.Servers), document.Roles)
+	if len(document.Servers) != 0 || len(document.Agents) != 0 {
+		t.Fatalf("first-run template must have no configured profiles or agents: servers=%d agents=%+v", len(document.Servers), document.Agents)
 	}
 }
 
 func TestEmptyServerListIsValidFirstRunState(t *testing.T) {
 	cfg := Defaults(t.TempDir())
 	cfg.Servers = []Profile{}
-	cfg.Roles = Roles{}
+	cfg.Agents = []Agent{}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	cfg.Roles.Main = "missing"
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "roles") {
-		t.Fatalf("nonempty first-run role error=%v", err)
+	cfg.Agents = []Agent{{Name: "Local", B: "missing", Toolset: FullToolset()}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "agents") {
+		t.Fatalf("nonempty first-run agent error=%v", err)
 	}
 }
 
@@ -388,7 +388,7 @@ func TestOperatorIdleTimeoutSchemaMigration(t *testing.T) {
 	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || loaded.Shell.OperatorContextIdleTimeoutMinutes != 37 {
 		t.Fatalf("migrated=%t version=%d idle=%d", migrated, loaded.ConfigVersion, loaded.Shell.OperatorContextIdleTimeoutMinutes)
 	}
-	if len(loaded.LoadNotices) != 3 || loaded.LoadNotices[0] != OperatorIdleTimeoutMigrationNotice || loaded.LoadNotices[1] != ByteWindowMigrationNotice || loaded.LoadNotices[2] != ModelRolesMigrationNotice {
+	if len(loaded.LoadNotices) != 4 || loaded.LoadNotices[0] != OperatorIdleTimeoutMigrationNotice || loaded.LoadNotices[1] != ByteWindowMigrationNotice || loaded.LoadNotices[2] != ModelRolesMigrationNotice || loaded.LoadNotices[3] != AgentObjectsMigrationNotice {
 		t.Fatalf("migration notices=%#v", loaded.LoadNotices)
 	}
 	persisted, err := os.ReadFile(path)
@@ -465,7 +465,7 @@ func TestVersion3LineLimitsMigrateToByteWindows(t *testing.T) {
 	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || loaded.Tools.ReadFile.DefaultLimit != 16<<10 || loaded.Tools.ReadFile.MaxLimit != 64<<10 || loaded.Tools.Fetch.DefaultLimit != 16<<10 || loaded.Tools.Fetch.MaxLimit != 64<<10 {
 		t.Fatalf("migrated=%t config=%+v", migrated, loaded.Tools)
 	}
-	if len(loaded.LoadNotices) != 2 || loaded.LoadNotices[0] != ByteWindowMigrationNotice || loaded.LoadNotices[1] != ModelRolesMigrationNotice {
+	if len(loaded.LoadNotices) != 3 || loaded.LoadNotices[0] != ByteWindowMigrationNotice || loaded.LoadNotices[1] != ModelRolesMigrationNotice || loaded.LoadNotices[2] != AgentObjectsMigrationNotice {
 		t.Fatalf("migration notices=%#v", loaded.LoadNotices)
 	}
 	persisted, err := os.ReadFile(path)
@@ -711,35 +711,43 @@ func TestSchema4ModelProfilesMigrateWithUTF8BOM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !migrated || loaded.ConfigVersion != 5 || loaded.Roles.Main != "homepc" || loaded.Roles.Aux != "" {
-		t.Fatalf("migrated=%t version=%d roles=%+v", migrated, loaded.ConfigVersion, loaded.Roles)
+	if !migrated || loaded.ConfigVersion != CurrentConfigVersion || len(loaded.Agents) != 1 || loaded.Agents[0].B != "homepc" || loaded.Agents[0].C != "" {
+		t.Fatalf("migrated=%t version=%d agents=%+v", migrated, loaded.ConfigVersion, loaded.Agents)
 	}
 	if loaded.Servers[1].Context.NCtx != 16384 || loaded.Servers[1].Capabilities.NCtx != 32768 {
 		t.Fatalf("profile context=%+v capabilities=%+v", loaded.Servers[1].Context, loaded.Servers[1].Capabilities)
 	}
-	if len(loaded.LoadNotices) != 1 || loaded.LoadNotices[0] != ModelRolesMigrationNotice {
+	if len(loaded.LoadNotices) != 2 || loaded.LoadNotices[0] != ModelRolesMigrationNotice || loaded.LoadNotices[1] != AgentObjectsMigrationNotice {
 		t.Fatalf("notices=%#v", loaded.LoadNotices)
 	}
 	persisted, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.HasPrefix(persisted, []byte{0xef, 0xbb, 0xbf}) || bytes.Contains(persisted, []byte("n_ctx_override")) || bytes.Contains(persisted, []byte("api_key")) {
+	if bytes.HasPrefix(persisted, []byte{0xef, 0xbb, 0xbf}) || bytes.Contains(persisted, []byte("n_ctx_override")) || bytes.Contains(persisted, []byte("api_key")) || bytes.Contains(persisted, []byte(`"roles"`)) {
 		t.Fatalf("legacy fields survived migration: %s", persisted)
 	}
 }
 
-func TestRoleProfileAuxFallsBackToMain(t *testing.T) {
+func TestAgentProfilesUseLetteredSlots(t *testing.T) {
 	cfg := Defaults(t.TempDir())
-	aux := cfg.Servers[0]
-	aux.ID, aux.Label = "small", "Small"
-	cfg.Servers = append(cfg.Servers, aux)
-	if profile, ok := cfg.RoleProfile("aux"); !ok || profile.ID != "local" {
-		t.Fatalf("unset aux resolved to profile=%+v ok=%t", profile, ok)
+	c := cfg.Servers[0]
+	c.ID, c.Label = "small", "Small"
+	cfg.Servers = append(cfg.Servers, c)
+	cfg.Agents[0].C = "small"
+	agent, ok := cfg.Agent("local")
+	if !ok || agent.B != "local" || agent.C != "small" || agent.D != "" {
+		t.Fatalf("lettered agent=%+v ok=%t", agent, ok)
 	}
-	cfg.Roles.Aux = "small"
-	if profile, ok := cfg.RoleProfile("aux"); !ok || profile.ID != "small" {
-		t.Fatalf("assigned aux resolved to profile=%+v ok=%t", profile, ok)
+}
+
+func TestAgentNameReservesAgentA(t *testing.T) {
+	cfg := Defaults(t.TempDir())
+	for _, name := range []string{"agent_a", "Agent_A", "AGENT_A"} {
+		cfg.Agents[0].Name = name
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "agent_a is reserved") {
+			t.Fatalf("name=%q error=%v", name, err)
+		}
 	}
 }
 
@@ -840,9 +848,9 @@ func TestSchema4APIKeyMovesToNamedDPAPIStore(t *testing.T) {
 	}
 }
 
-func TestAttachmentConfigIsAdditiveSchemaFive(t *testing.T) {
+func TestAttachmentConfigIsAdditiveCurrentSchema(t *testing.T) {
 	cfg := Defaults(t.TempDir())
-	if cfg.ConfigVersion != 5 || cfg.Tools.Attachments.MaxBytes != 8<<20 {
+	if cfg.ConfigVersion != CurrentConfigVersion || cfg.Tools.Attachments.MaxBytes != 8<<20 {
 		t.Fatalf("defaults: version=%d attachments=%+v", cfg.ConfigVersion, cfg.Tools.Attachments)
 	}
 	data, err := os.ReadFile(filepath.Join("..", "..", "harness.example.json"))
@@ -861,7 +869,7 @@ func TestAttachmentConfigIsAdditiveSchemaFive(t *testing.T) {
 		t.Fatal(err)
 	}
 	ApplyDefaults(&loaded)
-	if loaded.ConfigVersion != 5 || loaded.Tools.Attachments.MaxBytes != 8<<20 {
+	if loaded.ConfigVersion != CurrentConfigVersion || loaded.Tools.Attachments.MaxBytes != 8<<20 {
 		t.Fatalf("omitted attachment defaults=%+v version=%d", loaded.Tools.Attachments, loaded.ConfigVersion)
 	}
 	loaded.Tools.Attachments.MaxBytes = 0

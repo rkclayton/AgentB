@@ -26,8 +26,8 @@ func TestAutoRenameUsesAuxAtTwentyTurns(t *testing.T) {
 	aux := config.Profile{ID: "aux", BaseURL: server.URL, Model: "aux-model", RequestTimeoutS: 2}
 	cfg := config.Defaults(t.TempDir())
 	cfg.Servers = append(cfg.Servers, aux)
-	cfg.Roles.Aux = aux.ID
-	item := &session.Session{ID: "s2", Messages: []events.Message{{Role: "user", Content: "make Chat and Console use one shell"}}}
+	cfg.Agents[0].C = aux.ID
+	item := &session.Session{ID: "s2", AgentID: cfg.DefaultAgentID(), Messages: []events.Message{{Role: "user", Content: "make Chat and Console use one shell"}}}
 	for range autoRenameEveryTurns {
 		item.RecordModelTurn()
 	}
@@ -37,7 +37,7 @@ func TestAutoRenameUsesAuxAtTwentyTurns(t *testing.T) {
 		return nil
 	}}
 	runner.maybeAutoRename(context.Background(), item)
-	if id != "s2" || name != "Fix Shared Shell" || by != "aux" {
+	if id != "s2" || name != "Fix Shared Shell" || by != "c" {
 		t.Fatalf("rename=(%q,%q,%q)", id, name, by)
 	}
 	messages := body["messages"].([]any)
@@ -53,7 +53,7 @@ func TestAutoRenameHonorsUserPinAndToggle(t *testing.T) {
 	}
 	called := false
 	cfg := config.Defaults(t.TempDir())
-	cfg.Roles.Aux = "local"
+	cfg.Agents[0].C = "local"
 	runner := &Runner{cfg: func() config.Config { return cfg }, renameSession: func(string, string, string) error { called = true; return nil }}
 	runner.maybeAutoRename(context.Background(), item)
 	if called {

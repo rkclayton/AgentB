@@ -1,20 +1,24 @@
 const activeStatuses = new Set(["running", "queued", "paused", "stopping"]);
 
 export function projectStopState(session, replay = false) {
-  const active = !replay && !!session && activeStatuses.has(session.run?.status);
+  const status = session?.run?.status || "idle";
+  const stopping = !replay && status === "stopping";
+  const active = !replay && !!session && activeStatuses.has(status);
   return {
     active,
     disabled: !active,
-    label: active ? "Stop active run" : "No active run to stop",
+    state: stopping ? "stopping" : active ? "active" : "idle",
+    label: stopping ? "Emergency stop — cancel immediately" : active ? "Stop active run — cancel and hold queued messages" : "No active run to stop",
   };
 }
 
 export function renderStopState(button, session, replay = false) {
   const state = projectStopState(session, replay);
   button.disabled = state.disabled;
-  button.classList.toggle("active", state.active);
-  button.dataset.state = state.active ? "active" : "idle";
+  button.classList.toggle("active", state.state === "active");
+  button.classList.toggle("stopping", state.state === "stopping");
+  button.dataset.state = state.state;
   button.setAttribute("aria-label", state.label);
-  button.title = state.label;
+  button.setAttribute("title", state.label);
   return state;
 }

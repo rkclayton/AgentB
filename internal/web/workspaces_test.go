@@ -28,7 +28,7 @@ func TestBoundDirectorySessionAndNativeFolderPickerRoutes(t *testing.T) {
 	}
 	cfg := config.Defaults(filepath.Join(root, "default"))
 	cfg.Servers = []config.Profile{{ID: "main", Label: "Main", BaseURL: "http://127.0.0.1:8000", Model: "model", Context: config.Context{NCtx: 32768, ReserveOutput: 8192}, Capabilities: config.Capabilities{Streaming: true, ToolCalls: true, OverflowBehavior: "error"}}}
-	cfg.Roles.Main = "main"
+	cfg.Agents = []config.Agent{{Name: "Main", B: "main", Toolset: config.FullToolset()}}
 	bus := events.NewBus()
 	writers, err := events.NewWriters(logs)
 	if err != nil {

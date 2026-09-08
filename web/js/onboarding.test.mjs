@@ -12,7 +12,7 @@ const template = JSON.parse(fs.readFileSync(new URL("../../harness.example.json"
 
 test("Fresh template has no servers and setup offers the three skippable paths", () => {
   assert.deepEqual(template.servers, []);
-  assert.equal(template.roles.main, "");
+  assert.deepEqual(template.agents, []);
   for (const label of ["API only", "API + local assistant", "Full local"]) assert.match(script, new RegExp(label.replaceAll("+", "\\+")));
   assert.match(script, /Skip for now/);
   assert.match(script, /Skip this step/);
@@ -26,7 +26,8 @@ test("Connection Test shows the six requested capabilities in plain words", () =
 
 test("Hybrid sequencing preserves the API profile when Agent C is added", () => {
   assert.match(script, /snapshot\.config\.servers \|\| \[\]\)\.filter/);
-  assert.match(script, /choice === "hybrid" \? \{ aux: id \}/);
+  assert.match(script, /choice === "hybrid" \? \{ c: id \}/);
+  assert.match(script, /current\.b \|\| id/);
 });
 
 test("Versioned recommendation table stays small and memory-class keyed", () => {

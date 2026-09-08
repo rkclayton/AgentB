@@ -6,7 +6,7 @@ import { agentAuthor, chatRowText, closeConfirmText, openSessions, sessionTitle 
 const idle = {
   id: "s2",
   agent_name: "Coder",
-  main_profile: "Home API",
+  b_profile: "Home API",
   created_at: "2026-09-07T12:00:00Z",
   closed: false,
   run: { status: "idle" },
@@ -33,8 +33,8 @@ test("Open chat list excludes durable closed sessions", () => {
 
 test("Agent and title labels use the persisted main-profile display name", () => {
   assert.equal(agentAuthor(idle), "agent_b · Coder");
-  assert.equal(agentAuthor(idle, "aux"), "agent_c · Coder");
-  assert.equal(sessionTitle(idle), "Coder");
+  assert.equal(agentAuthor(idle, "c"), "agent_c · Coder");
+  assert.equal(sessionTitle(idle), "Coder · Home API");
 });
 
 test("Close confirmation counts changed files and memory entries without deleting either", () => {

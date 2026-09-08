@@ -4,6 +4,7 @@ import { renderStopState } from "./stop-state.js";
 import { chatRowText, closeConfirmText, firstUserLine, isRunning } from "./chat-lifecycle.js";
 
 const activeRunStates = new Set(["running", "queued", "stopping"]);
+const agentKey = (agent) => String(agent?.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 
 export function initShell(options = {}) {
   const root = document.getElementById("app-shell");
@@ -95,11 +96,13 @@ export function initShell(options = {}) {
   }
 
   function agentName(agentID) {
+    const selected = store.sessions[store.selection.session_id];
     if (agentID === "agent_b") {
-      const selected = store.sessions[store.selection.session_id];
       if (selected?.agent_name) return selected.agent_name;
     }
-    const profileID = agentID === "agent_c" ? store.config.roles?.aux : store.config.roles?.main;
+	const selectedAgentID = selected?.agent_id || agentKey(store.config.agents?.[0]);
+	const configured = (store.config.agents || []).find((agent) => agentKey(agent) === selectedAgentID) || store.config.agents?.[0];
+	const profileID = configured?.[agentID.replace("agent_", "")];
     const profile = store.servers.find((item) => item.id === profileID);
     return profile?.label || profileID || agentID;
   }
@@ -114,7 +117,10 @@ export function initShell(options = {}) {
   function renderTabs() {
     tabs.replaceChildren();
     const agents = ["agent_b"];
-    if (store.config.roles?.aux) agents.push("agent_c");
+	const selected = store.sessions[store.selection.session_id];
+	const configured = (store.config.agents || []).find((agent) => agentKey(agent) === selected?.agent_id) || store.config.agents?.[0];
+	if (configured?.c) agents.push("agent_c");
+	if (configured?.d) agents.push("agent_d");
     for (const agentID of agents) {
       const wrap = node("div", "agent-tab-wrap");
       const tab = button("", `${agentID} · ${agentName(agentID)}`, `agent-tab ${store.selection.agent_id === agentID ? "selected" : ""}`);

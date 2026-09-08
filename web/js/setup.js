@@ -56,7 +56,7 @@ function connectionStep(kind) {
   const profile = snapshot.servers?.find((item) => item.id === id) || {};
   const caps = profile.capabilities || {};
   const title = local ? (choice === "hybrid" ? "Connect Agent C" : "Connect the local model") : "Connect the API";
-  const role = local && choice === "hybrid" ? "Agent C uses the auxiliary model role." : local ? "This becomes the main model." : "This becomes the main model.";
+  const role = local && choice === "hybrid" ? "Agent C uses this profile." : "Agent B uses this profile.";
   return `<section class="setup-section">
     <p class="setup-kicker">${local ? "Local detection" : "API connection"}</p>
     <h1>${title}</h1><p>${role}</p>
@@ -150,9 +150,17 @@ async function testConnection(kind) {
     const profile = { id, label: local && choice === "hybrid" ? "Agent C" : local ? "Local" : "API", base_url: url, model };
     if (credential) profile.credential = credential;
     if (apiKey) profile.api_key = apiKey;
-    const roles = local ? (choice === "hybrid" ? { aux: id } : { main: id }) : { main: id };
     const servers = [...(snapshot.config.servers || []).filter((item) => item.id !== id), profile];
-    snapshot.config = await request("/api/config", { servers, roles });
+    const current = snapshot.config.agents?.[0] || {};
+    const agents = [{
+      name: current.name || profile.label,
+      b: local && choice !== "hybrid" ? id : current.b || id,
+      ...(local && choice === "hybrid" ? { c: id } : current.c ? { c: current.c } : {}),
+      ...(current.d ? { d: current.d } : {}),
+      toolset: current.toolset || ["read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "run_script", "call_service"],
+      ...(current.prompt_addendum ? { prompt_addendum: current.prompt_addendum } : {}),
+    }];
+    snapshot.config = await request("/api/config", { servers, agents });
     snapshot.servers = snapshot.config.servers || [];
     message = "Running the existing connection Test…";
     render();
@@ -184,10 +192,11 @@ async function runDetection() {
 async function finish() {
   try {
     snapshot = await request("/api/state", undefined, "GET");
-    if (!Object.keys(snapshot.sessions || {}).length && snapshot.config.roles?.main) {
-      await request("/api/sessions", { label: "main", server_id: snapshot.config.roles.main, workspace: snapshot.config.workspace });
+    const agent = snapshot.config.agents?.[0];
+    if (!Object.keys(snapshot.sessions || {}).length && agent) {
+      await request("/api/sessions", { label: "main", agent_id: agent.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), workspace: snapshot.config.workspace });
     }
-    location.href = snapshot.config.roles?.main ? "/chat" : "/chat?setup=skip";
+    location.href = agent ? "/chat" : "/chat?setup=skip";
   } catch (error) { message = error.message; alarm = true; render(); }
 }
 

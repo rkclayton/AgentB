@@ -14,7 +14,7 @@ import (
 	"harness/internal/tools"
 )
 
-func TestActiveRunMessagesQueueAtZeroDepthAndDispatchInOrderAfterStop(t *testing.T) {
+func TestActiveRunMessagesQueueAtZeroDepthAndDispatchInOrderAfterRunEnd(t *testing.T) {
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
@@ -58,7 +58,7 @@ func TestActiveRunMessagesQueueAtZeroDepthAndDispatchInOrderAfterStop(t *testing
 	runner := NewRunner(bus, tools.New(), &PromptRenderer{text: "system"}, profileLookup, func() config.Config { return cfg })
 	scheduler := NewScheduler(runner, registry, bus, func() config.Config { return cfg })
 	item.SetRun(session.RunState{Status: "running", RunID: "r0", MaxTurns: cfg.Run.MaxTurns})
-	scheduler.active[item.ID] = activeRun{}
+	scheduler.active[item.ID] = &activeRun{}
 	first, err := scheduler.Submit(context.Background(), item.ID, "first queued")
 	if err != nil || !first.Queued || first.Position != 1 {
 		t.Fatalf("first=%+v err=%v", first, err)
@@ -67,7 +67,7 @@ func TestActiveRunMessagesQueueAtZeroDepthAndDispatchInOrderAfterStop(t *testing
 	if err != nil || !second.Queued || second.Position != 2 {
 		t.Fatalf("second=%+v err=%v", second, err)
 	}
-	scheduler.finish(queuedRun{s: item, runID: "r0"}, "user_stop", "", 1)
+	scheduler.finish(queuedRun{s: item, runID: "r0"}, "done", "", 1)
 	deadline := time.Now().Add(5 * time.Second)
 	for (scheduler.Active(item.ID) || item.Snapshot().QueuedMessages != 0) && time.Now().Before(deadline) {
 		time.Sleep(10 * time.Millisecond)
@@ -96,4 +96,149 @@ func TestActiveRunMessagesQueueAtZeroDepthAndDispatchInOrderAfterStop(t *testing
 	if queued != 2 {
 		t.Fatalf("message.queued count=%d", queued)
 	}
+}
+
+func TestStopHoldsQueuedMessagesUntilNextExplicitSubmit(t *testing.T) {
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
+	}))
+	defer model.Close()
+	cfg, profile, item, scheduler := schedulerFixture(t, model.URL)
+	item.SetRun(session.RunState{Status: "running", RunID: "r0", MaxTurns: cfg.Run.MaxTurns})
+	scheduler.active[item.ID] = &activeRun{cancel: func() {}}
+	if result, err := scheduler.Submit(context.Background(), item.ID, "first queued"); err != nil || result.Position != 1 {
+		t.Fatalf("first=%+v err=%v", result, err)
+	}
+	if result, err := scheduler.Submit(context.Background(), item.ID, "second queued"); err != nil || result.Position != 2 {
+		t.Fatalf("second=%+v err=%v", result, err)
+	}
+	scheduler.Stop(item.ID, false)
+	scheduler.finish(queuedRun{s: item, runID: "r0"}, "user_stop", "", 1)
+	if snapshot := item.Snapshot(); snapshot.Run.Status != "held" || snapshot.QueuedMessages != 2 {
+		t.Fatalf("held snapshot=%+v", snapshot)
+	}
+	if len(item.MessagesCopy()) != 0 {
+		t.Fatalf("held messages dispatched=%+v", item.MessagesCopy())
+	}
+	if _, err := scheduler.Submit(context.Background(), item.ID, "resume queue"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(3 * time.Second)
+	for (scheduler.Active(item.ID) || item.Snapshot().QueuedMessages != 0) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	var users []string
+	for _, message := range item.MessagesCopy() {
+		if message.Role == "user" {
+			users = append(users, message.Content)
+		}
+	}
+	if len(users) != 3 || users[0] != "first queued" || users[1] != "second queued" || users[2] != "resume queue" {
+		t.Fatalf("dispatch order=%v profile=%s", users, profile.ID)
+	}
+}
+
+func TestStopCancelsBlackholedApplyTemplateInUnderOneSecond(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	blackhole := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/apply-template" {
+			select {
+			case entered <- struct{}{}:
+			default:
+			}
+			select {
+			case <-request.Context().Done():
+			case <-release:
+			}
+			return
+		}
+		if request.URL.Path == "/tokenize" {
+			_, _ = w.Write([]byte(`{"tokens":[1]}`))
+			return
+		}
+		http.NotFound(w, request)
+	}))
+	defer blackhole.Close()
+	defer close(release)
+	_, profile, item, scheduler := schedulerFixture(t, blackhole.URL)
+	profile.Capabilities.Tokenize = true
+	profile.Capabilities.ApplyTemplate = true
+	profile.Capabilities.ApplyTemplateTools = true
+	scheduler.runner.cfg = func() config.Config {
+		cfg := config.Defaults(item.Workspace)
+		cfg.Context.Accounting = "exact"
+		cfg.Servers[0] = *profile
+		return cfg
+	}
+	if _, err := scheduler.Submit(context.Background(), item.ID, "blocked request"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("apply-template was not reached")
+	}
+	started := time.Now()
+	scheduler.Stop(item.ID, false)
+	for scheduler.Active(item.ID) && time.Since(started) < time.Second {
+		time.Sleep(time.Millisecond)
+	}
+	if elapsed := time.Since(started); scheduler.Active(item.ID) || elapsed >= time.Second {
+		t.Fatalf("stop elapsed=%s active=%t", elapsed, scheduler.Active(item.ID))
+	}
+	if reason := item.Snapshot().Run.LastStopReason; reason != "safe" {
+		t.Fatalf("stop reason=%q", reason)
+	}
+}
+
+func TestSecondStopEscalatesToEmergency(t *testing.T) {
+	_, _, item, scheduler := schedulerFixture(t, "http://127.0.0.1:1")
+	item.SetRun(session.RunState{Status: "running", RunID: "r1", MaxTurns: 40})
+	scheduler.active[item.ID] = &activeRun{cancel: func() {}}
+	eventStream, unsubscribe := scheduler.bus.Subscribe()
+	defer unsubscribe()
+	scheduler.Stop(item.ID, false)
+	scheduler.Stop(item.ID, false)
+	if got := scheduler.active[item.ID].stopReason; got != "emergency" {
+		t.Fatalf("stop reason=%q", got)
+	}
+	for index, reason := range []string{"safe", "emergency"} {
+		select {
+		case event := <-eventStream:
+			if event.Type != events.RunStopping || event.RunID != "r1" || event.Data.(map[string]any)["reason"] != reason {
+				t.Fatalf("event %d=%+v", index, event)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("missing %s stop event", reason)
+		}
+	}
+}
+
+func schedulerFixture(t *testing.T, modelURL string) (config.Config, *config.Profile, *session.Session, *Scheduler) {
+	t.Helper()
+	workspace := t.TempDir()
+	cfg := config.Defaults(workspace)
+	cfg.Context.Accounting = "estimated"
+	cfg.Run.MaxConcurrent = 1
+	profile := cfg.Servers[0]
+	profile.BaseURL, profile.Model, profile.RequestTimeoutS = modelURL, "model", 30
+	profile.Context.NCtx, profile.Context.ReserveOutput = 32768, 8192
+	profile.Capabilities.Streaming, profile.Capabilities.ToolCalls, profile.Capabilities.OverflowBehavior = true, true, "error"
+	cfg.Servers[0] = profile
+	bus := events.NewBus()
+	writers, err := events.NewWriters(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = writers.Close() })
+	lookup := func(id string) (*config.Profile, bool) { return &profile, id == profile.ID }
+	registry := session.NewRegistry(bus, writers, lookup, cfg.Run.MaxTurns, func() config.Config { return cfg })
+	item, err := registry.Create("main", profile.ID, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner := NewRunner(bus, tools.New(), &PromptRenderer{text: "system {{tools}} {{memory}}"}, lookup, func() config.Config { return cfg })
+	return cfg, &profile, item, NewScheduler(runner, registry, bus, func() config.Config { return cfg })
 }

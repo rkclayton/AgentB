@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 	"time"
 )
@@ -25,6 +26,21 @@ type LogCursor struct {
 	Generation string `json:"generation"`
 	Offset     int64  `json:"offset"`
 	Path       string `json:"-"`
+}
+
+type MemoryWrite struct {
+	Path    string `json:"path"`
+	Note    string `json:"note"`
+	Target  string `json:"target"`
+	AgentID string `json:"agent_id,omitempty"`
+}
+
+type SessionInventory struct {
+	Events       int           `json:"events"`
+	JSONLFiles   int           `json:"jsonl_files"`
+	JSONLBytes   int64         `json:"jsonl_bytes"`
+	MemoryWrites []MemoryWrite `json:"memory_writes"`
+	Paths        []string      `json:"-"`
 }
 
 func NewWriters(dir string) (*Writers, error) {
@@ -92,6 +108,79 @@ func (w *Writers) CloseSession(id string) error {
 		return syncErr
 	}
 	return closeErr
+}
+
+func (w *Writers) SessionInventory(id string) (SessionInventory, error) {
+	w.mu.Lock()
+	if file := w.sessions[id]; file != nil {
+		if err := file.Sync(); err != nil {
+			w.mu.Unlock()
+			return SessionInventory{}, err
+		}
+	}
+	dir := w.dir
+	w.mu.Unlock()
+	matches, err := filepath.Glob(filepath.Join(dir, id+"-*.jsonl"))
+	if err != nil {
+		return SessionInventory{}, err
+	}
+	result := SessionInventory{Paths: []string{}, MemoryWrites: []MemoryWrite{}}
+	for _, path := range matches {
+		info, statErr := os.Stat(path)
+		if statErr != nil {
+			return SessionInventory{}, statErr
+		}
+		if !info.Mode().IsRegular() {
+			continue
+		}
+		result.Paths = append(result.Paths, path)
+		result.JSONLFiles++
+		result.JSONLBytes += info.Size()
+		file, openErr := os.Open(path)
+		if openErr != nil {
+			return SessionInventory{}, openErr
+		}
+		decoder := json.NewDecoder(file)
+		for {
+			var event Event
+			decodeErr := decoder.Decode(&event)
+			if decodeErr == io.EOF {
+				break
+			}
+			if decodeErr != nil {
+				_ = file.Close()
+				return SessionInventory{}, fmt.Errorf("inventory %s: %w", path, decodeErr)
+			}
+			if event.SessionID == id && event.Type == MemoryNoted {
+				data := valueMap(event.Data)
+				result.MemoryWrites = append(result.MemoryWrites, MemoryWrite{Path: valueString(data["path"]), Note: valueString(data["note"]), Target: valueString(data["target"]), AgentID: valueString(data["agent_id"])})
+			}
+			if event.SessionID == id {
+				result.Events++
+			}
+		}
+		if closeErr := file.Close(); closeErr != nil {
+			return SessionInventory{}, closeErr
+		}
+	}
+	sort.Strings(result.Paths)
+	return result, nil
+}
+
+func (w *Writers) DeleteSession(id string) (SessionInventory, error) {
+	inventory, err := w.SessionInventory(id)
+	if err != nil {
+		return SessionInventory{}, err
+	}
+	if err := w.CloseSession(id); err != nil {
+		return SessionInventory{}, err
+	}
+	for _, path := range inventory.Paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return SessionInventory{}, err
+		}
+	}
+	return inventory, nil
 }
 func (w *Writers) Write(event Event) error {
 	_, err := w.WriteRecord(event)

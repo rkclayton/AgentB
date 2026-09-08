@@ -98,7 +98,7 @@ func TestCompactionAuxUnsetUsesOneMainCall(t *testing.T) {
 		t.Fatalf("request params=%v", body)
 	}
 	attempt, compact := compactionEvents(t, bus, item.ID)
-	if attempt.Role != "main" || attempt.ProfileID != "main" || attempt.Outcome != "accepted" || compact["profile_id"] != "main" {
+	if attempt.Role != "b" || attempt.ProfileID != "main" || attempt.Outcome != "accepted" || compact["profile_id"] != "main" {
 		t.Fatalf("attempt=%+v compact=%v", attempt, compact)
 	}
 	snapshot := item.Snapshot()
@@ -118,7 +118,7 @@ func TestCompactionUsesFittingAuxProfile(t *testing.T) {
 		t.Fatalf("aux chat/template/tokenize=%d/%d/%d main chat=%d", auxServer.chatCalls.Load(), auxServer.templateCalls.Load(), auxServer.tokenizeCalls.Load(), mainServer.chatCalls.Load())
 	}
 	attempt, compact := compactionEvents(t, bus, item.ID)
-	if attempt.Role != "aux" || attempt.ProfileID != "aux" || attempt.Estimated || compact["profile_id"] != "aux" {
+	if attempt.Role != "c" || attempt.ProfileID != "aux" || attempt.Estimated || compact["profile_id"] != "aux" {
 		t.Fatalf("attempt=%+v compact=%v", attempt, compact)
 	}
 }
@@ -226,7 +226,7 @@ func TestCompactionSkipsSmallAuxAndFallsBackToMain(t *testing.T) {
 		t.Fatalf("aux chat=%d main chat=%d", auxServer.chatCalls.Load(), mainServer.chatCalls.Load())
 	}
 	attempts := summaryAttempts(bus, item.ID)
-	if len(attempts) != 2 || attempts[0].Outcome != "skipped" || attempts[0].Dispatched || attempts[1].FallbackReason != "aux_context" {
+	if len(attempts) != 2 || attempts[0].Outcome != "skipped" || attempts[0].Dispatched || attempts[1].FallbackReason != "c_context" {
 		t.Fatalf("attempts=%+v", attempts)
 	}
 }
@@ -238,7 +238,7 @@ func TestCompactionAuxErrorFallsBackToMain(t *testing.T) {
 	aux.ID, aux.Label, aux.BaseURL, aux.Model = "aux", "aux", "http://127.0.0.1:1", "offline"
 	aux.RequestTimeoutS = 1
 	cfg.Servers = append(cfg.Servers, aux)
-	cfg.Roles.Aux = "aux"
+	cfg.Agents[0].C = "aux"
 	if !runner.summarize(context.Background(), item, "run", profileForRunner(runner, "main")) {
 		t.Fatal("main fallback summary was not accepted")
 	}
@@ -246,7 +246,7 @@ func TestCompactionAuxErrorFallsBackToMain(t *testing.T) {
 		t.Fatalf("main chat=%d", mainServer.chatCalls.Load())
 	}
 	attempts := summaryAttempts(bus, item.ID)
-	if len(attempts) != 2 || attempts[0].Outcome != "error" || !attempts[0].Dispatched || attempts[1].FallbackReason != "aux_error" {
+	if len(attempts) != 2 || attempts[0].Outcome != "error" || !attempts[0].Dispatched || attempts[1].FallbackReason != "c_error" {
 		t.Fatalf("attempts=%+v", attempts)
 	}
 	snapshot := item.Snapshot()
@@ -267,7 +267,7 @@ func TestCompactionAuxFitCheckErrorFallsBackBeforeDispatch(t *testing.T) {
 		t.Fatalf("aux chat=%d main chat=%d", auxServer.chatCalls.Load(), mainServer.chatCalls.Load())
 	}
 	attempts := summaryAttempts(bus, item.ID)
-	if len(attempts) != 2 || attempts[0].Outcome != "error" || attempts[0].Dispatched || attempts[0].Estimated || attempts[1].FallbackReason != "aux_fit_error" {
+	if len(attempts) != 2 || attempts[0].Outcome != "error" || attempts[0].Dispatched || attempts[0].Estimated || attempts[1].FallbackReason != "c_fit_error" {
 		t.Fatalf("attempts=%+v", attempts)
 	}
 	snapshot := item.Snapshot()
@@ -290,7 +290,7 @@ func TestCompactionMainFallbackFailureLeavesContextUntouched(t *testing.T) {
 		t.Fatalf("messages changed after both profiles failed: before=%d after=%d", len(before), len(item.MessagesCopy()))
 	}
 	attempts := summaryAttempts(bus, item.ID)
-	if len(attempts) != 2 || attempts[0].Outcome != "error" || attempts[0].Dispatched || attempts[1].Outcome != "error" || !attempts[1].Dispatched || attempts[1].FallbackReason != "aux_fit_error" {
+	if len(attempts) != 2 || attempts[0].Outcome != "error" || attempts[0].Dispatched || attempts[1].Outcome != "error" || !attempts[1].Dispatched || attempts[1].FallbackReason != "c_fit_error" {
 		t.Fatalf("attempts=%+v", attempts)
 	}
 	foundOperationalError := false
@@ -315,7 +315,7 @@ func TestCompactionRejectedAuxFallsBackToMain(t *testing.T) {
 		t.Fatalf("aux chat=%d main chat=%d", auxServer.chatCalls.Load(), mainServer.chatCalls.Load())
 	}
 	attempts := summaryAttempts(bus, item.ID)
-	if len(attempts) != 2 || attempts[0].Outcome != "rejected" || attempts[1].FallbackReason != "aux_rejected" {
+	if len(attempts) != 2 || attempts[0].Outcome != "rejected" || attempts[1].FallbackReason != "c_rejected" {
 		t.Fatalf("attempts=%+v", attempts)
 	}
 }
@@ -358,7 +358,7 @@ func compactionRunner(t *testing.T, mainServer, auxServer *summaryServer, auxNCt
 	main.RequestTimeoutS = 2
 	main.Capabilities.Tokenize = false
 	cfg.Servers = []config.Profile{main}
-	cfg.Roles = config.Roles{Main: "main"}
+	cfg.Agents = []config.Agent{{Name: "Coder", B: "main", Toolset: config.FullToolset()}}
 	if auxServer != nil {
 		aux := main
 		aux.ID, aux.Label, aux.BaseURL, aux.Model = "aux", "aux", auxServer.server.URL, "aux-model"
@@ -366,11 +366,11 @@ func compactionRunner(t *testing.T, mainServer, auxServer *summaryServer, auxNCt
 		aux.Capabilities.Tokenize = auxNCtx > 100
 		aux.Capabilities.ApplyTemplate = auxNCtx > 100
 		cfg.Servers = append(cfg.Servers, aux)
-		cfg.Roles.Aux = "aux"
+		cfg.Agents[0].C = "aux"
 	}
 	bus := newCapturedBus()
 	runner := NewRunner(bus.Bus, tools.New(), &PromptRenderer{text: "system {{workspace}} {{memory}} {{tools}}"}, cfg.Profile, func() config.Config { return cfg })
-	item := &session.Session{ID: "main", ServerID: "main", Workspace: t.TempDir(), ToolsEnabled: map[string]bool{}, ToolCalls: map[string]int{}, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	item := &session.Session{ID: "main", AgentID: cfg.DefaultAgentID(), ServerID: "main", Workspace: t.TempDir(), ToolsEnabled: map[string]bool{}, ToolCalls: map[string]int{}, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
 	for index := 0; index < 10; index++ {
 		item.Append(events.Message{ID: fmt.Sprintf("m%d", index), Role: "user", Content: strings.Repeat("history ", 20), Category: "history", Tokens: 100})
 	}

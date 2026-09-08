@@ -85,7 +85,7 @@ func TestAttachmentIngestLiveServiceSplit(t *testing.T) {
 	cfg.Servers[0].Capabilities.Streaming = true
 	cfg.Servers[0].Capabilities.ToolCalls = true
 	cfg.Servers[0].Capabilities.OverflowBehavior = "error"
-	cfg.Roles.Main = "live"
+	cfg.Agents = []config.Agent{{Name: "Live", B: "live", Toolset: config.FullToolset()}}
 
 	temporary := t.TempDir()
 	writers, err := events.NewWriters(filepath.Join(temporary, "logs"))

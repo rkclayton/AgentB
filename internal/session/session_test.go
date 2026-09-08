@@ -88,6 +88,10 @@ func TestCloseIsDurableMetadataAndNeverStopsARun(t *testing.T) {
 	if err := running.Close(); err == nil || !strings.Contains(err.Error(), "stop the run before closing") || running.IsClosed() {
 		t.Fatalf("running close err=%v closed=%t", err, running.IsClosed())
 	}
+	held := &Session{Run: RunState{Status: "held"}}
+	if err := held.Close(); err == nil || held.IsClosed() {
+		t.Fatalf("held close err=%v closed=%t", err, held.IsClosed())
+	}
 	idle := &Session{Run: RunState{Status: "idle"}}
 	if err := idle.Close(); err != nil || !idle.Snapshot().Closed {
 		t.Fatalf("idle close err=%v snapshot=%+v", err, idle.Snapshot())
@@ -111,11 +115,11 @@ func TestRenameAuthorsPinUserAndLeaveAuxUnpinned(t *testing.T) {
 	}
 	eventsOut, cancel := bus.Subscribe()
 	defer cancel()
-	if err := registry.RenameBy(item.ID, "Aux suggestion", "aux"); err != nil {
+	if err := registry.RenameBy(item.ID, "C suggestion", "c"); err != nil {
 		t.Fatal(err)
 	}
 	aux := <-eventsOut
-	if aux.Type != events.SessionRenamed || aux.Data.(map[string]any)["by"] != "aux" || item.Snapshot().NamePinned {
+	if aux.Type != events.SessionRenamed || aux.Data.(map[string]any)["by"] != "c" || item.Snapshot().NamePinned {
 		t.Fatalf("aux event=%+v snapshot=%+v", aux, item.Snapshot())
 	}
 	if err := registry.Rename(item.ID, "User title"); err != nil {
@@ -125,7 +129,7 @@ func TestRenameAuthorsPinUserAndLeaveAuxUnpinned(t *testing.T) {
 	if user.Data.(map[string]any)["by"] != "user" || !item.Snapshot().NamePinned {
 		t.Fatalf("user event=%+v", user)
 	}
-	if err := registry.RenameBy(item.ID, "Ignored", "aux"); err != nil {
+	if err := registry.RenameBy(item.ID, "Ignored", "c"); err != nil {
 		t.Fatal(err)
 	}
 	if item.Snapshot().Label != "User title" {
@@ -166,7 +170,7 @@ func TestCreateLikeKeepsProfileWorkspaceAndExactToolsetAfterClose(t *testing.T) 
 		t.Fatal(err)
 	}
 	want, got := first.Snapshot(), second.Snapshot()
-	if got.ServerID != want.ServerID || got.Workspace != want.Workspace || got.AgentName != "Coder" || got.MainProfile != "Coder" || got.Tools[5].Enabled {
+	if got.AgentID != "coder" || got.ServerID != want.ServerID || got.Workspace != want.Workspace || got.AgentName != "Coder" || got.BProfile != "Coder" || got.Tools[5].Enabled {
 		t.Fatalf("cloned session=%+v", got)
 	}
 	if len(registry.List()) != 2 || !registry.List()[0].Snapshot().Closed {

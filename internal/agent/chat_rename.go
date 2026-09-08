@@ -22,10 +22,11 @@ func (r *Runner) maybeAutoRename(ctx context.Context, item *session.Session) {
 		return
 	}
 	cfg := r.cfg()
-	if !cfg.Chat.AutoRename || cfg.Roles.Aux == "" {
+	agent, ok := cfg.Agent(snapshot.AgentID)
+	if !cfg.Chat.AutoRename || !ok || agent.C == "" {
 		return
 	}
-	profile, ok := cfg.Profile(cfg.Roles.Aux)
+	profile, ok := cfg.Profile(agent.C)
 	if !ok {
 		return
 	}
@@ -43,7 +44,7 @@ func (r *Runner) maybeAutoRename(ctx context.Context, item *session.Session) {
 	}
 	name := cleanChatName(response.Content)
 	if name != "" {
-		_ = r.renameSession(item.ID, name, "aux")
+		_ = r.renameSession(item.ID, name, "c")
 	}
 }
 

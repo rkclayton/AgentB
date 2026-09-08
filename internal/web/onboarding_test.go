@@ -22,7 +22,7 @@ func TestFirstRunRoutesToSetupAndSkipRemainsAvailable(t *testing.T) {
 	}
 	cfg := config.Defaults(t.TempDir())
 	cfg.Servers = []config.Profile{}
-	cfg.Roles = config.Roles{}
+	cfg.Agents = []config.Agent{}
 	server := New(&cfg, filepath.Join(t.TempDir(), "harness.json"), webDir, RuntimeRoots{Application: t.TempDir()}, events.NewBus())
 
 	redirect := httptest.NewRecorder()
