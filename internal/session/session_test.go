@@ -83,6 +83,63 @@ func TestSnapshotCarriesRunAggregates(t *testing.T) {
 	}
 }
 
+func TestBindWorkspaceUpdatesTheExistingIdleSessionDurably(t *testing.T) {
+	logs, data, original, bound := t.TempDir(), t.TempDir(), t.TempDir(), filepath.Join(t.TempDir(), "bound repo")
+	if err := os.MkdirAll(bound, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bound, "AGENTS.md"), []byte("bound instructions"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(bound, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bound, "sub", "AGENTS.md"), []byte("nested bound instructions"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(bound, "sub", "file.txt"), []byte("touch"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writers, err := events.NewWriters(logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writers.Close()
+	bus := events.NewBus()
+	stream, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	profile := &config.Profile{ID: "main", Label: "Main", Context: config.Context{NCtx: 32768, ReserveOutput: 8192}, Capabilities: config.Capabilities{Streaming: true, ToolCalls: true, OverflowBehavior: "error"}}
+	cfg := config.Defaults(original)
+	registry := NewRegistry(bus, writers, func(id string) (*config.Profile, bool) { return profile, id == profile.ID }, 40, func() config.Config { return cfg })
+	registry.SetWorkspaceManager(workspaceinfo.New(data, func(dir string) string { return filepath.Join(data, filepath.Base(dir)+".md") }))
+	item, err := registry.Create("", profile.ID, original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for len(stream) > 0 {
+		<-stream
+	}
+	if _, err := registry.BindWorkspace(item.ID, bound); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := item.Snapshot()
+	if snapshot.WorkspaceDir != filepath.Clean(bound) || !strings.Contains(snapshot.ProjectContent, "bound instructions") {
+		t.Fatalf("bound snapshot=%+v", snapshot)
+	}
+	select {
+	case event := <-stream:
+		if event.Type != events.WorkspaceBound || event.Data.(map[string]any)["workspace_dir"] != filepath.Clean(bound) {
+			t.Fatalf("event=%+v", event)
+		}
+	default:
+		t.Fatal("workspace.bound was not published")
+	}
+	item.ProjectTouch(filepath.Join("sub", "file.txt"))
+	if !strings.Contains(item.Snapshot().ProjectContent, "nested bound instructions") {
+		t.Fatal("project touch retained the pre-bind workspace root")
+	}
+}
+
 func TestCloseIsDurableMetadataAndNeverStopsARun(t *testing.T) {
 	running := &Session{Run: RunState{Status: "running"}}
 	if err := running.Close(); err == nil || !strings.Contains(err.Error(), "stop the run before closing") || running.IsClosed() {

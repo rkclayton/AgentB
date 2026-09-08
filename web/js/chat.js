@@ -503,11 +503,12 @@ function renderComposer(session) {
   attachButton.disabled = !session || !!store.replay || attachmentsBusy;
   input.removeAttribute("placeholder");
   const queued = session?.queued_messages || 0;
-  const state = session?.pending_approval || session?.pending_repo_policy ? "waiting for you" : session?.run?.status || "idle";
+  const state = session?.pending_approval || session?.pending_repo_policy || session?.pending_bind ? "waiting for you" : session?.run?.status || "idle";
   const unreachable = session?.model_unreachable;
+  const busy = session?.model_busy;
   const operatorUntil = store.shell_identity?.operator_context ? `operator mode · until ${shortTime(store.shell_identity.operator_context_expires_at)}` : "";
   const queueText = queued ? `queued (${queued})${unreachable ? " · waiting for model" : ""}` : "";
-  const message = [localNotice || (session && !session.runnable ? session.not_runnable_reason : unreachable ? `model unreachable · ${unreachable.host || "model"}` : state), queueText, operatorUntil].filter(Boolean).join(" · ");
+  const message = [localNotice || (session && !session.runnable ? session.not_runnable_reason : unreachable ? `model unreachable · ${unreachable.host || "model"}` : busy ? `model busy · ${busy.host || "model"}` : state), queueText, operatorUntil].filter(Boolean).join(" · ");
   notice.textContent = message;
   notice.className = `chat-notice ${localAlarm || unreachable || (session && !session.runnable) ? "alarm" : ""}`;
 	pendingFiles.replaceChildren(...queuedAttachments.map((file) => {
@@ -516,18 +517,39 @@ function renderComposer(session) {
     row.textContent = `${file.path.split("/").pop()} · ${format(file.bytes)} B${file.reused ? " · reused" : ""}`;
     return row;
 	}));
-	pendingApproval.hidden = !(session?.pending_approval || session?.pending_repo_policy);
+	pendingApproval.hidden = !(session?.pending_approval || session?.pending_repo_policy || session?.pending_bind);
 	const policyCard = session?.pending_repo_policy ? createPolicyCard(session) : null;
+	const bindCard = session?.pending_bind ? createBindCard(session) : null;
 	pendingApproval.replaceChildren(...(session?.pending_approval ? [createApprovalCard(document, session.pending_approval, {
 		replay: store.replay,
 		decide: (callID, decision) => api("/api/approve", { session_id: session.id, call_id: callID, decision }),
-	})] : policyCard ? [policyCard] : []));
+	})] : policyCard ? [policyCard] : bindCard ? [bindCard] : []));
   renderStopState(stop, session, store.replay);
   renderOperatorStatus(runAsYou, { operator_context: hasChatGrant(session) });
   runAsYou.disabled = !session || store.replay || !hasChatGrant(session);
   runAsYou.title = hasChatGrant(session) ? "Run as you active for this chat · click to revoke" : "No Run as you grant for this chat";
   retryModel.hidden = !unreachable;
   retryModel.disabled = !session || store.replay;
+}
+
+function createBindCard(session) {
+	const card = document.createElement("section"); card.className = "approval-card workspace-bind-card";
+	const title = document.createElement("span"); title.textContent = "Allow this";
+	const heading = document.createElement("strong"); heading.textContent = `Bind this chat to ${session.pending_bind.dir}?`;
+	const reason = document.createElement("span"); reason.textContent = "The directory named in your message is outside this chat's workspace.";
+	const actions = document.createElement("div"); actions.className = "approval-actions";
+	for (const [label, decision] of [["Yes", "yes"], ["No", "no"]]) {
+		const button = document.createElement("button"); button.type = "button"; button.textContent = label;
+		if (decision === "yes") { button.className = "default"; button.autofocus = true; }
+		button.disabled = !!store.replay; button.onclick = () => void decideBind(session, decision); actions.append(button);
+	}
+	card.append(title, heading, reason, actions); return card;
+}
+
+async function decideBind(session, decision) {
+	if (!session?.pending_bind || store.replay) return;
+	try { await api("/api/bind", { session_id: session.id, decision }); reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") }); localNotice = ""; localAlarm = false; render(); }
+	catch (error) { localNotice = error.message || String(error); localAlarm = true; renderComposer(store.sessions[selectedID()]); }
 }
 
 function createPolicyCard(session) {
@@ -650,7 +672,7 @@ runAsYou.onclick = async () => {
 retryModel.onclick = async () => {
   const session = store.sessions[selectedID()];
   if (!session || store.replay) return;
-  try { await api(`/api/servers/${encodeURIComponent(session.b_profile || session.server_id)}/probe`, { session_id: session.id, retry: true }); }
+  try { await api(`/api/servers/${encodeURIComponent(session.server_id || session.b_profile)}/probe`, { session_id: session.id, retry: true }); }
   catch (error) { localNotice = error.message; localAlarm = true; renderComposer(session); }
 };
 attachButton.onclick = () => { attachMenu.hidden = !attachMenu.hidden; };

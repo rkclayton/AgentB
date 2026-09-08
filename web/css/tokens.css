@@ -30,13 +30,20 @@ button:hover{background:rgba(216,221,227,.12)}button:active{background:rgba(216,
 .window-titlebar button,.window-titlebar input,.window-titlebar select,.window-titlebar a{-webkit-app-region:no-drag;app-region:no-drag}
 .app-shell{position:relative;z-index:30;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;height:var(--app-header-height);min-width:0;padding:0 8px;background:var(--bezel)}
 .shell-left,.agent-tabs,.shell-right,.shell-pages{display:flex;align-items:center;min-width:0;gap:2px}
-.shell-left,.agent-tabs{overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
-.agent-tab-wrap,.shell-add-wrap{position:relative}
-.agent-tab,.shell-add{height:28px;min-height:28px;padding:2px 7px;background:transparent;font:500 13px/20px var(--sans);white-space:nowrap}
+.shell-left,.agent-tabs{overflow:hidden}
+.shell-left{width:100%}
+.agent-tabs{flex:1 1 auto}
+.agent-tab-wrap{position:relative;flex:1 1 132px;min-width:72px;max-width:180px}
+.agent-overflow-wrap,.shell-add-wrap{position:relative;flex:none}
+.agent-tab,.shell-add,.agent-overflow{height:28px;min-height:28px;padding:2px 7px;background:transparent;font:500 13px/20px var(--sans);white-space:nowrap}
+.agent-tab{width:100%;min-width:0;overflow:hidden}
+.agent-overflow{width:36px;padding:2px 4px;font-family:var(--mono)}
+.agent-overflow-menu{right:0;left:auto;width:min(18rem,calc(100vw - 16px))}
 .agent-tab.selected{background:var(--well)}
 .agent-state{display:inline-block;width:12px;margin-right:4px;color:var(--mute);font:12px/16px var(--mono);text-align:center}
 .agent-state.running{color:var(--trace)}
 .agent-state.waiting,.shell-state.waiting{color:var(--alarm)}
+.agent-tab-robot{width:16px;height:16px;margin-right:4px;opacity:.72}
 .shell-state.stopping{color:var(--trace)}
 .shell-add{width:28px;padding:0;font-size:16px}
 .shell-state,.shell-connection{max-width:180px;overflow:hidden;color:var(--mute);font:12px/16px var(--mono);text-overflow:ellipsis;white-space:nowrap}

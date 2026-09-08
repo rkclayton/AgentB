@@ -89,3 +89,24 @@ func TestBoundDirectorySessionAndNativeFolderPickerRoutes(t *testing.T) {
 		t.Fatalf("workspaces %d %s", listed.Code, listed.Body.String())
 	}
 }
+
+func TestNamedOutsideDirectoryFindsExistingPathWithSpacesOnlyOutsideBinding(t *testing.T) {
+	root := t.TempDir()
+	bound := filepath.Join(root, "bound")
+	outside := filepath.Join(t.TempDir(), "outside repo")
+	inside := filepath.Join(bound, "inside repo")
+	for _, dir := range []string{bound, outside, inside} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := namedOutsideDirectory(`please inspect "`+outside+`" and report`, bound); got != filepath.Clean(outside) {
+		t.Fatalf("outside=%q want=%q", got, outside)
+	}
+	if got := namedOutsideDirectory("please inspect "+inside+" and report", bound); got != "" {
+		t.Fatalf("inside path offered=%q", got)
+	}
+	if got := namedOutsideDirectory(`C:\definitely-not-an-agentb-directory`, bound); got != "" {
+		t.Fatalf("missing path offered=%q", got)
+	}
+}

@@ -89,6 +89,9 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 	if err != nil {
 		return "", err
 	}
+	if existing, readErr := os.ReadFile(resolved); readErr == nil && string(existing) == content {
+		return fmt.Sprintf("unchanged: %s already has the requested bytes", cleanRel(path)), nil
+	}
 	prefix, err := w.coordinator.check(s, path, resolved)
 	if err != nil {
 		return "", err

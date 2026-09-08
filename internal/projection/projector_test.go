@@ -172,6 +172,7 @@ func TestModelAvailabilityAndRunAsYouReconstructFromEvents(t *testing.T) {
 	state := Empty("main")
 	records := []events.Event{
 		events.New(events.ModelUnreachable, "main", "r1", map[string]any{"host": "model.example:8000", "detail": "dial timeout"}),
+		events.New(events.ModelBusy, "main", "r1", map[string]any{"host": "model.example:8000", "detail": "connected; waiting"}),
 		events.New(events.ShellGrant, "main", "r1", map[string]any{"scope": "session", "identity": "operator", "rule": "shell_boundary"}),
 		events.New(events.ModelReachable, "main", "", map[string]any{"server_id": "main"}),
 		events.New(events.ShellGrantLapsed, "main", "r1", map[string]any{"scope": "session", "identity": "operator", "reason": "revoked by operator"}),
@@ -183,8 +184,8 @@ func TestModelAvailabilityAndRunAsYouReconstructFromEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if state.ModelUnreachable != nil || state.RunAsYou {
-		t.Fatalf("replayed availability=%+v run_as_you=%t", state.ModelUnreachable, state.RunAsYou)
+	if state.ModelUnreachable != nil || state.ModelBusy != nil || state.RunAsYou {
+		t.Fatalf("replayed unreachable=%+v busy=%+v run_as_you=%t", state.ModelUnreachable, state.ModelBusy, state.RunAsYou)
 	}
 }
 
@@ -207,6 +208,25 @@ func TestSessionRenameReplaysAuthorAndUserPin(t *testing.T) {
 	}
 	if user.Label != "Pinned title" || !user.NamePinned {
 		t.Fatalf("user rename=%+v", user)
+	}
+}
+
+func TestWorkspaceBindOfferAndDecisionReconstruct(t *testing.T) {
+	state := seeded(t)
+	dir := `C:\projects\bound`
+	var err error
+	state, _, err = Next(state, Record{Cursor: Cursor{Generation: "bind.events", Offset: 1}, Event: events.New(events.WorkspaceBindRequired, "main", "", map[string]any{"dir": dir})})
+	if err != nil || state.PendingBind == nil || state.PendingBind.Dir != dir {
+		t.Fatalf("required state=%+v err=%v", state.PendingBind, err)
+	}
+	state, _, err = Next(state, Record{Cursor: Cursor{Generation: "bind.events", Offset: 2}, Event: events.New(events.WorkspaceBound, "main", "", map[string]any{"workspace_dir": dir, "project_content": "instructions"})})
+	if err != nil || state.PendingBind != nil || state.WorkspaceDir != dir || state.ProjectContent != "instructions" {
+		t.Fatalf("bound state=%+v err=%v", state, err)
+	}
+	state, _, err = Next(state, Record{Cursor: Cursor{Generation: "bind.events", Offset: 3}, Event: events.New(events.WorkspaceBindRequired, "main", "", map[string]any{"dir": `C:\other`})})
+	state, _, err = Next(state, Record{Cursor: Cursor{Generation: "bind.events", Offset: 4}, Event: events.New(events.WorkspaceBindDecided, "main", "", map[string]any{"dir": `C:\other`, "decision": "no"})})
+	if err != nil || state.PendingBind != nil || state.WorkspaceDir != dir {
+		t.Fatalf("denied state=%+v err=%v", state, err)
 	}
 }
 

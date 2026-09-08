@@ -1,5 +1,6 @@
 import { api, reduce, setSelection, store, subscribe } from "./bus.js";
 import { chatRowText, closeConfirmText, firstUserLine, isRunning } from "./chat-lifecycle.js";
+import { agentTabLayout } from "./agent-tabs.js";
 
 const activeRunStates = new Set(["running", "queued", "stopping"]);
 const agentKey = (agent) => String(agent?.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -35,7 +36,6 @@ export function initShell(options = {}) {
   settings.title = "Settings";
   right.append(pages, settings);
   root.append(left, right);
-
   document.addEventListener("click", (event) => {
     if (!tabs.contains(event.target)) for (const menu of tabs.querySelectorAll(".shell-menu")) menu.hidden = true;
   });
@@ -86,7 +86,7 @@ export function initShell(options = {}) {
       const tab = button("", `${agentID} · ${agentName(agentID)}`, `agent-tab ${store.selection.agent_id === agentID ? "selected" : ""}`);
       const glyphState = agentState(agentID);
       tab.dataset.agent = agentID;
-      tab.innerHTML = `<span class="agent-state ${glyphState}" aria-hidden="true">${glyphState === "waiting" ? "!" : glyphState === "running" ? "●" : "○"}</span><span>${escapeHTML(agentID)}</span>`;
+      tab.innerHTML = `<span class="agent-state ${glyphState}" aria-hidden="true">${glyphState === "waiting" ? "!" : glyphState === "running" ? "●" : "○"}</span>${agentID === "agent_b" ? '<img class="agent-tab-robot" src="/static/assets/agent.svg" alt="">' : ""}<span>${escapeHTML(agentID)}</span>`;
       tab.onclick = () => {
         const current = store.selection.session_id;
         const owned = sessionsFor(agentID, false);
@@ -102,6 +102,51 @@ export function initShell(options = {}) {
       };
       wrap.append(tab, menu);
       tabs.append(wrap);
+    }
+    const overflowWrap = node("div", "agent-overflow-wrap");
+    const overflowButton = button("", "More agents", "agent-overflow");
+    const overflowMenu = node("div", "shell-menu agent-overflow-menu");
+    overflowMenu.hidden = true;
+    overflowButton.setAttribute("aria-haspopup", "menu");
+    overflowButton.onclick = (event) => {
+      event.stopPropagation();
+      for (const other of tabs.querySelectorAll(".shell-menu")) if (other !== overflowMenu) other.hidden = true;
+      renderOverflowMenu(overflowMenu);
+      overflowMenu.hidden = !overflowMenu.hidden;
+    };
+    overflowWrap.append(overflowButton, overflowMenu);
+    tabs.append(overflowWrap);
+    queueMicrotask(layoutTabs);
+  }
+
+  function layoutTabs() {
+    const entries = [...tabs.querySelectorAll(".agent-tab-wrap")];
+    const overflowWrap = tabs.querySelector(".agent-overflow-wrap");
+    const overflowButton = tabs.querySelector(".agent-overflow");
+    if (!overflowWrap || !overflowButton) return;
+    for (const entry of entries) entry.hidden = false;
+    overflowWrap.hidden = true;
+    const layout = agentTabLayout(entries.length, tabs.clientWidth);
+    const visible = new Set(Array.from({ length: layout.visible }, (_, index) => index));
+    const selectedIndex = entries.findIndex((entry) => entry.dataset.agent === store.selection.agent_id);
+    if (layout.hidden && selectedIndex >= layout.visible) {
+      visible.delete(layout.visible - 1);
+      visible.add(selectedIndex);
+    }
+    entries.forEach((entry, index) => { entry.hidden = !visible.has(index); });
+    const hidden = entries.filter((entry) => entry.hidden);
+    overflowWrap.hidden = hidden.length === 0;
+    overflowButton.textContent = `+${hidden.length}`;
+    overflowButton.setAttribute("aria-label", `${hidden.length} more agents`);
+  }
+
+  function renderOverflowMenu(menu) {
+    menu.replaceChildren();
+    for (const entry of tabs.querySelectorAll(".agent-tab-wrap[hidden]")) {
+      const source = entry.querySelector(".agent-tab");
+      const choice = button(source?.textContent?.trim() || entry.dataset.agent, `Select ${entry.dataset.agent}`, "shell-new-choice");
+      choice.onclick = () => { source?.click(); menu.hidden = true; };
+      menu.append(choice);
     }
   }
 
@@ -219,6 +264,8 @@ export function initShell(options = {}) {
   subscribe((_state, event) => {
     render();
   });
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(layoutTabs).observe(tabs);
+  else window.addEventListener("resize", layoutTabs);
   return {
     render,
     report,

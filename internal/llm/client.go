@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptrace"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"harness/internal/config"
@@ -39,6 +41,10 @@ func (c *Client) Chat(ctx context.Context, request Request) (Response, error) {
 }
 
 func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(Delta)) (Response, error) {
+	return c.ChatStreamStatus(ctx, request, onDelta, nil)
+}
+
+func (c *Client) ChatStreamStatus(ctx context.Context, request Request, onDelta func(Delta), onConnected func()) (Response, error) {
 	body := buildRequest(c.profile, request, true)
 	encoded, _ := json.Marshal(body)
 	req, err := c.newRequest(ctx, http.MethodPost, "/v1/chat/completions", bytes.NewReader(encoded))
@@ -46,9 +52,16 @@ func (c *Client) ChatStream(ctx context.Context, request Request, onDelta func(D
 		return Response{}, err
 	}
 	start := time.Now()
+	var connected atomic.Bool
+	req = req.WithContext(httptrace.WithClientTrace(req.Context(), &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) {
+		connected.Store(true)
+		if onConnected != nil {
+			onConnected()
+		}
+	}}))
 	response, err := c.http.Do(req)
 	if err != nil {
-		return Response{}, err
+		return Response{}, &TransportError{Kind: transportKind(connected.Load()), Err: err}
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
@@ -215,12 +228,31 @@ func (c *Client) DoJSON(ctx context.Context, method, path string, body any) ([]b
 	}
 	response, err := c.http.Do(req)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, &TransportError{Kind: requestTransportKind(req), Err: err}
 	}
 	defer response.Body.Close()
 	raw, err := readBounded(response.Body, 64<<20)
 	return raw, response.StatusCode, err
 }
+
+func transportKind(connected bool) TransportKind {
+	if connected {
+		return TransportConnected
+	}
+	return TransportDial
+}
+
+func requestTransportKind(req *http.Request) TransportKind {
+	if req == nil {
+		return TransportDial
+	}
+	if value, ok := req.Context().Value(connectionTraceKey{}).(*atomic.Bool); ok {
+		return transportKind(value.Load())
+	}
+	return TransportDial
+}
+
+type connectionTraceKey struct{}
 
 func readBounded(reader io.Reader, limit int64) ([]byte, error) {
 	raw, err := io.ReadAll(io.LimitReader(reader, limit+1))
@@ -233,6 +265,9 @@ func readBounded(reader io.Reader, limit int64) ([]byte, error) {
 	return raw, nil
 }
 func (c *Client) newRequest(ctx context.Context, method, path string, body io.Reader) (*http.Request, error) {
+	connected := &atomic.Bool{}
+	ctx = context.WithValue(ctx, connectionTraceKey{}, connected)
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{GotConn: func(httptrace.GotConnInfo) { connected.Store(true) }})
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(c.profile.BaseURL, "/")+path, body)
 	if err != nil {
 		return nil, err

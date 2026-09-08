@@ -223,3 +223,6 @@ try {
         Remove-Item -LiteralPath $testRoot -Recurse -Force
     }
 }
+
+& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test-chat-acceptance.ps1')
+if ($LASTEXITCODE -ne 0) { throw "Chat acceptance release gate exited $LASTEXITCODE." }

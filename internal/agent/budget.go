@@ -111,7 +111,25 @@ func (b *Budgeter) saveCosts(id, key string, schema, marginal map[string]int) {
 func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
 	accountingCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
 	defer cancel()
-	ctx = accountingCtx
+	return b.measure(accountingCtx, profile, s, global, in, markRequest)
+}
+
+func (b *Budgeter) MeasureWithBusy(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool, onBusy func(error)) (events.Budget, error) {
+	accountingCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+	result, err := b.measure(accountingCtx, profile, s, global, in, markRequest)
+	cancel()
+	if err == nil || ctx.Err() != nil || llm.TransportKindOf(err) != llm.TransportConnected {
+		return result, err
+	}
+	if onBusy != nil {
+		onBusy(err)
+	}
+	waitCtx, waitCancel := context.WithTimeout(ctx, time.Duration(profile.RequestTimeoutS)*time.Second)
+	defer waitCancel()
+	return b.measure(waitCtx, profile, s, global, in, markRequest)
+}
+
+func (b *Budgeter) measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
 	if in.SystemProject == "" {
 		in.SystemProject = in.SystemBase
 	}

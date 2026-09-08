@@ -43,8 +43,8 @@ test("Composer uses one paperclip and pending files occupy no row when empty", (
 
 test("Pending approval is pinned above the composer with zero idle space", () => {
 	assert.match(html, /id="chat-pending-approval" class="pending-approval" hidden[\s\S]*class="chat-composer-row"/);
-	assert.match(chat, /session\?\.pending_approval \|\| session\?\.pending_repo_policy \? "waiting for you"/);
-	assert.match(chat, /pendingApproval\.hidden = !\(session\?\.pending_approval \|\| session\?\.pending_repo_policy\)/);
+	assert.match(chat, /session\?\.pending_approval \|\| session\?\.pending_repo_policy \|\| session\?\.pending_bind \? "waiting for you"/);
+	assert.match(chat, /pendingApproval\.hidden = !\(session\?\.pending_approval \|\| session\?\.pending_repo_policy \|\| session\?\.pending_bind\)/);
 	assert.match(css, /\.pending-approval\[hidden\]\s*\{\s*display:\s*none/);
 	assert.match(tokens, /\.shell-state\.waiting\{color:var\(--alarm\)/);
 });
@@ -58,6 +58,8 @@ test("Composer sends during an active run and reports projected queue count", ()
 test("State strip owns queue operator pending and unreachable state without chat rows", () => {
   assert.match(html, /id="chat-status-strip"[\s\S]*id="chat-run-as-you"[\s\S]*id="chat-notice"[\s\S]*id="chat-retry-model"/);
   assert.match(chat, /model unreachable · \$\{unreachable\.host/);
+	assert.match(chat, /model busy · \$\{busy\.host/);
+	assert.match(chat, /session\.server_id \|\| session\.b_profile/);
   assert.match(chat, /queued \(\$\{queued\}\).*waiting for model/);
   assert.match(chat, /operator mode · until/);
   assert.match(chat, /filter\(\(entry\) => !\["operator\.context", "message\.queued", "run\.queued"\]/);
@@ -100,10 +102,18 @@ test("Composer is five lines with no placeholder and expands upward", () => {
   assert.match(html, /textarea id="chat-task" rows="5" aria-label="Task"><\/textarea>/);
   assert.doesNotMatch(html, /placeholder=/);
   assert.match(css, /height:\s*112px/);
-  assert.match(css, /\.chat-composer\.expanded textarea[\s\S]*height:\s*min\(50vh, 520px\)/);
-  assert.match(css, /grid-template-columns:\s*24px auto minmax\(0, 1fr\)/);
+	assert.match(css, /\.chat-composer\.expanded textarea[\s\S]*height:\s*min\(50vh, 520px\)/);
+	assert.match(css, /grid-template-columns:\s*24px auto minmax\(0, 1fr\)/);
+	assert.match(css, /\.chat-input-wrap\s*\{\s*grid-column:\s*3/);
+	assert.match(css, /#chat-expand\s*\{[\s\S]*position:\s*absolute;[\s\S]*top:\s*4px;[\s\S]*right:\s*4px/);
   assert.match(html, /id="chat-send"[^>]+aria-label="Send"[^>]*>↵<\/button>/);
   assert.doesNotMatch(html, />Send<\/button>/);
+});
+
+test("Chat uses the narrow monospace label gutter and the agent_b tab restores its robot", () => {
+	assert.match(css, /\.chat-entry\s*\{[\s\S]*grid-template-columns:\s*90px minmax\(0, 1fr\)/);
+	assert.match(shell, /agentID === "agent_b"[\s\S]*agent-tab-robot[\s\S]*assets\/agent\.svg/);
+	assert.match(tokens, /\.agent-tab-robot\{width:16px;height:16px/);
 });
 
 test("Repository policy is a pinned full-content trust decision", () => {
@@ -114,6 +124,12 @@ test("Repository policy is a pinned full-content trust decision", () => {
   assert.match(chat, /\["Just once","policy-once"\]/);
   assert.match(chat, /\["No","policy-deny"\]/);
   assert.match(chat, /Technical detail/);
+});
+
+test("An existing outside directory raises the workspace bind offer before the model runs", () => {
+	assert.match(chat, /Bind this chat to \$\{session\.pending_bind\.dir\}\?/);
+	assert.match(chat, /api\("\/api\/bind", \{ session_id: session\.id, decision \}\)/);
+	assert.match(chat, /pending_approval \|\| session\?\.pending_repo_policy \|\| session\?\.pending_bind \? "waiting for you"/);
 });
 
 test("Reduced motion remains zero-duration", () => {

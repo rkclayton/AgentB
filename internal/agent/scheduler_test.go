@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -173,17 +174,79 @@ func TestModelUnreachableHoldsQueueDeduplicatesAndProbeReleases(t *testing.T) {
 	}
 }
 
-func TestAccountingBlackholeFastFailsAsModelUnreachable(t *testing.T) {
+func TestAccountingSlowConnectedServerReportsBusyWithoutStopping(t *testing.T) {
 	release := make(chan struct{})
-	blackhole := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		select {
-		case <-request.Context().Done():
-		case <-release:
+	var slow sync.Once
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/apply-template" {
+			slow.Do(func() {
+				select {
+				case <-request.Context().Done():
+				case <-release:
+				}
+			})
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"prompt":"prompt"}`))
+			return
 		}
+		if request.URL.Path == "/tokenize" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"tokens":[1]}`))
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
 	}))
-	defer blackhole.Close()
-	defer close(release)
-	_, profile, item, scheduler := schedulerFixture(t, blackhole.URL)
+	defer model.Close()
+	_, profile, item, scheduler := schedulerFixture(t, model.URL)
+	profile.Capabilities.Tokenize = true
+	profile.Capabilities.ApplyTemplate = true
+	profile.Capabilities.ApplyTemplateTools = true
+	scheduler.runner.cfg = func() config.Config {
+		cfg := config.Defaults(item.Workspace)
+		cfg.Context.Accounting = "exact"
+		cfg.Servers[0] = *profile
+		return cfg
+	}
+	eventsSeen, unsubscribe := scheduler.bus.Subscribe()
+	defer unsubscribe()
+	if _, err := scheduler.Submit(context.Background(), item.ID, "busy"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(4 * time.Second)
+	for {
+		select {
+		case event := <-eventsSeen:
+			if event.Type == events.ModelBusy {
+				if !scheduler.Active(item.ID) || item.Snapshot().Run.LastStopReason != "" {
+					t.Fatalf("busy request stopped: %+v", item.Snapshot().Run)
+				}
+				close(release)
+				goto released
+			}
+		case <-deadline:
+			t.Fatal("connected timeout did not publish model.busy")
+		}
+	}
+
+released:
+	deadlineAt := time.Now().Add(3 * time.Second)
+	for scheduler.Active(item.ID) && time.Now().Before(deadlineAt) {
+		time.Sleep(time.Millisecond)
+	}
+	if scheduler.Active(item.ID) || item.Snapshot().Run.LastStopReason != "done" {
+		t.Fatalf("released busy request=%+v", item.Snapshot().Run)
+	}
+}
+
+func TestAccountingDialFailureFastStopsAsModelUnreachable(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+	_, profile, item, scheduler := schedulerFixture(t, "http://"+address)
 	profile.Capabilities.Tokenize = true
 	profile.Capabilities.ApplyTemplate = true
 	profile.Capabilities.ApplyTemplateTools = true
@@ -197,10 +260,10 @@ func TestAccountingBlackholeFastFailsAsModelUnreachable(t *testing.T) {
 	if _, err := scheduler.Submit(context.Background(), item.ID, "unreachable"); err != nil {
 		t.Fatal(err)
 	}
-	for scheduler.Active(item.ID) && time.Since(start) < 4*time.Second {
-		time.Sleep(5 * time.Millisecond)
+	for scheduler.Active(item.ID) && time.Since(start) < 3*time.Second {
+		time.Sleep(time.Millisecond)
 	}
-	if elapsed := time.Since(start); scheduler.Active(item.ID) || elapsed > 3*time.Second {
+	if elapsed := time.Since(start); scheduler.Active(item.ID) || elapsed >= 3*time.Second {
 		t.Fatalf("elapsed=%s active=%t", elapsed, scheduler.Active(item.ID))
 	}
 	if reason := item.Snapshot().Run.LastStopReason; reason != "model_unreachable" {

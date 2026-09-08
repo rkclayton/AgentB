@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -150,6 +149,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		system := ""
 		var budget events.Budget
 		var budgetErr error
+		budgetBusy := false
 		r.stage(s, runID, turn, "assemble", func() {
 			systemBase := r.prompt.RenderParts(profile, s, toolNames, "", "")
 			systemProject := r.prompt.RenderParts(profile, s, toolNames, s.ProjectBlock, "")
@@ -165,7 +165,10 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				messages = append(messages, converted)
 			}
 			request = llm.Request{Messages: messages, Tools: schemas, ToolChoice: "auto", Thinking: profile.Reasoning.Enabled}
-			budget, budgetErr = r.budget.Measure(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, SystemProject: systemProject, SystemWorkspaceMemory: systemWorkspaceMemory, System: system, WithoutToolSystems: r.withoutToolSystems(profile, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false)
+			budget, budgetErr = r.budget.MeasureWithBusy(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, SystemProject: systemProject, SystemWorkspaceMemory: systemWorkspaceMemory, System: system, WithoutToolSystems: r.withoutToolSystems(profile, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false, func(err error) {
+				budgetBusy = true
+				r.bus.Publish(events.New(events.ModelBusy, s.ID, runID, map[string]any{"host": modelHost(profile), "detail": err.Error()}))
+			})
 			if budgetErr != nil {
 				return
 			}
@@ -179,6 +182,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			requestEvent = events.New(events.ModelRequest, s.ID, runID, data)
 			requestEvent.Body = body
 		})
+		if budgetBusy && budgetErr == nil {
+			r.bus.Publish(events.New(events.ModelReachable, s.ID, runID, map[string]any{"server_id": profile.ID}))
+		}
 		if budgetErr != nil {
 			r.operationalError(s, runID, "budget", budgetErr)
 			if !accountingRepairTried && r.repairMalformedToolCall(ctx, s, runID, profile, currentReasoning) {
@@ -206,8 +212,10 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		var response llm.Response
 		var callErr error
 		partial := ""
+		var streamBusy atomic.Bool
+		requestDone := make(chan struct{})
 		r.stage(s, runID, turn, "call_model", func() {
-			response, callErr = client.ChatStream(ctx, request, func(delta llm.Delta) {
+			response, callErr = client.ChatStreamStatus(ctx, request, func(delta llm.Delta) {
 				if delta.Kind == "progress" {
 					r.bus.Publish(events.New(events.ModelProgress, s.ID, runID, map[string]any{"turn": turn, "total": delta.Total, "cache": delta.Cache, "processed": delta.Processed}))
 					return
@@ -217,9 +225,24 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 					s.UpdatePartial(partial)
 				}
 				r.bus.Publish(events.New(events.ModelDelta, s.ID, runID, map[string]any{"turn": turn, "kind": delta.Kind, "index": delta.Index, "text": durableModelDeltaText(delta.Kind, delta.Text)}))
+			}, func() {
+				go func() {
+					timer := time.NewTimer(2500 * time.Millisecond)
+					defer timer.Stop()
+					select {
+					case <-timer.C:
+						streamBusy.Store(true)
+						r.bus.Publish(events.New(events.ModelBusy, s.ID, runID, map[string]any{"host": modelHost(profile), "detail": "connected; waiting for model response"}))
+					case <-requestDone:
+					}
+				}()
 			})
+			close(requestDone)
 			s.UpdatePartial("")
 		})
+		if streamBusy.Load() && callErr == nil {
+			r.bus.Publish(events.New(events.ModelReachable, s.ID, runID, map[string]any{"server_id": profile.ID}))
+		}
 		if callErr != nil {
 			if ctx.Err() != nil {
 				return "user_stop", "", turn
@@ -679,16 +702,18 @@ func modelUnavailable(profile *config.Profile, err error) (string, bool) {
 	if err == nil {
 		return "", false
 	}
-	text := strings.ToLower(err.Error())
-	unavailable := errors.Is(err, context.DeadlineExceeded) || strings.Contains(text, "deadline exceeded") || strings.Contains(text, "client.timeout") || strings.Contains(text, "dial tcp") || strings.Contains(text, "no such host") || strings.Contains(text, "connection refused") || strings.Contains(text, "i/o timeout") || strings.Contains(text, "network is unreachable")
-	if !unavailable {
+	if llm.TransportKindOf(err) != llm.TransportDial {
 		return "", false
 	}
+	return modelHost(profile), true
+}
+
+func modelHost(profile *config.Profile) string {
 	host := strings.TrimSpace(profile.BaseURL)
 	if endpoint, parseErr := url.Parse(host); parseErr == nil && endpoint.Host != "" {
 		host = endpoint.Host
 	}
-	return host, true
+	return host
 }
 func (r *Runner) textTokens(ctx context.Context, p *config.Profile, text string) int {
 	value, _ := r.count(ctx, p, text)

@@ -142,6 +142,8 @@ type Snapshot struct {
 	Chat                 []ChatEntry                `json:"chat"`
 	PendingApproval      *ChatEntry                 `json:"pending_approval,omitempty"`
 	ModelUnreachable     *ModelAvailability         `json:"model_unreachable,omitempty"`
+	ModelBusy            *ModelAvailability         `json:"model_busy,omitempty"`
+	PendingBind          *WorkspaceBindOffer        `json:"pending_bind,omitempty"`
 	RunAsYou             bool                       `json:"run_as_you,omitempty"`
 	Closed               bool                       `json:"closed"`
 	NamePinned           bool                       `json:"name_pinned,omitempty"`
@@ -152,6 +154,9 @@ type Snapshot struct {
 type ModelAvailability struct {
 	Host   string `json:"host"`
 	Detail string `json:"detail,omitempty"`
+}
+type WorkspaceBindOffer struct {
+	Dir string `json:"dir"`
 }
 
 type Operation struct {
@@ -251,6 +256,25 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.RepoPolicy = nil
 	case events.PolicyDenied:
 		next.PendingRepoPolicy = nil
+	case events.WorkspaceBindRequired:
+		next.PendingBind = &WorkspaceBindOffer{Dir: stringValue(data["dir"])}
+	case events.WorkspaceBindDecided:
+		next.PendingBind = nil
+	case events.WorkspaceBound:
+		next.PendingBind = nil
+		next.Workspace = stringValue(data["workspace_dir"])
+		next.WorkspaceDir = next.Workspace
+		next.WorkspaceMissing = boolValue(data["workspace_missing"])
+		next.ProjectContent = stringValue(data["project_content"])
+		next.ProjectFiles = stringSlice(data["project_files"])
+		next.ProjectNotes = stringSlice(data["project_notes"])
+		next.MemoryPath = stringValue(data["memory_path"])
+		next.MemoryContent = stringValue(data["memory_content"])
+		_ = decode(data["pending_repo_policy"], &next.PendingRepoPolicy)
+		_ = decode(data["repo_policy"], &next.RepoPolicy)
+		if data["tools"] != nil {
+			_ = decode(data["tools"], &next.Tools)
+		}
 	case events.MemoryCleared:
 		if strings.EqualFold(filepathClean(stringValue(data["dir"])), filepathClean(next.WorkspaceDir)) {
 			next.MemoryContent = ""
@@ -311,8 +335,12 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		}
 	case events.ModelUnreachable:
 		next.ModelUnreachable = &ModelAvailability{Host: stringValue(data["host"]), Detail: stringValue(data["detail"])}
+		next.ModelBusy = nil
+	case events.ModelBusy:
+		next.ModelBusy = &ModelAvailability{Host: stringValue(data["host"]), Detail: stringValue(data["detail"])}
 	case events.ModelReachable:
 		next.ModelUnreachable = nil
+		next.ModelBusy = nil
 	case events.ShellGrant, events.FileGrant:
 		if stringValue(data["scope"]) == "session" && stringValue(data["identity"]) == "operator" {
 			next.RunAsYou = true
@@ -713,7 +741,7 @@ func diff(before, after Snapshot) Patch {
 		{"compaction_model_calls", before.CompactionModelCalls, after.CompactionModelCalls},
 		{"compaction_prompt_tokens", before.CompactionPrompt, after.CompactionPrompt},
 		{"compaction_completion_tokens", before.CompactionCompletion, after.CompactionCompletion},
-		{"activity", before.Activity, after.Activity}, {"pending_approval", before.PendingApproval, after.PendingApproval}, {"model_unreachable", before.ModelUnreachable, after.ModelUnreachable}, {"run_as_you", before.RunAsYou, after.RunAsYou}, {"closed", before.Closed, after.Closed}, {"name_pinned", before.NamePinned, after.NamePinned},
+		{"activity", before.Activity, after.Activity}, {"pending_approval", before.PendingApproval, after.PendingApproval}, {"pending_bind", before.PendingBind, after.PendingBind}, {"model_unreachable", before.ModelUnreachable, after.ModelUnreachable}, {"model_busy", before.ModelBusy, after.ModelBusy}, {"run_as_you", before.RunAsYou, after.RunAsYou}, {"closed", before.Closed, after.Closed}, {"name_pinned", before.NamePinned, after.NamePinned},
 		{"projection_stale", before.Stale, after.Stale}, {"projection_stale_reason", before.StaleReason, after.StaleReason},
 	}
 	patch.Operations = append(patch.Operations, diffRun(before.Run, after.Run)...)

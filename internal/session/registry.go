@@ -148,21 +148,7 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 	}
 	session := &Session{ID: id, Label: label, AgentID: agentID, ServerID: agent.B, AgentName: agent.Name, BProfile: profile.Label, PromptAddendum: agent.PromptAddendum, Workspace: abs, WorkspaceMissing: setup.Missing, ProjectBlock: setup.Instructions.Block, ProjectFiles: setup.Instructions.Files, ProjectNotes: setup.Instructions.Notes, PendingRepoPolicy: pendingPolicy, RepoPolicy: activePolicy, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, AgentMemoryBlock: agentMemoryBlock, AgentMemoryPath: agentMemoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
 	if r.workspaces != nil && !setup.Missing {
-		session.ProjectTouch = func(relative string) {
-			target := filepath.Join(abs, relative)
-			info, statErr := os.Stat(target)
-			if statErr == nil && !info.IsDir() {
-				target = filepath.Dir(target)
-			}
-			addition, loadErr := workspaceinfo.LoadInstructions(abs, target)
-			if loadErr != nil {
-				r.bus.Publish(events.New(events.Error, id, "", map[string]any{"where": "project_instructions", "message": loadErr.Error()}))
-				return
-			}
-			if session.AppendProject(addition.Block, addition.Files, addition.Notes) {
-				r.bus.Publish(events.New(events.ProjectInstructions, id, "", map[string]any{"block": addition.Block, "files": addition.Files, "notes": addition.Notes, "lazy": true}))
-			}
-		}
+		session.ProjectTouch = r.projectTouch(session)
 	}
 	session.Messages = []events.Message{}
 	session.Budget = initialBudget(profile)
@@ -191,6 +177,99 @@ func (r *Registry) ApplyRepoPolicySession(sessionID string, state workspaceinfo.
 		}
 	}
 	return nil
+}
+
+func (r *Registry) BindWorkspace(sessionID, dir string) (*Session, error) {
+	s, ok := r.Get(sessionID)
+	if !ok {
+		return nil, fmt.Errorf("session not found")
+	}
+	if r.workspaces == nil {
+		return nil, fmt.Errorf("workspace manager unavailable")
+	}
+	setup, err := r.workspaces.Inspect(dir)
+	if err != nil {
+		return nil, err
+	}
+	if setup.Missing {
+		return nil, fmt.Errorf("workspace directory does not exist")
+	}
+	snapshot := s.Snapshot()
+	memoryBlock, memoryPath := "", ""
+	if r.memory != nil {
+		memoryBlock, memoryPath, err = r.memory(context.Background(), setup.Dir, snapshot.ServerID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var activePolicy, pendingPolicy *workspaceinfo.PolicyState
+	if setup.Policy.Path != "" {
+		copy := setup.Policy
+		if setup.Policy.Approved && setup.Policy.Error == "" {
+			activePolicy = &copy
+		} else {
+			pendingPolicy = &copy
+		}
+	}
+
+	s.mu.Lock()
+	if s.Closed {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("session is closed")
+	}
+	if s.Run.Status != "idle" {
+		s.mu.Unlock()
+		return nil, fmt.Errorf("session is running")
+	}
+	s.Workspace = setup.Dir
+	s.WorkspaceMissing = false
+	s.ProjectBlock = setup.Instructions.Block
+	s.ProjectFiles = append([]string(nil), setup.Instructions.Files...)
+	s.ProjectNotes = append([]string(nil), setup.Instructions.Notes...)
+	s.PendingRepoPolicy = pendingPolicy
+	s.RepoPolicy = activePolicy
+	s.MemoryBlock, s.MemoryPath = memoryBlock, memoryPath
+	s.LastSeen = map[string]time.Time{}
+	s.ProjectTouch = r.projectTouch(s)
+	if activePolicy != nil && len(activePolicy.Policy.DefaultToolset) > 0 {
+		for name := range s.ToolsEnabled {
+			s.ToolsEnabled[name] = false
+		}
+		for _, name := range activePolicy.Policy.DefaultToolset {
+			if _, exists := s.ToolsEnabled[name]; exists {
+				s.ToolsEnabled[name] = true
+			}
+		}
+	}
+	bound := s.SnapshotUnlocked()
+	s.mu.Unlock()
+	r.bus.Publish(events.New(events.WorkspaceBound, sessionID, "", map[string]any{
+		"workspace_dir": bound.WorkspaceDir, "workspace_missing": bound.WorkspaceMissing,
+		"project_content": bound.ProjectContent, "project_files": bound.ProjectFiles, "project_notes": bound.ProjectNotes,
+		"pending_repo_policy": bound.PendingRepoPolicy, "repo_policy": bound.RepoPolicy,
+		"memory_path": bound.MemoryPath, "memory_content": bound.MemoryContent, "tools": bound.Tools,
+	}))
+	return s, nil
+}
+
+func (r *Registry) projectTouch(item *Session) func(string) {
+	return func(relative string) {
+		snapshot := item.Snapshot()
+		root := snapshot.WorkspaceDir
+		target := filepath.Join(root, relative)
+		info, statErr := os.Stat(target)
+		if statErr == nil && !info.IsDir() {
+			target = filepath.Dir(target)
+		}
+		addition, loadErr := workspaceinfo.LoadInstructions(root, target)
+		if loadErr != nil {
+			r.bus.Publish(events.New(events.Error, item.ID, "", map[string]any{"where": "project_instructions", "message": loadErr.Error()}))
+			return
+		}
+		if item.AppendProject(addition.Block, addition.Files, addition.Notes) {
+			r.bus.Publish(events.New(events.ProjectInstructions, item.ID, "", map[string]any{"block": addition.Block, "files": addition.Files, "notes": addition.Notes, "lazy": true}))
+		}
+	}
 }
 func (r *Registry) DenyRepoPolicy(sessionID string) error {
 	s, ok := r.Get(sessionID)

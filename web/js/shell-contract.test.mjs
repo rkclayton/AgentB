@@ -7,6 +7,8 @@ const chat = await readFile(new URL("./chat.js", import.meta.url), "utf8");
 const consoleApp = await readFile(new URL("./app.js", import.meta.url), "utf8");
 const plan = await readFile(new URL("./plan.js", import.meta.url), "utf8");
 const tokens = await readFile(new URL("../css/tokens.css", import.meta.url), "utf8");
+const appCSS = await readFile(new URL("../css/app.css", import.meta.url), "utf8");
+const chatCSS = await readFile(new URL("../css/chat.css", import.meta.url), "utf8");
 const pages = await Promise.all(["index.html", "chat.html", "plan.html"].map(async (name) => [name, await readFile(new URL(`../${name}`, import.meta.url), "utf8")]));
 
 test("shared shell slot order is identical on Chat Console and Plan", () => {
@@ -41,6 +43,13 @@ test("agent menu owns open close and inline rename for open and closed chats", (
   assert.match(shell, /\{ label \}/);
 });
 
+test("overflow menu keeps extra Agents reachable without a horizontal scrollbar", () => {
+  assert.match(shell, /agentTabLayout\(entries\.length, tabs\.clientWidth\)/);
+  assert.match(shell, /button\("", "More agents", "agent-overflow"\)/);
+  assert.match(shell, /overflowButton\.textContent = `\+\$\{hidden\.length\}`/);
+  assert.doesNotMatch(tokens + appCSS + chatCSS, /overflow(?:-x)?:\s*(?:auto|scroll)/);
+});
+
 test("Stop follows the selected chat from each page-local lower control", () => {
   assert.match(chat, /api\("\/api\/stop", \{ session_id: session\.id \}\)/);
   assert.match(consoleApp, /api\("\/api\/stop",\{session_id:id\}\)/);
@@ -48,8 +57,9 @@ test("Stop follows the selected chat from each page-local lower control", () => 
   assert.doesNotMatch(chat+consoleApp+plan, /all:\s*true/);
 });
 
-test("top bar belongs to unellipsized scrolling agent tabs and right controls", () => {
-  assert.match(tokens, /\.shell-left,\.agent-tabs\{overflow-x:auto/);
+test("top bar belongs to shrinking non-scrolling agent tabs and right controls", () => {
+  assert.match(tokens, /\.shell-left,\.agent-tabs\{overflow:hidden/);
+  assert.match(tokens, /\.agent-tab-wrap\{[^}]*min-width:72px/);
   assert.match(tokens, /\.agent-tab[^\n]*white-space:nowrap/);
   assert.doesNotMatch(shell, /shell-selection/);
 });

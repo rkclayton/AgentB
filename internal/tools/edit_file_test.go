@@ -315,3 +315,29 @@ func TestEditFile(t *testing.T) {
 		}
 	})
 }
+
+func TestWriteFileByteIdenticalContentIsUnchanged(t *testing.T) {
+	root := t.TempDir()
+	_, tool, _, workspaces := testTools(root)
+	item := testSession(root, "a", "A")
+	path := writeFixture(t, root, "same.txt", []byte("same bytes\n"))
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	result, err := tool.Call(context.Background(), item, map[string]any{"path": path, "content": "same bytes\n"})
+	if err != nil || !strings.HasPrefix(result, "unchanged:") {
+		t.Fatalf("result=%q err=%v", result, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("mtime changed: before=%s after=%s", before.ModTime(), after.ModTime())
+	}
+	if _, ok := workspaces.LastWriter(root, "same.txt"); ok {
+		t.Fatal("unchanged write was recorded as a mutation")
+	}
+}

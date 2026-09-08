@@ -108,6 +108,11 @@ type Session struct {
 func (s *Session) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.SnapshotUnlocked()
+}
+
+// SnapshotUnlocked is for registry mutations that already hold the session lock.
+func (s *Session) SnapshotUnlocked() Snapshot {
 	tools := make([]ToolState, 0, len(s.ToolsEnabled))
 	for _, name := range []string{"read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "run_script", "call_service"} {
 		enabled, ok := s.ToolsEnabled[name]

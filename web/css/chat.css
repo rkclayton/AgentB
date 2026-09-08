@@ -71,7 +71,7 @@
 .chat-new-wrap { position: relative; }
 .chat-new-menu { position: absolute; z-index: 20; top: 100%; left: 0; width: min(34rem, 70vw); background: var(--bezel); border: 1px solid var(--mute); padding: 3px; }
 .chat-new-menu button { display: block; width: 100%; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.repo-policy-card pre { max-height: 12rem; overflow: auto; white-space: pre-wrap; }
+.repo-policy-card pre { max-height: 12rem; overflow-x: hidden; overflow-y: auto; white-space: pre-wrap; }
 .approval-card { display: grid; gap: 2px; }
 .approval-card > span:first-child { color: var(--alarm); font: 11px/16px var(--mono); text-transform: uppercase; }
 .approval-card details { color: var(--mute); }
@@ -182,7 +182,8 @@
 }
 .chat-log {
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   scrollbar-gutter: stable;
   scrollbar-gutter: stable;
   background: var(--well);
@@ -196,7 +197,7 @@
 }
 .chat-entry {
   display: grid;
-  grid-template-columns: 148px minmax(0, 1fr);
+  grid-template-columns: 90px minmax(0, 1fr);
   gap: 8px;
   padding: 8px 12px;
   border-bottom: 1px solid rgba(125, 135, 148, 0.28);
@@ -246,7 +247,8 @@
 .chat-content pre {
   margin: 4px 0 8px;
   padding: 8px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--well);
   box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.6);
   white-space: pre-wrap;
@@ -385,7 +387,8 @@
 .tool-detail {
   margin: 4px 0 0;
   padding: 8px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--well);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -500,13 +503,17 @@
   gap: 6px;
   align-items: end;
 }
+.chat-attach-wrap { grid-column: 1; }
+.chat-pending-attachments { grid-column: 2; }
+.chat-input-wrap { grid-column: 3; }
 .chat-composer textarea {
   min-width: 0;
   height: 112px;
   min-height: 112px;
   max-height: 112px;
   resize: none;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 5px 86px 5px 7px;
   background: var(--well);
   border: 1px solid rgba(125, 135, 148, 0.28);
@@ -612,7 +619,7 @@
   text-align: left;
   font: 12px/20px var(--mono);
 }
-.chat-exchange-files { max-height: 180px; overflow: auto; border-top: 1px solid rgba(125, 135, 148, 0.28); }
+.chat-exchange-files { max-height: 180px; overflow-x: hidden; overflow-y: auto; border-top: 1px solid rgba(125, 135, 148, 0.28); }
 .chat-exchange-files:empty { display: none; }
 .chat-exchange-files span { display: block; padding: 2px 5px; color: var(--mute); font: 12px/20px var(--mono); }
 #chat-build {
@@ -658,14 +665,19 @@
   max-height: 112px;
 }
 #chat-expand {
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 4px;
   width: 24px;
-  height: 32px;
-  min-height: 32px;
+  height: 24px;
+  min-height: 24px;
   padding: 0;
-  align-self: end;
   color: var(--mute);
-  background: transparent;
+  background: rgba(21, 24, 28, .62);
+  opacity: .62;
 }
+#chat-expand:hover { opacity: 1; }
 .chat-composer.expanded textarea {
   height: min(50vh, 520px);
   max-height: min(50vh, 520px);
@@ -685,5 +697,5 @@
 .no-open-chats .chat-composer { display: none; }
 
 @media (max-width: 620px) {
-  .chat-entry { grid-template-columns: 104px minmax(0, 1fr); }
+  .chat-entry { grid-template-columns: 90px minmax(0, 1fr); }
 }

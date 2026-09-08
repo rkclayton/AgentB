@@ -63,7 +63,7 @@ func (t *identityFileTool) Description() string {
 	description := t.tool.Description()
 	service, _, _, _ := t.identity.snapshot()
 	if service.Enabled {
-		description += " Paths outside the workspace require an operator decision; state the need once and stop rather than retrying paths."
+		description += " Try once. If it's outside your workspace the operator will be asked; don't retry other paths."
 	}
 	return description
 }

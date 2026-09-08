@@ -156,7 +156,7 @@ func TestFileToolJailDescriptionOnlyWhenServiceSplitEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(off), "Paths outside the workspace") {
+	if strings.Contains(string(off), "Try once. If it's outside your workspace") {
 		t.Fatalf("disabled split changed description: %s", off)
 	}
 	cfg.Shell.ServiceAccount.Enabled = true
@@ -165,7 +165,7 @@ func TestFileToolJailDescriptionOnlyWhenServiceSplitEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Paths outside the workspace require an operator decision; state the need once and stop rather than retrying paths."
+	want := "Try once. If it's outside your workspace the operator will be asked; don't retry other paths."
 	if strings.Count(string(on), want) != len(names) || string(on) == string(off) {
 		t.Fatalf("enabled split schema=%s", on)
 	}
