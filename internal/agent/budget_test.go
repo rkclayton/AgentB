@@ -34,6 +34,18 @@ func TestBudgetAccountsFetchedResultsSeparately(t *testing.T) {
 	}
 }
 
+func TestColdPrefillSuppressesImmediateCompaction(t *testing.T) {
+	budget := NewBudgeter()
+	budget.RecordUsage("session", 20000, 1661)
+	if !budget.ColdPrefill("session") {
+		t.Fatal("cold prefill was not recognized")
+	}
+	budget.RecordUsage("session", 20000, 18000)
+	if budget.ColdPrefill("session") {
+		t.Fatal("warm prefix was classified cold")
+	}
+}
+
 func TestExactSchemaAttributionReturnsTokenizerFailure(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

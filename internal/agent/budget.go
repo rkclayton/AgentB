@@ -8,6 +8,7 @@ import (
 	"math"
 	"strings"
 	"sync"
+	"time"
 
 	"harness/internal/config"
 	"harness/internal/events"
@@ -84,6 +85,10 @@ func (b *Budgeter) MarkRequest(id string, estimate int) {
 		state.lastChars = state.pendingChars
 	})
 }
+func (b *Budgeter) ColdPrefill(id string) bool {
+	state := b.state(id)
+	return state.hasMeasured && state.hasCached && state.measured > 0 && state.cached < state.measured/2
+}
 func (b *Budgeter) InvalidateToolCosts() {
 	b.mu.Lock()
 	b.toolCosts = map[string]cachedToolCosts{}
@@ -104,6 +109,9 @@ func (b *Budgeter) saveCosts(id, key string, schema, marginal map[string]int) {
 	b.mu.Unlock()
 }
 func (b *Budgeter) Measure(ctx context.Context, profile *config.Profile, s *session.Session, global config.GlobalContext, in budgetInput, markRequest bool) (events.Budget, error) {
+	accountingCtx, cancel := context.WithTimeout(ctx, 2500*time.Millisecond)
+	defer cancel()
+	ctx = accountingCtx
 	if in.SystemProject == "" {
 		in.SystemProject = in.SystemBase
 	}

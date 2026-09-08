@@ -3,9 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"math"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -108,7 +110,12 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	if !snapshot.Runnable {
 		return "profile_not_runnable", snapshot.NotRunnableReason, 0
 	}
-	defer r.PublishBudget(ctx, s)
+	publishFinalBudget := true
+	defer func() {
+		if publishFinalBudget {
+			r.PublishBudget(ctx, s)
+		}
+	}()
 	turn := 0
 	lengthSeen := false
 	accountingRepairTried := false
@@ -179,6 +186,11 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				turn--
 				continue
 			}
+			if host, unavailable := modelUnavailable(profile, budgetErr); unavailable {
+				publishFinalBudget = false
+				r.bus.Publish(events.New(events.ModelUnreachable, s.ID, runID, map[string]any{"host": host, "detail": budgetErr.Error()}))
+				return "model_unreachable", budgetErr.Error(), turn - 1
+			}
 			return "model_error", "budget accounting: " + budgetErr.Error(), turn - 1
 		}
 		guardUsed := guardedPromptTokens(budget)
@@ -211,6 +223,11 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		if callErr != nil {
 			if ctx.Err() != nil {
 				return "user_stop", "", turn
+			}
+			if host, unavailable := modelUnavailable(profile, callErr); unavailable {
+				publishFinalBudget = false
+				r.bus.Publish(events.New(events.ModelUnreachable, s.ID, runID, map[string]any{"host": host, "detail": callErr.Error()}))
+				return "model_unreachable", callErr.Error(), turn
 			}
 			return "model_error", callErr.Error(), turn
 		}
@@ -350,6 +367,18 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			reason, detail, prior := guards.Observe(item.call.ID, item.call.Name, eventArgs, item.content, item.ok)
 			if reason == "cycle" {
 				r.bus.Publish(events.New(events.CycleDetected, s.ID, runID, map[string]any{"call_id": item.call.ID, "name": item.call.Name, "args": eventArgs, "prior_call_id": prior}))
+				decision, err := r.gate.WaitCycleDecision(ctx, s, runID, item.call.ID+"-cycle", map[string]any{"tool": item.call.Name, "detail": detail})
+				if err != nil {
+					if ctx.Err() != nil {
+						return "user_stop", "", turn
+					}
+					return "cycle", err.Error(), turn
+				}
+				if decision == "continue" {
+					guards.ResetCycle()
+					continue
+				}
+				return "cycle", detail, turn
 			}
 			if reason != "" {
 				return reason, detail, turn
@@ -635,13 +664,31 @@ func (r *Runner) makeMessage(ctx context.Context, p *config.Profile, role, conte
 }
 func (r *Runner) count(ctx context.Context, p *config.Profile, text string) (int, bool) {
 	if p.Capabilities.Tokenize {
+		countCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
+		defer cancel()
 		client := llm.New(p)
-		count, err := client.Tokenize(ctx, text, false)
+		count, err := client.Tokenize(countCtx, text, false)
 		if err == nil {
 			return count, false
 		}
 	}
 	return int(math.Ceil(float64(len([]rune(text))) / 3.6)), true
+}
+
+func modelUnavailable(profile *config.Profile, err error) (string, bool) {
+	if err == nil {
+		return "", false
+	}
+	text := strings.ToLower(err.Error())
+	unavailable := errors.Is(err, context.DeadlineExceeded) || strings.Contains(text, "deadline exceeded") || strings.Contains(text, "client.timeout") || strings.Contains(text, "dial tcp") || strings.Contains(text, "no such host") || strings.Contains(text, "connection refused") || strings.Contains(text, "i/o timeout") || strings.Contains(text, "network is unreachable")
+	if !unavailable {
+		return "", false
+	}
+	host := strings.TrimSpace(profile.BaseURL)
+	if endpoint, parseErr := url.Parse(host); parseErr == nil && endpoint.Host != "" {
+		host = endpoint.Host
+	}
+	return host, true
 }
 func (r *Runner) textTokens(ctx context.Context, p *config.Profile, text string) int {
 	value, _ := r.count(ctx, p, text)
@@ -695,13 +742,21 @@ func (r *Runner) withoutToolSystems(p *config.Profile, s *session.Session, enabl
 func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID string, turn int, p *config.Profile, current map[string]bool) {
 	cfg := r.cfg()
 	readDefaultLimit := min(cfg.Tools.ReadFile.DefaultLimit, cfg.Tools.ReadFile.MaxLimit)
-	changed := r.compact.Supersede(s, runID, turn, readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
+	changed := false
 	budget, err := r.measureSession(ctx, p, s, current, false)
 	if err != nil {
 		r.operationalError(s, runID, "compaction_budget", err)
 		return
 	}
-	if budget.Ceiling > 0 && budget.UsedEst >= int(float64(budget.Ceiling)*cfg.Context.SoftPct) {
+	if shouldBatchElide(budget.UsedEst, budget.Ceiling, cfg.Context, r.budget.ColdPrefill(s.ID)) {
+		changed = r.compact.Supersede(s, runID, turn, readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
+		if changed {
+			budget, err = r.measureSession(ctx, p, s, current, false)
+			if err != nil {
+				r.operationalError(s, runID, "compaction_budget", err)
+				return
+			}
+		}
 		did, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
 		changed = changed || did
 		if did {
@@ -725,6 +780,16 @@ func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID
 		}
 		r.bus.Publish(events.New(events.BudgetEvent, s.ID, runID, next))
 	}
+}
+func shouldBatchElide(used, ceiling int, cfg config.GlobalContext, coldPrefill bool) bool {
+	if ceiling <= 0 || coldPrefill {
+		return false
+	}
+	high := cfg.SummaryPct
+	if high <= cfg.SoftPct {
+		high = min(.95, cfg.SoftPct+.10)
+	}
+	return used >= int(float64(ceiling)*high)
 }
 func (r *Runner) compactToFit(ctx context.Context, s *session.Session, runID string, p *config.Profile, current map[string]bool, budget events.Budget) bool {
 	cfg := r.cfg()
@@ -760,7 +825,7 @@ func requestParams(p *config.Profile, maxTokens int) map[string]any {
 	if control == "auto" {
 		control = p.Capabilities.ReasoningControl
 	}
-	return map[string]any{"temperature": s.Temperature, "top_p": s.TopP, "top_k": s.TopK, "min_p": s.MinP, "presence_penalty": s.PresencePenalty, "repeat_penalty": s.RepeatPenalty, "max_tokens": maxTokens, "reasoning": map[string]any{"control": control, "effort": p.Reasoning.Effort, "enabled": p.Reasoning.Enabled, "preserve": p.Reasoning.Preserve}}
+	return map[string]any{"temperature": s.Temperature, "top_p": s.TopP, "top_k": s.TopK, "min_p": s.MinP, "presence_penalty": s.PresencePenalty, "repeat_penalty": s.RepeatPenalty, "max_tokens": maxTokens, "reasoning": map[string]any{"control": control, "effort": p.Reasoning.Effort, "enabled": p.Reasoning.Enabled, "preserve": p.Reasoning.Preserve, "max_tokens": p.Reasoning.MaxTokens}}
 }
 
 func guardedPromptTokens(budget events.Budget) int {

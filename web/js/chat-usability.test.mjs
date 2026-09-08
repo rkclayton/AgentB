@@ -7,6 +7,9 @@ const css = await readFile(new URL("../css/chat.css", import.meta.url), "utf8");
 const html = await readFile(new URL("../chat.html", import.meta.url), "utf8");
 const shell = await readFile(new URL("./shell.js", import.meta.url), "utf8");
 const tokens = await readFile(new URL("../css/tokens.css", import.meta.url), "utf8");
+const settings = await readFile(new URL("./settings.js", import.meta.url), "utf8");
+const plan = await readFile(new URL("../plan.html", import.meta.url), "utf8");
+const consoleHTML = await readFile(new URL("../index.html", import.meta.url), "utf8");
 
 test("Chat has fence-only copy and documents composer keys", () => {
   assert.doesNotMatch(chat, /Copy message|messageCopy|assistantCopyText/);
@@ -49,12 +52,36 @@ test("Pending approval is pinned above the composer with zero idle space", () =>
 test("Composer sends during an active run and reports projected queue count", () => {
 	assert.doesNotMatch(chat, /Run in progress|queue_depth/);
 	assert.match(chat, /send\.onclick = submit/);
-	assert.match(chat, /queued \? `queued \(\$\{queued\}\)`/);
+	assert.match(chat, /const queueText = queued \? `queued \(\$\{queued\}\)/);
 });
 
-test("New, list, close, and rename live in the shared agent-tab shell", () => {
+test("State strip owns queue operator pending and unreachable state without chat rows", () => {
+  assert.match(html, /id="chat-status-strip"[\s\S]*id="chat-run-as-you"[\s\S]*id="chat-notice"[\s\S]*id="chat-retry-model"/);
+  assert.match(chat, /model unreachable · \$\{unreachable\.host/);
+  assert.match(chat, /queued \(\$\{queued\}\).*waiting for model/);
+  assert.match(chat, /operator mode · until/);
+  assert.match(chat, /filter\(\(entry\) => !\["operator\.context", "message\.queued", "run\.queued"\]/);
+  assert.match(css, /\.chat-status-strip \{ min-height:24px/);
+});
+
+test("Operator mode lives only in Settings Security and states the defeated boundary", () => {
+  assert.match(settings, /Run everything as me for 20 minutes/);
+  assert.match(settings, /defeats the service-account OS boundary for every tool in every chat/);
+  assert.match(settings, /data-action="operator-context"/);
+  assert.doesNotMatch(shell, /shell-operator-status/);
+});
+
+test("No-agent and blank Plan wells are explicit and Console links to active tools", () => {
+  assert.match(chat, /No agent connected — add one in/);
+  assert.match(chat, /operator-off-48\.png/);
+  assert.match(plan, />No plan yet\.<\/span>/);
+  assert.match(consoleHTML, /id="console-tools-link"[^>]*>0 tools active<\/a>/);
+});
+
+test("New, list, close, and rename live in the agent right-click menu", () => {
   assert.match(html, /id="app-shell"[^>]+data-page="chat"/);
-  assert.match(shell, /className = "shell-add"|"shell-add"/);
+  assert.doesNotMatch(shell, /button\("\+"/);
+  assert.match(shell, /button\("New chat…"/);
   assert.match(shell, /oncontextmenu/);
   assert.match(shell, /agent-chat-rename/);
   assert.doesNotMatch(html, /chat-clear-conversation|Clear conversation/);
@@ -63,10 +90,10 @@ test("New, list, close, and rename live in the shared agent-tab shell", () => {
 });
 
 test("New chat binds a default, recent, or operator-picked directory", () => {
-  assert.match(shell, /addMenu\.hidden = true/);
+  assert.match(shell, /menu\.hidden = true/);
   assert.match(shell, /api\("\/api\/pick-folder", undefined, "GET"\)/);
   assert.match(shell, /api\("\/api\/pick-folder", \{ default: choices\.default \}\)/);
-  assert.match(shell, /session\.workspace_dir \|\| session\.workspace/);
+  assert.match(shell, /\{ source_session_id: source\.id, workspace \}/);
 });
 
 test("Composer is five lines with no placeholder and expands upward", () => {
@@ -74,7 +101,9 @@ test("Composer is five lines with no placeholder and expands upward", () => {
   assert.doesNotMatch(html, /placeholder=/);
   assert.match(css, /height:\s*112px/);
   assert.match(css, /\.chat-composer\.expanded textarea[\s\S]*height:\s*min\(50vh, 520px\)/);
-  assert.match(css, /grid-template-columns:\s*24px auto minmax\(0, 1fr\) 24px 72px/);
+  assert.match(css, /grid-template-columns:\s*24px auto minmax\(0, 1fr\)/);
+  assert.match(html, /id="chat-send"[^>]+aria-label="Send"[^>]*>↵<\/button>/);
+  assert.doesNotMatch(html, />Send<\/button>/);
 });
 
 test("Repository policy is a pinned full-content trust decision", () => {

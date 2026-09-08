@@ -280,6 +280,9 @@ func (c *Client) ApplyTemplate(ctx context.Context, messages []Message, tools []
 		if contains(c.profile.Reasoning.ValidEfforts, c.profile.Reasoning.Effort) {
 			kwargs["reasoning_effort"] = c.profile.Reasoning.Effort
 		}
+		if c.profile.Reasoning.MaxTokens > 0 {
+			kwargs["reasoning_budget"] = c.profile.Reasoning.MaxTokens
+		}
 		body["chat_template_kwargs"] = kwargs
 	}
 	raw, status, err := c.DoJSON(ctx, http.MethodPost, "/apply-template", body)

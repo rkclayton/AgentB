@@ -168,6 +168,26 @@ func TestShellGrantAndLapseProjectAsReplayableNotices(t *testing.T) {
 	}
 }
 
+func TestModelAvailabilityAndRunAsYouReconstructFromEvents(t *testing.T) {
+	state := Empty("main")
+	records := []events.Event{
+		events.New(events.ModelUnreachable, "main", "r1", map[string]any{"host": "model.example:8000", "detail": "dial timeout"}),
+		events.New(events.ShellGrant, "main", "r1", map[string]any{"scope": "session", "identity": "operator", "rule": "shell_boundary"}),
+		events.New(events.ModelReachable, "main", "", map[string]any{"server_id": "main"}),
+		events.New(events.ShellGrantLapsed, "main", "r1", map[string]any{"scope": "session", "identity": "operator", "reason": "revoked by operator"}),
+	}
+	for index, event := range records {
+		var err error
+		state, _, err = Next(state, Record{Cursor: Cursor{Generation: "availability.events", Offset: int64(index + 1)}, Event: event})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if state.ModelUnreachable != nil || state.RunAsYou {
+		t.Fatalf("replayed availability=%+v run_as_you=%t", state.ModelUnreachable, state.RunAsYou)
+	}
+}
+
 func TestSessionRenameReplaysAuthorAndUserPin(t *testing.T) {
 	state := seeded(t)
 	aux, _, err := Next(state, Record{Cursor: Cursor{Generation: "main-a.jsonl", Offset: 30}, Event: events.Event{

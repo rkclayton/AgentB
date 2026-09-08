@@ -203,7 +203,7 @@ func add(c *Counters, event events.Event, r *run) {
 			if r != nil && !r.evidence {
 				c.Reliability.Silent++
 			}
-		} else if reason == "model_error" || reason == "length" {
+		} else if reason == "model_error" || reason == "model_unreachable" || reason == "length" {
 			c.Reliability.ModelFailures++
 		} else if reason == "tool_errors" || reason == "profile_not_runnable" || reason == "context_ceiling" {
 			c.Reliability.HarnessFailures++

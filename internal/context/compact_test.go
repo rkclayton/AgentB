@@ -20,6 +20,18 @@ func TestReadFileRangesUseByteUnitsAndConfiguredDefault(t *testing.T) {
 	}
 }
 
+func TestReadFileLineRangesSupersedeOnlyOverlappingLineMode(t *testing.T) {
+	if !supersedes("read_file", `{"path":"a","line":10,"lines":20}`, `{"path":"a","line":25,"lines":5}`, 100) {
+		t.Fatal("overlapping line reads did not supersede")
+	}
+	if supersedes("read_file", `{"path":"a","line":10,"lines":5}`, `{"path":"a","line":25,"lines":5}`, 100) {
+		t.Fatal("disjoint line reads superseded")
+	}
+	if supersedes("read_file", `{"path":"a","line":10,"lines":5}`, `{"path":"a","offset":10,"limit":5}`, 100) {
+		t.Fatal("line and byte modes superseded each other")
+	}
+}
+
 func TestSummarizeRejectsContextGrowth(t *testing.T) {
 	bus := events.NewBus()
 	item := &session.Session{ID: "main"}

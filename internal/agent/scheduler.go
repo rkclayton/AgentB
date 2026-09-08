@@ -26,20 +26,21 @@ type SubmitResult struct {
 	Position int    `json:"position,omitempty"`
 }
 type Scheduler struct {
-	mu       sync.Mutex
-	runner   *Runner
-	registry *session.Registry
-	bus      *events.Bus
-	cfg      func() config.Config
-	active   map[string]*activeRun
-	queue    []queuedRun
-	pending  map[string][]queuedRun
-	held     map[string]bool
-	ids      atomic.Int64
+	mu          sync.Mutex
+	runner      *Runner
+	registry    *session.Registry
+	bus         *events.Bus
+	cfg         func() config.Config
+	active      map[string]*activeRun
+	queue       []queuedRun
+	pending     map[string][]queuedRun
+	held        map[string]bool
+	unreachable map[string]bool
+	ids         atomic.Int64
 }
 
 func NewScheduler(runner *Runner, registry *session.Registry, bus *events.Bus, cfg func() config.Config) *Scheduler {
-	return &Scheduler{runner: runner, registry: registry, bus: bus, cfg: cfg, active: map[string]*activeRun{}, pending: map[string][]queuedRun{}, held: map[string]bool{}}
+	return &Scheduler{runner: runner, registry: registry, bus: bus, cfg: cfg, active: map[string]*activeRun{}, pending: map[string][]queuedRun{}, held: map[string]bool{}, unreachable: map[string]bool{}}
 }
 func (s *Scheduler) Submit(ctx context.Context, sessionID, text string) (SubmitResult, error) {
 	return s.SubmitAttachments(ctx, sessionID, text, nil)
@@ -58,6 +59,24 @@ func (s *Scheduler) SubmitAttachments(ctx context.Context, sessionID, text strin
 		return SubmitResult{}, fmt.Errorf("session is closed")
 	}
 	defer item.EndSubmission()
+	if s.unreachable[sessionID] {
+		if position := identicalPendingPosition(s.pending[sessionID], text); position > 0 {
+			return SubmitResult{Queued: true, Position: position}, nil
+		}
+		message, err := s.runner.QueueUserAttachments(ctx, item, text, attachments)
+		if err != nil {
+			return SubmitResult{}, err
+		}
+		s.pending[sessionID] = append(s.pending[sessionID], queuedRun{s: item, userMessageID: message.ID, userMessage: message})
+		position := len(s.pending[sessionID])
+		item.SetQueuedMessages(position)
+		state := item.Snapshot().Run
+		state.Status = "held"
+		state.QueuePosition = position
+		item.SetRun(state)
+		s.bus.Publish(events.New(events.MessageQueued, sessionID, "", map[string]any{"message_id": message.ID, "position": position, "waiting_for": "model"}))
+		return SubmitResult{Queued: true, Position: position}, nil
+	}
 	if s.held[sessionID] {
 		message, err := s.runner.QueueUserAttachments(ctx, item, text, attachments)
 		if err != nil {
@@ -80,6 +99,9 @@ func (s *Scheduler) SubmitAttachments(ctx context.Context, sessionID, text strin
 		return SubmitResult{Queued: true, Position: position}, nil
 	}
 	if _, active := s.active[sessionID]; active || item.IsRunning() {
+		if position := identicalPendingPosition(s.pending[sessionID], text); position > 0 {
+			return SubmitResult{Queued: true, Position: position}, nil
+		}
 		depth := s.cfg().Run.QueueDepth
 		if depth > 0 && len(s.pending[sessionID]) >= depth {
 			return SubmitResult{}, fmt.Errorf("queue full")
@@ -131,7 +153,10 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 	if active != nil && active.stopReason != "" {
 		reason = active.stopReason
 	}
-	if waiting := s.pending[entry.s.ID]; len(waiting) > 0 && !s.held[entry.s.ID] {
+	if reason == "model_unreachable" {
+		s.unreachable[entry.s.ID] = true
+	}
+	if waiting := s.pending[entry.s.ID]; len(waiting) > 0 && !s.held[entry.s.ID] && !s.unreachable[entry.s.ID] {
 		next := waiting[0]
 		s.pending[entry.s.ID] = waiting[1:]
 		entry.s.SetQueuedMessages(len(waiting) - 1)
@@ -140,7 +165,7 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 		s.queue = append(s.queue, next)
 	}
 	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: reason}
-	queueHeld := s.held[entry.s.ID] && len(s.pending[entry.s.ID]) > 0
+	queueHeld := (s.held[entry.s.ID] || s.unreachable[entry.s.ID]) && len(s.pending[entry.s.ID]) > 0
 	if queueHeld {
 		state.Status = "held"
 		state.QueuePosition = len(s.pending[entry.s.ID])
@@ -154,6 +179,48 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 	}
 	s.repositionLocked()
 	s.mu.Unlock()
+}
+
+func identicalPendingPosition(waiting []queuedRun, text string) int {
+	for index, entry := range waiting {
+		if entry.userMessage.Content == text {
+			return index + 1
+		}
+	}
+	return 0
+}
+
+// ReleaseModel releases only model-unreachable holds after a successful probe.
+// A manual Stop hold remains in force until the operator explicitly sends again.
+func (s *Scheduler) ReleaseModel(profileID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for sessionID, held := range s.unreachable {
+		if !held {
+			continue
+		}
+		item, ok := s.registry.Get(sessionID)
+		if !ok || item.ServerID != profileID {
+			continue
+		}
+		delete(s.unreachable, sessionID)
+		s.bus.Publish(events.New(events.ModelReachable, sessionID, "", map[string]any{"server_id": profileID}))
+		waiting := s.pending[sessionID]
+		if len(waiting) == 0 || s.held[sessionID] || s.active[sessionID] != nil {
+			continue
+		}
+		next := waiting[0]
+		s.pending[sessionID] = waiting[1:]
+		item.SetQueuedMessages(len(waiting) - 1)
+		next.runID = fmt.Sprintf("r%d", s.ids.Add(1))
+		if len(s.active) < s.cfg().Run.MaxConcurrent {
+			s.startLocked(next)
+		} else {
+			s.queue = append(s.queue, next)
+			item.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.queue)})
+			s.bus.Publish(events.New(events.RunQueued, sessionID, next.runID, map[string]any{"run_id": next.runID, "position": len(s.queue)}))
+		}
+	}
 }
 func (s *Scheduler) repositionLocked() {
 	for index, entry := range s.queue {

@@ -287,7 +287,7 @@ func TestFileToolSessionGrantPersistsAcrossRunsAndLapsesOnClose(t *testing.T) {
 	}
 }
 
-func TestRunAsYouChatGrantCoversFileAndShellWithoutAnotherPrompt(t *testing.T) {
+func TestRunAsYouChatGrantCoversFileShellAndInterpreterWithoutAnotherPrompt(t *testing.T) {
 	bus := events.NewBus()
 	eventCh, unsubscribe := bus.Subscribe()
 	defer unsubscribe()
@@ -312,6 +312,10 @@ func TestRunAsYouChatGrantCoversFileAndShellWithoutAnotherPrompt(t *testing.T) {
 	outcome := runner.executeTool(context.Background(), s, "run-2", "call-2", "shell", map[string]any{"command": "whoami"})
 	if !outcome.OK || !outcome.OperatorContext || shellTool.normalCalls != 0 || shellTool.overrideCalls != 1 {
 		t.Fatalf("shell outcome=%+v normal=%d operator=%d", outcome, shellTool.normalCalls, shellTool.overrideCalls)
+	}
+	interpreter := runner.executeTool(context.Background(), s, "run-3", "call-3", "shell", map[string]any{"command": "python -V"})
+	if !interpreter.OK || !interpreter.OperatorContext || shellTool.normalCalls != 0 || shellTool.overrideCalls != 2 {
+		t.Fatalf("interpreter outcome=%+v normal=%d operator=%d", interpreter, shellTool.normalCalls, shellTool.overrideCalls)
 	}
 }
 

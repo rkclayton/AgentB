@@ -141,10 +141,17 @@ type Snapshot struct {
 	Timeline             []events.Event             `json:"timeline"`
 	Chat                 []ChatEntry                `json:"chat"`
 	PendingApproval      *ChatEntry                 `json:"pending_approval,omitempty"`
+	ModelUnreachable     *ModelAvailability         `json:"model_unreachable,omitempty"`
+	RunAsYou             bool                       `json:"run_as_you,omitempty"`
 	Closed               bool                       `json:"closed"`
 	NamePinned           bool                       `json:"name_pinned,omitempty"`
 	Stale                bool                       `json:"projection_stale,omitempty"`
 	StaleReason          string                     `json:"projection_stale_reason,omitempty"`
+}
+
+type ModelAvailability struct {
+	Host   string `json:"host"`
+	Detail string `json:"detail,omitempty"`
 }
 
 type Operation struct {
@@ -271,6 +278,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		}
 	case events.SessionClosed:
 		next.Closed = true
+		next.RunAsYou = false
 	case events.RunQueued:
 		next.Run.Status = "queued"
 		next.Run.RunID = firstString(data["run_id"], record.Event.RunID)
@@ -300,6 +308,18 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		}
 		if next.PendingApproval != nil && next.PendingApproval.RunID == record.Event.RunID {
 			next.PendingApproval = nil
+		}
+	case events.ModelUnreachable:
+		next.ModelUnreachable = &ModelAvailability{Host: stringValue(data["host"]), Detail: stringValue(data["detail"])}
+	case events.ModelReachable:
+		next.ModelUnreachable = nil
+	case events.ShellGrant, events.FileGrant:
+		if stringValue(data["scope"]) == "session" && stringValue(data["identity"]) == "operator" {
+			next.RunAsYou = true
+		}
+	case events.ShellGrantLapsed, events.FileGrantLapsed:
+		if stringValue(data["scope"]) == "session" && stringValue(data["identity"]) == "operator" {
+			next.RunAsYou = false
 		}
 	case events.Stage:
 		stage, state := stringValue(data["stage"]), stringValue(data["state"])
@@ -693,7 +713,7 @@ func diff(before, after Snapshot) Patch {
 		{"compaction_model_calls", before.CompactionModelCalls, after.CompactionModelCalls},
 		{"compaction_prompt_tokens", before.CompactionPrompt, after.CompactionPrompt},
 		{"compaction_completion_tokens", before.CompactionCompletion, after.CompactionCompletion},
-		{"activity", before.Activity, after.Activity}, {"pending_approval", before.PendingApproval, after.PendingApproval}, {"closed", before.Closed, after.Closed}, {"name_pinned", before.NamePinned, after.NamePinned},
+		{"activity", before.Activity, after.Activity}, {"pending_approval", before.PendingApproval, after.PendingApproval}, {"model_unreachable", before.ModelUnreachable, after.ModelUnreachable}, {"run_as_you", before.RunAsYou, after.RunAsYou}, {"closed", before.Closed, after.Closed}, {"name_pinned", before.NamePinned, after.NamePinned},
 		{"projection_stale", before.Stale, after.Stale}, {"projection_stale_reason", before.StaleReason, after.StaleReason},
 	}
 	patch.Operations = append(patch.Operations, diffRun(before.Run, after.Run)...)

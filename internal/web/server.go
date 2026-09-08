@@ -832,6 +832,21 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := parts[0]
+	if len(parts) == 3 && parts[1] == "grants" && parts[2] == "revoke" && r.Method == http.MethodPost {
+		if err := s.operatorRequest(r); err != nil {
+			writeError(w, http.StatusForbidden, "Run as you can be revoked only by the verified local operator process", "session_id")
+			return
+		}
+		if _, ok := s.registry.Get(id); !ok {
+			writeError(w, http.StatusNotFound, "session not found", "session_id")
+			return
+		}
+		if s.runner != nil {
+			s.runner.RevokeSessionGrants(id)
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"session_id": id, "revoked": true})
+		return
+	}
 	if len(parts) == 3 && parts[1] == "messages" && parts[2] == "drop-last" && r.Method == http.MethodPost {
 		message, err := s.registry.DropLastMessage(id)
 		if err != nil {
@@ -1083,6 +1098,7 @@ func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) runProbe(ctx context.Context, profile *config.Profile, current *probeRun) {
 	caps, findings, err := probe.Probe(ctx, profile)
+	probeSucceeded := err == nil
 	s.clearProbe(profile.ID, current)
 	if ctx.Err() != nil {
 		return
@@ -1110,6 +1126,9 @@ func (s *Server) runProbe(ctx context.Context, profile *config.Profile, current 
 		s.registry.RefreshRunnable()
 	}
 	s.bus.Publish(events.New(events.ServerProbed, "", "", map[string]any{"server_id": profile.ID, "capabilities": caps, "findings": findings}))
+	if probeSucceeded && s.scheduler != nil {
+		s.scheduler.ReleaseModel(profile.ID)
+	}
 }
 
 func (s *Server) clearProbe(profileID string, current *probeRun) {

@@ -8,6 +8,7 @@ export function shellGrantApproval(data = {}) {
 }
 
 export function approvalChoices(data = {}) {
+	if (data.kind === "cycle" || data.name === "run.cycle") return [["continue", "Continue"], ["stop", "Stop"]];
 	return [["session", "Yes, for this chat"], ["once", "Just once"], ["deny", "No"]];
 }
 
@@ -16,6 +17,12 @@ export function approvalText(data = {}) {
 		? data.boundary_escape
 		: data.name?.endsWith(".operator_override");
 	const value = data.args?.path ?? data.args?.command ?? data.args?.pattern ?? "";
+	if (data.kind === "cycle" || data.name === "run.cycle") return {
+		title: "Loop check",
+		request: "You’re repeating — continue or stop?",
+		reason: data.args?.detail || "The same tool call and result repeated.",
+		detail: data.args?.tool || "",
+	};
 	if (boundary) return {
 		title: "Run as you",
 		request: `${data.name || "This operation"} needs your Windows identity.`,
@@ -62,7 +69,7 @@ export function createApprovalCard(document, entry = {}, options = {}) {
 			const button = document.createElement("button");
 			button.type = "button";
 			button.textContent = label;
-			if (decision === "session") {
+			if (decision === "session" || decision === "continue") {
 				button.className = "default";
 				button.autofocus = true;
 			}

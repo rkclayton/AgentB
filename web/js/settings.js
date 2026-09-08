@@ -1,4 +1,5 @@
 import { api, reduce, setActive, store, subscribe } from "./bus.js";
+import { operatorStatusView } from "./operator-status.js";
 
 const sheet = document.getElementById("settings-page");
 let gear;
@@ -271,6 +272,7 @@ function profileFields(profile, reason) {
     ${toggle(`${p}.reasoning.enabled`, "enabled", profile.reasoning.enabled)}
     ${efforts.length ? choices(`${p}.reasoning.effort`, "effort", efforts, profile.reasoning.effort) : row("effort", '<span class="settings-note inline">not supported by this server</span>')}
     ${toggle(`${p}.reasoning.preserve`, "preserve", profile.reasoning.preserve)}
+    ${number(`${p}.reasoning.max_tokens`, "reasoning cap", profile.reasoning.max_tokens || 0, "1")}
     ${number(`${p}.context.reserve_output`, "reserve", profile.context.reserve_output)}
 	${number(`${p}.context.n_ctx`, "context size", profile.context.n_ctx, "1", false, "", !profile.context.n_ctx)}
     ${textarea(`${p}.system_prompt_override`, "system prompt override", profile.system_prompt_override || "")}
@@ -495,8 +497,11 @@ function shell(active) {
 	const certificateDone = signingStatus.configured && signingStatus.has_private_key && signingStatus.code_signing_eku;
 	const verifyDone = certificateDone && signingStatus.chain_valid && signaturesValid;
 	const signingAllowed = signingStatus.can_manage && !signingBusy;
-  return `<div class="settings-subhead">Service identity</div>
-	<p class="settings-note">Use the operator control beside Stop to run tools temporarily as your Windows account.</p>
+	const operatorView = operatorStatusView(store.shell_identity);
+  return `<div class="settings-subhead">Operator mode</div>
+	${row("identity", `<button type="button" class="settings-operator-status" data-action="operator-context" aria-pressed="${operatorView.active}" aria-label="${attr(operatorView.label)}"><img src="${operatorView.src}" srcset="${operatorView.srcset}" width="24" height="24" alt=""><span>${operatorView.active ? "Stop running everything as me" : "Run everything as me for 20 minutes"}</span></button>`)}
+	<p class="settings-note">This defeats the service-account OS boundary for every tool in every chat until it expires.</p>
+	<div class="settings-subhead">Service identity</div>
     ${row("status", `<span class="account-status"><span class="lamp ${serviceAccountStatus.administrator ? "alarm" : serviceAccountStatus.exists ? "live" : ""}"></span>${html(accountState)}</span>`)}
     ${row("credential", `<span class="account-status">${html(stored)}</span>`)}
     ${row("new password", `<input id="service-account-setup-password" type="password" autocomplete="new-password" aria-label="New service-account password" ${setupDisabled ? "disabled" : ""}>`)}
@@ -669,6 +674,11 @@ async function click(event) {
     return render();
   }
   if (action === "save-settings") return saveSettings();
+  if (action === "operator-context") {
+    try { await api("/api/config", {shell:{operator_context:!store.shell_identity?.operator_context}}); }
+    catch (error) { errors.set("shell", error.message); render(); }
+    return;
+  }
   if (action === "open-setup") { location.href = "/setup?from=settings"; return; }
   if (action === "config-toggle" || action === "config-choice") {
     const path = button.dataset.path;

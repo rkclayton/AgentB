@@ -149,9 +149,23 @@ func supersedes(name, older, current string, readDefaultLimit int) bool {
 		Path   string `json:"path"`
 		Offset int    `json:"offset"`
 		Limit  int    `json:"limit"`
+		Line   int    `json:"line"`
+		Lines  int    `json:"lines"`
 	}
 	if json.Unmarshal([]byte(older), &a) != nil || json.Unmarshal([]byte(current), &b) != nil || a.Path != b.Path {
 		return false
+	}
+	if a.Line > 0 || b.Line > 0 {
+		if a.Line == 0 || b.Line == 0 {
+			return false
+		}
+		if a.Lines == 0 {
+			a.Lines = 200
+		}
+		if b.Lines == 0 {
+			b.Lines = 200
+		}
+		return a.Line <= b.Line+b.Lines-1 && b.Line <= a.Line+a.Lines-1
 	}
 	if a.Offset == 0 {
 		a.Offset = 1
@@ -189,6 +203,10 @@ func keyArgs(name, raw string, readDefaultLimit int) string {
 	}
 	if name == "read_file" {
 		path, _ := args["path"].(string)
+		if line := number(args["line"], 0); line > 0 {
+			lines := number(args["lines"], 200)
+			return fmt.Sprintf("%s lines %d–%d", path, line, line+lines-1)
+		}
 		offset := number(args["offset"], 1)
 		limit := number(args["limit"], readDefaultLimit)
 		return fmt.Sprintf("%s bytes %d–%d", path, offset, offset+limit-1)

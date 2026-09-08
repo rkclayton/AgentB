@@ -42,15 +42,24 @@ try {
     }
     if ($launcherSource -notmatch '\[switch\]\$Detached' -or
         $launcherSource -notmatch '\[switch\]\$NoPause' -or
+        $launcherSource -notmatch '\[switch\]\$Console' -or
         $launcherSource -notmatch "WindowStyle = 'Hidden'" -or
         $launcherSource -notmatch 'launcher-errors\.log') {
-        throw 'Installed PowerShell launcher is missing detached automation or durable failure logging.'
+        throw 'Installed PowerShell launcher is missing hidden-default/Console-opt-in launch behavior, detached automation, or durable failure logging.'
     }
     $batchLauncherSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'Agent_b.cmd')
     if ($batchLauncherSource -match '(?im)^\s*pause\s*$' -or
+        $batchLauncherSource -notmatch 'AGENTB_HIDDEN_REENTRY' -or
+        $batchLauncherSource -notmatch '"-Console"' -or
         $batchLauncherSource -notmatch 'timeout /t 10 /nobreak' -or
         $batchLauncherSource -notmatch 'AGENT_B_AUTO_CLOSE') {
-        throw 'Installed batch launcher can still wait indefinitely after a failure.'
+        throw 'Installed batch launcher does not hide by default with -Console opt-in, or can still wait indefinitely after a failure.'
+    }
+    $sourceBatchLauncher = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'start-Agent_b.cmd')
+    if ($sourceBatchLauncher -notmatch 'AGENTB_HIDDEN_REENTRY' -or
+        $sourceBatchLauncher -notmatch '"-Console"' -or
+        $sourceBatchLauncher -notmatch 'launcher-errors\.log') {
+        throw 'Source launcher does not hide by default with -Console opt-in and durable failure logging.'
     }
     $indexSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\index.html')
     $chatSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\chat.html')
@@ -71,11 +80,11 @@ try {
             throw "Installed $($page.Name) page is missing the shared shell slot."
         }
     }
-    if ($shellSource -notmatch 'root\.append\(left, middle, right\)' -or
-        $shellSource -notmatch 'right\.append\(stop, state, operator, alarm, connection, pages, settings\)' -or
-        $shellSource -notmatch 'const sessionID = store\.selection\.session_id' -or
+    if ($shellSource -notmatch 'root\.append\(left, right\)' -or
+        $shellSource -notmatch 'right\.append\(pages, settings\)' -or
+        $shellSource -match 'shell-operator-status' -or
         $shellSource -match 'all:\s*true') {
-        throw 'Installed shared shell does not preserve LEFT/MIDDLE/RIGHT order or selected-chat Stop scope.'
+        throw 'Installed shared shell does not preserve agent-tabs/right-controls ownership.'
     }
     foreach ($required in @('id="chat-attach"', 'id="chat-expand"', 'rows="5"', '/static/assets/Agent_b.ico', '/static/app.webmanifest')) {
         if ($chatSource -notmatch [regex]::Escape($required)) { throw "Installed Chat view is missing: $required" }
@@ -87,7 +96,7 @@ try {
         if ($shellSource -notmatch [regex]::Escape($link)) { throw "Installed application is missing page switch $link." }
     }
     $chatCSS = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\css\chat.css')
-    foreach ($required in @('.chat-budget { grid-row: 2; }', '.chat-log { grid-row: 3; }', '.chat-composer { grid-row: 4; }', '#chat-send {')) {
+    foreach ($required in @('.chat-budget { grid-row: 3; }', '.chat-log { grid-row: 4; }', '.chat-composer { grid-row: 5; }', '#chat-send {')) {
         if ($chatCSS -notmatch [regex]::Escape($required)) { throw "Installed Chat layout is missing: $required" }
     }
     $chatScript = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\chat.js')

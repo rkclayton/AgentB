@@ -105,6 +105,14 @@ func (r *Runner) lapseShellGrants(s *session.Session, runID string) {
 // LapseSessionGrants closes only grants scoped to the durable chat. Run grants
 // retain their existing run-end lifecycle.
 func (r *Runner) LapseSessionGrants(sessionID string) {
+	r.lapseSessionGrants(sessionID, "session closed")
+}
+
+func (r *Runner) RevokeSessionGrants(sessionID string) {
+	r.lapseSessionGrants(sessionID, "revoked by operator")
+}
+
+func (r *Runner) lapseSessionGrants(sessionID, reason string) {
 	r.identityGrantMu.Lock()
 	delete(r.identityChatGrants, sessionID)
 	r.identityGrantMu.Unlock()
@@ -124,7 +132,7 @@ func (r *Runner) LapseSessionGrants(sessionID string) {
 	})
 	for _, stored := range shellGrants {
 		if r.bus != nil {
-			r.bus.Publish(events.New(events.ShellGrantLapsed, sessionID, stored.RunID, shellGrantData(stored.RunID, "session", stored.shellRunGrant, "session closed")))
+			r.bus.Publish(events.New(events.ShellGrantLapsed, sessionID, stored.RunID, shellGrantData(stored.RunID, "session", stored.shellRunGrant, reason)))
 		}
 	}
 
@@ -133,7 +141,7 @@ func (r *Runner) LapseSessionGrants(sessionID string) {
 	delete(r.fileSessionGrants, sessionID)
 	r.fileGrantMu.Unlock()
 	if fileRunID != "" {
-		r.publishFileGrant(events.FileGrantLapsed, sessionID, fileRunID, "session", "session closed")
+		r.publishFileGrant(events.FileGrantLapsed, sessionID, fileRunID, "session", reason)
 	}
 }
 

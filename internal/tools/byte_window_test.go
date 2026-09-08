@@ -76,6 +76,27 @@ func TestReadFileNumbersLinesAndMarksMidLineBoundaries(t *testing.T) {
 	}
 }
 
+func TestReadFileLineModeUsesOneBasedLineWindows(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "lines.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbravo\ncharlie\ndelta\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewReadFile(config.ReadFileTool{DefaultLimit: 8, MaxLimit: 64})
+	item := &session.Session{Workspace: root, LastSeen: map[string]time.Time{}}
+	got, err := tool.Call(context.Background(), item, map[string]any{"path": path, "line": float64(2), "lines": float64(2)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[line window: line=2 lines=2 total_lines=4 more=true next_line=4]\n2: bravo\n3: charlie"
+	if got != want {
+		t.Fatalf("line window=%q, want %q", got, want)
+	}
+	if _, err := tool.Call(context.Background(), item, map[string]any{"path": path, "line": 1, "offset": 1}); err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("mixed modes err=%v", err)
+	}
+}
+
 func TestReadFileDefaultWindowNumbersLongSource(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "generated.go")

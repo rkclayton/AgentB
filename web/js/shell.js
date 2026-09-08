@@ -1,6 +1,4 @@
 import { api, reduce, setSelection, store, subscribe } from "./bus.js";
-import { createOperatorStatusController, isOperatorStateEvent } from "./operator-status.js";
-import { renderStopState } from "./stop-state.js";
 import { chatRowText, closeConfirmText, firstUserLine, isRunning } from "./chat-lifecycle.js";
 
 const activeRunStates = new Set(["running", "queued", "stopping"]);
@@ -15,34 +13,9 @@ export function initShell(options = {}) {
   const left = node("div", "shell-left");
   const tabs = node("nav", "agent-tabs");
   tabs.setAttribute("aria-label", "Agents");
-  const addWrap = node("div", "shell-add-wrap");
-  const add = button("+", "New chat", "shell-add");
-  const addMenu = node("div", "shell-menu shell-new-menu");
-  addMenu.hidden = true;
-  addWrap.append(add, addMenu);
-  left.append(tabs, addWrap);
-
-  const middle = node("div", "shell-middle");
-  const selection = node("span", "shell-selection");
-  middle.append(selection);
+  left.append(tabs);
 
   const right = node("div", "shell-right");
-  const stop = button("", "Stop", "stop-sign");
-  stop.id = "shell-stop";
-  stop.innerHTML = '<span aria-hidden="true"></span>';
-  const state = node("span", "shell-state");
-  state.id = "shell-state";
-  const operator = button("", "Operator mode off", "operator-status");
-  operator.id = "shell-operator-status";
-  operator.setAttribute("aria-pressed", "false");
-  operator.innerHTML = '<img src="/static/assets/operator-off-24.png" srcset="/static/assets/operator-off-48.png 2x" width="24" height="24" alt="">';
-  const connection = node("span", "shell-connection");
-  connection.id = "connection";
-  connection.setAttribute("role", "status");
-  const alarm = node("span", "identity-status");
-  alarm.id = "shell-identity-alarm";
-  alarm.setAttribute("role", "status");
-  alarm.hidden = true;
   const pages = node("nav", "shell-pages");
   pages.setAttribute("aria-label", "Pages");
   for (const [id, label, path] of [["chat", "Chat", "/chat"], ["console", "Console", "/"], ["plan", "Plan", "/plan"]]) {
@@ -60,31 +33,17 @@ export function initShell(options = {}) {
   settings.textContent = "⚙";
   settings.setAttribute("aria-label", "Settings");
   settings.title = "Settings";
-  right.append(stop, state, operator, alarm, connection, pages, settings);
-  root.append(left, middle, right);
+  right.append(pages, settings);
+  root.append(left, right);
 
-  const operatorControl = createOperatorStatusController(operator, {
-    identity: () => store.shell_identity,
-    interactive: () => !store.replay,
-    setOperatorContext: (enabled) => api("/api/config", { shell: { operator_context: enabled } }),
-    reportError: report,
-  });
-
-  add.onclick = () => void showNewChatMenu();
-  stop.onclick = () => {
-    const sessionID = store.selection.session_id;
-    if (sessionID && !store.replay) api("/api/stop", { session_id: sessionID }).catch((error) => report(error.message));
-  };
   document.addEventListener("click", (event) => {
-    if (!addWrap.contains(event.target)) addMenu.hidden = true;
     if (!tabs.contains(event.target)) for (const menu of tabs.querySelectorAll(".shell-menu")) menu.hidden = true;
   });
 
   function report(message) {
     if (options.reportError) options.reportError(message);
     else {
-      connection.textContent = message;
-      connection.className = "shell-connection alarm";
+      root.dataset.error = message;
     }
   }
 
@@ -123,6 +82,7 @@ export function initShell(options = {}) {
 	if (configured?.d) agents.push("agent_d");
     for (const agentID of agents) {
       const wrap = node("div", "agent-tab-wrap");
+      wrap.dataset.agent = agentID;
       const tab = button("", `${agentID} · ${agentName(agentID)}`, `agent-tab ${store.selection.agent_id === agentID ? "selected" : ""}`);
       const glyphState = agentState(agentID);
       tab.dataset.agent = agentID;
@@ -148,6 +108,10 @@ export function initShell(options = {}) {
   function renderAgentMenu(menu, agentID) {
     const sessions = sessionsFor(agentID, true);
     menu.replaceChildren();
+    const create = button("New chat…", `New chat with ${agentID}`, "shell-new-choice");
+    create.disabled = store.replay || agentID !== "agent_b" || !(store.config.agents || []).length;
+    create.onclick = () => void showNewChatMenu(menu, agentID);
+    menu.append(create);
     if (!sessions.length) {
       const empty = node("span", "shell-menu-empty");
       empty.textContent = "No chats";
@@ -205,55 +169,45 @@ export function initShell(options = {}) {
     } catch (error) { report(error.message); }
   }
 
-  async function showNewChatMenu() {
+  async function showNewChatMenu(menu, agentID = "agent_b") {
     if (store.replay) return;
     try {
       const choices = await api("/api/pick-folder", undefined, "GET");
-      addMenu.replaceChildren();
+      menu.replaceChildren();
       const addChoice = (label, path) => {
         const choice = button(label, path, "shell-new-choice");
-        choice.onclick = () => { addMenu.hidden = true; void createChat(path); };
-        addMenu.append(choice);
+        choice.onclick = () => { menu.hidden = true; void createChat(path, agentID); };
+        menu.append(choice);
       };
       addChoice(`Default · ${choices.default}`, choices.default);
       for (const item of (choices.recent || []).filter((item) => item.dir && item.dir.toLowerCase() !== String(choices.default).toLowerCase()).slice(0, 6)) addChoice(item.dir, item.dir);
       const browse = button("Browse…", "Browse for workspace", "shell-new-choice");
       browse.onclick = async () => {
-        addMenu.hidden = true;
+        menu.hidden = true;
         try {
           const picked = await api("/api/pick-folder", { default: choices.default });
-          await createChat(picked.workspace_dir);
+          await createChat(picked.workspace_dir, agentID);
         } catch (error) { if (!String(error.message).includes("canceled")) report(error.message); }
       };
-      addMenu.append(browse);
-      addMenu.hidden = false;
+      menu.append(browse);
+      menu.hidden = false;
     } catch (error) { report(error.message); }
   }
 
-  async function createChat(workspace) {
+  async function createChat(workspace, agentID = "agent_b") {
     const source = store.sessions[store.selection.session_id] || Object.values(store.sessions).sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0))[0];
-    if (!source) return report("No session template is available.");
     try {
-      const result = await api("/api/sessions", { source_session_id: source.id, workspace });
+      const configuredID = agentKey(store.config.agents?.[0]);
+      const body = source ? { source_session_id: source.id, workspace } : { agent_id: configuredID, workspace };
+      const result = await api("/api/sessions", body);
       reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
-      setSelection("agent_b", result.session.id);
+      setSelection(agentID, result.session.id);
     } catch (error) { report(error.message); }
   }
 
   function render() {
     const session = store.sessions[store.selection.session_id];
     renderTabs();
-    const name = agentName(store.selection.agent_id);
-    selection.textContent = session ? `${name} · ${session.label || firstUserLine(session)} · ${session.workspace_dir || session.workspace || "—"}` : name;
-    selection.title = selection.textContent;
-    const waiting = !!(session?.pending_approval || session?.pending_repo_policy);
-    state.textContent = store.replay ? "replay" : waiting ? "waiting for you" : session?.run?.status || "idle";
-    state.className = `shell-state ${waiting ? "waiting" : session?.run?.status || "idle"}`;
-    renderStopState(stop, session, store.replay);
-    operatorControl.render();
-    const unavailable = store.shell_identity?.operator_approval_required || store.shell_identity?.fallback;
-    alarm.hidden = !unavailable;
-    alarm.textContent = unavailable ? `Service identity unavailable · tools require operator approval · ${store.shell_identity.reason}` : "";
     const query = new URLSearchParams();
     if (session) query.set("session", session.id);
     const suffix = query.size ? `?${query}` : "";
@@ -263,10 +217,16 @@ export function initShell(options = {}) {
   }
 
   subscribe((_state, event) => {
-    if (isOperatorStateEvent(event)) operatorControl.render();
     render();
   });
-  return { render, report, stop, operator, selection };
+  return {
+    render,
+    report,
+    newChat() {
+      const menu = tabs.querySelector('.agent-tab-wrap[data-agent="agent_b"] .shell-menu');
+      if (menu) void showNewChatMenu(menu, "agent_b");
+    },
+  };
 }
 
 function node(tag, className) {

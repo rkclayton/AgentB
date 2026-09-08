@@ -29,6 +29,7 @@ const (
 	approvalShellScopes
 	approvalFileScopes
 	approvalPolicyScopes
+	approvalCycle
 )
 
 type Gate struct {
@@ -108,6 +109,17 @@ func (g *Gate) WaitBoundaryDecision(ctx context.Context, s *session.Session, run
 	g.sequenceMu.Lock()
 	wait, cleanup := g.beginWait(s, runID, callID, kind)
 	g.publishBoundaryEscapeRequired(s, runID, callID, name, args)
+	g.sequenceMu.Unlock()
+	defer cleanup()
+	return g.awaitDecision(ctx, s, runID, callID, wait)
+}
+
+func (g *Gate) WaitCycleDecision(ctx context.Context, s *session.Session, runID, callID string, args map[string]any) (string, error) {
+	g.sequenceMu.Lock()
+	wait, cleanup := g.beginWait(s, runID, callID, approvalCycle)
+	g.bus.Publish(events.New(events.ApprovalRequired, s.ID, runID, map[string]any{
+		"call_id": callID, "name": "run.cycle", "kind": "cycle", "args": args, "boundary_escape": false,
+	}))
 	g.sequenceMu.Unlock()
 	defer cleanup()
 	return g.awaitDecision(ctx, s, runID, callID, wait)
@@ -224,6 +236,12 @@ func (g *Gate) DecideWith(sessionID, callID, decision string, before func()) err
 	if decision == "operator_mode" && wait.scopeKind != approvalShellScopes {
 		return fmt.Errorf("decision %s is only valid for a shell approval", decision)
 	}
+	if (decision == "continue" || decision == "stop") && wait.scopeKind != approvalCycle {
+		return fmt.Errorf("decision %s is only valid for a cycle decision", decision)
+	}
+	if wait.scopeKind == approvalCycle && decision != "continue" && decision != "stop" {
+		return fmt.Errorf("cycle decision must be continue or stop")
+	}
 	if wait.decided {
 		return fmt.Errorf("approval already decided")
 	}
@@ -237,7 +255,7 @@ func (g *Gate) DecideWith(sessionID, callID, decision string, before func()) err
 
 func validApprovalDecision(decision string) bool {
 	switch decision {
-	case "approve", "once", "run", "session", "operator_mode", "deny":
+	case "approve", "once", "run", "session", "operator_mode", "deny", "continue", "stop":
 		return true
 	default:
 		return false

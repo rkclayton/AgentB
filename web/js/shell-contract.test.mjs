@@ -3,6 +3,9 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const shell = await readFile(new URL("./shell.js", import.meta.url), "utf8");
+const chat = await readFile(new URL("./chat.js", import.meta.url), "utf8");
+const consoleApp = await readFile(new URL("./app.js", import.meta.url), "utf8");
+const plan = await readFile(new URL("./plan.js", import.meta.url), "utf8");
 const tokens = await readFile(new URL("../css/tokens.css", import.meta.url), "utf8");
 const pages = await Promise.all(["index.html", "chat.html", "plan.html"].map(async (name) => [name, await readFile(new URL(`../${name}`, import.meta.url), "utf8")]));
 
@@ -11,8 +14,9 @@ test("shared shell slot order is identical on Chat Console and Plan", () => {
     assert.match(html, new RegExp(`id="app-shell"[^>]+data-page="${name === "index.html" ? "console" : name.slice(0, -5)}"`));
     assert.doesNotMatch(html, /id="(?:shell-stop|shell-state|shell-operator-status)"/);
   }
-  assert.match(shell, /root\.append\(left, middle, right\)/);
-  assert.match(shell, /right\.append\(stop, state, operator, alarm, connection, pages, settings\)/);
+  assert.match(shell, /root\.append\(left, right\)/);
+  assert.match(shell, /right\.append\(pages, settings\)/);
+  assert.doesNotMatch(shell, /shell-operator-status|right\.append\(stop/);
   assert.match(shell, /\[\["chat", "Chat", "\/chat"\], \["console", "Console", "\/"\], \["plan", "Plan", "\/plan"\]\]/);
 });
 
@@ -37,10 +41,17 @@ test("agent menu owns open close and inline rename for open and closed chats", (
   assert.match(shell, /\{ label \}/);
 });
 
-test("Stop targets only the selected chat", () => {
-  assert.match(shell, /const sessionID = store\.selection\.session_id/);
-  assert.match(shell, /api\("\/api\/stop", \{ session_id: sessionID \}\)/);
-  assert.doesNotMatch(shell, /all:\s*true/);
+test("Stop follows the selected chat from each page-local lower control", () => {
+  assert.match(chat, /api\("\/api\/stop", \{ session_id: session\.id \}\)/);
+  assert.match(consoleApp, /api\("\/api\/stop",\{session_id:id\}\)/);
+  assert.match(plan, /api\("\/api\/stop", \{session_id:id\}\)/);
+  assert.doesNotMatch(chat+consoleApp+plan, /all:\s*true/);
+});
+
+test("top bar belongs to unellipsized scrolling agent tabs and right controls", () => {
+  assert.match(tokens, /\.shell-left,\.agent-tabs\{overflow-x:auto/);
+  assert.match(tokens, /\.agent-tab[^\n]*white-space:nowrap/);
+  assert.doesNotMatch(shell, /shell-selection/);
 });
 
 test("all shell motion is zero duration under reduced motion", () => {

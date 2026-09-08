@@ -9,6 +9,7 @@ import { initSettings } from "./settings.js";
 import { createMessageDropController } from "./message-drop.js";
 import { createApprovalCard } from "./approval.js";
 import { agentKey, closedChats, closedRow, deletePrompt, lifetimeRows, ratio } from "./console-lifetime.js";
+import { renderStopState } from "./stop-state.js";
 
 const requestedSession = new URLSearchParams(location.search).get("session");
 let initialSession = requestedSession;
@@ -20,6 +21,7 @@ const live = document.getElementById("console-live");
 const dropLastMessage = document.getElementById("drop-last-message");
 const agentSelect = document.getElementById("console-agent");
 const feedback = document.getElementById("console-feedback");
+const consoleStop = document.getElementById("console-stop");
 
 initShell({ page: "console", reportError: showError });
 initSettings();
@@ -43,6 +45,8 @@ document.getElementById("clear-stats").addEventListener("click", () => void clea
 document.getElementById("flush-memory").addEventListener("click", () => void flushMemory());
 document.getElementById("console-tools").addEventListener("change", (event) => void toggleTool(event));
 document.getElementById("console-closed").addEventListener("click", (event) => void deleteChat(event));
+document.getElementById("console-tools-link").addEventListener("click", (event) => { event.preventDefault(); document.getElementById("console-tools-panel").scrollIntoView({block:"start"}); });
+consoleStop.addEventListener("click", () => { const id=store.selection.session_id; if(id&&!store.replay) void api("/api/stop",{session_id:id}); });
 
 subscribe((_state, event) => {
   if (event.type === "snapshot" && initialSession && store.sessions[initialSession]) {
@@ -93,6 +97,8 @@ function renderConsole() {
   live.hidden = !showLive;
   if (showLive) {
     renderRail(); renderFlow(); renderRack(); renderState(); renderTimeline(); placeDropLastMessage(); dropControl.render(); renderPendingApproval(session);
+    renderStopState(consoleStop, session, store.replay);
+    document.getElementById("console-live-state").textContent = session.pending_approval ? "waiting for you" : session.run?.status || "idle";
   }
 }
 
@@ -100,6 +106,7 @@ function renderTools(agent) {
   const root = document.getElementById("console-tools");
   if (!agent) { root.innerHTML = '<p class="console-empty">No agent selected.</p>'; return; }
   const enabled = new Set(agent.toolset || []);
+  document.getElementById("console-tools-link").textContent = `${enabled.size} tools active`;
   const counters = ledger?.agent?.tools || {};
   root.replaceChildren(...(store.tools || []).map((tool) => {
     const stats = counters[tool.name] || {};

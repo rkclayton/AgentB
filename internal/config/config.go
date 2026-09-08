@@ -166,6 +166,7 @@ type Reasoning struct {
 	Effort       string   `json:"effort"`
 	ValidEfforts []string `json:"valid_efforts"`
 	Preserve     bool     `json:"preserve"`
+	MaxTokens    int      `json:"max_tokens,omitempty"`
 }
 type Context struct {
 	NCtx          int `json:"n_ctx"`
@@ -556,6 +557,9 @@ func (c Config) Validate() error {
 		}
 		if len(p.Reasoning.ValidEfforts) > 0 && !contains(p.Reasoning.ValidEfforts, p.Reasoning.Effort) {
 			return fmt.Errorf("%s.reasoning.effort: not in valid_efforts", prefix)
+		}
+		if p.Reasoning.MaxTokens < 0 {
+			return fmt.Errorf("%s.reasoning.max_tokens: cannot be negative", prefix)
 		}
 		if p.Context.NCtx < 0 {
 			return fmt.Errorf("%s.context.n_ctx: cannot be negative", prefix)

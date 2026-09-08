@@ -191,6 +191,12 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 	var process runningShellProcess
 	var usedService bool
 	var err error
+	if !forceOperator && cfg.ServiceAccount.Enabled && !cfg.OperatorContext {
+		if name := operatorOnlyInterpreter(command, exec.LookPath, operatorHome()); name != "" {
+			reason := name + " is operator-only; needs Run as you"
+			return CallDetail{Content: reason, OperatorOverrideReason: reason}
+		}
+	}
 	if forceOperator {
 		process, err = startHarnessProcess(cfg.Command[0], argv, item.Workspace, &output)
 	} else {
@@ -207,6 +213,34 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 		return CallDetail{Err: err}
 	}
 	return waitShellProcess(ctx, process, usedService, timeout, cfg, &output, command)
+}
+
+func operatorHome() string {
+	home, _ := os.UserHomeDir()
+	return home
+}
+
+func operatorOnlyInterpreter(command string, lookPath func(string) (string, error), home string) string {
+	if home == "" {
+		return ""
+	}
+	home = strings.ToLower(filepath.Clean(home)) + string(os.PathSeparator)
+	for _, token := range shellPolicyTokens(command) {
+		cleaned := cleanShellScriptToken(token)
+		candidate := strings.ToLower(filepath.Base(cleaned))
+		candidate = strings.TrimSuffix(candidate, filepath.Ext(candidate))
+		if candidate == "py" {
+			candidate = "python"
+		}
+		if candidate != "python" && candidate != "node" && candidate != "go" && candidate != "dotnet" {
+			continue
+		}
+		resolved, err := lookPath(cleaned)
+		if err == nil && strings.HasPrefix(strings.ToLower(filepath.Clean(resolved)), home) {
+			return candidate
+		}
+	}
+	return ""
 }
 
 func waitShellProcess(ctx context.Context, process runningShellProcess, usedService bool, timeout int, cfg config.Shell, output *lockedBuffer, operatorCommand string) CallDetail {

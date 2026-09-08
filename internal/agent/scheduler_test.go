@@ -139,6 +139,75 @@ func TestStopHoldsQueuedMessagesUntilNextExplicitSubmit(t *testing.T) {
 	}
 }
 
+func TestModelUnreachableHoldsQueueDeduplicatesAndProbeReleases(t *testing.T) {
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"done\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":1}}\n\ndata: [DONE]\n\n"))
+	}))
+	defer model.Close()
+	cfg, profile, item, scheduler := schedulerFixture(t, model.URL)
+	item.SetRun(session.RunState{Status: "running", RunID: "r0", MaxTurns: cfg.Run.MaxTurns})
+	scheduler.active[item.ID] = &activeRun{}
+	first, err := scheduler.Submit(context.Background(), item.ID, "same pending bytes")
+	if err != nil || first.Position != 1 {
+		t.Fatalf("first=%+v err=%v", first, err)
+	}
+	second, err := scheduler.Submit(context.Background(), item.ID, "same pending bytes")
+	if err != nil || second.Position != 1 || item.Snapshot().QueuedMessages != 1 {
+		t.Fatalf("dedupe second=%+v queued=%d err=%v", second, item.Snapshot().QueuedMessages, err)
+	}
+	scheduler.finish(queuedRun{s: item, runID: "r0"}, "model_unreachable", "dial tcp timeout", 1)
+	if snapshot := item.Snapshot(); snapshot.Run.Status != "held" || snapshot.QueuedMessages != 1 {
+		t.Fatalf("held=%+v", snapshot)
+	}
+	if scheduler.Active(item.ID) {
+		t.Fatal("unreachable queue dispatched before probe")
+	}
+	scheduler.ReleaseModel(profile.ID)
+	deadline := time.Now().Add(3 * time.Second)
+	for (scheduler.Active(item.ID) || item.Snapshot().QueuedMessages != 0) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if scheduler.Active(item.ID) || item.Snapshot().QueuedMessages != 0 {
+		t.Fatalf("queue not released: %+v", item.Snapshot())
+	}
+}
+
+func TestAccountingBlackholeFastFailsAsModelUnreachable(t *testing.T) {
+	release := make(chan struct{})
+	blackhole := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		select {
+		case <-request.Context().Done():
+		case <-release:
+		}
+	}))
+	defer blackhole.Close()
+	defer close(release)
+	_, profile, item, scheduler := schedulerFixture(t, blackhole.URL)
+	profile.Capabilities.Tokenize = true
+	profile.Capabilities.ApplyTemplate = true
+	profile.Capabilities.ApplyTemplateTools = true
+	scheduler.runner.cfg = func() config.Config {
+		cfg := config.Defaults(item.Workspace)
+		cfg.Context.Accounting = "exact"
+		cfg.Servers[0] = *profile
+		return cfg
+	}
+	start := time.Now()
+	if _, err := scheduler.Submit(context.Background(), item.ID, "unreachable"); err != nil {
+		t.Fatal(err)
+	}
+	for scheduler.Active(item.ID) && time.Since(start) < 4*time.Second {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if elapsed := time.Since(start); scheduler.Active(item.ID) || elapsed > 3*time.Second {
+		t.Fatalf("elapsed=%s active=%t", elapsed, scheduler.Active(item.ID))
+	}
+	if reason := item.Snapshot().Run.LastStopReason; reason != "model_unreachable" {
+		t.Fatalf("reason=%q", reason)
+	}
+}
+
 func TestStopCancelsBlackholedApplyTemplateInUnderOneSecond(t *testing.T) {
 	entered := make(chan struct{}, 1)
 	release := make(chan struct{})

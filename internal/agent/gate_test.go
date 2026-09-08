@@ -218,3 +218,31 @@ func TestPolicyChatGrantLapsesWithSession(t *testing.T) {
 		t.Fatal("policy chat grant survived session close")
 	}
 }
+
+func TestCycleDecisionPausesAndAcceptsOnlyContinueOrStop(t *testing.T) {
+	bus := events.NewBus()
+	eventsCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	cfg := config.Defaults(t.TempDir())
+	gate := NewGate(bus, func() config.Config { return cfg })
+	s := &session.Session{ID: "session", Run: session.RunState{Status: "running"}}
+	done := make(chan string, 1)
+	go func() {
+		decision, _ := gate.WaitCycleDecision(context.Background(), s, "run", "cycle-card", map[string]any{"tool": "list_dir"})
+		done <- decision
+	}()
+	event := <-eventsCh
+	data := event.Data.(map[string]any)
+	if event.Type != events.ApprovalRequired || data["kind"] != "cycle" || s.Snapshot().Run.Status != "paused" {
+		t.Fatalf("event=%+v run=%+v", event, s.Snapshot().Run)
+	}
+	if err := gate.Decide(s.ID, "cycle-card", "session"); err == nil {
+		t.Fatal("cycle accepted grant decision")
+	}
+	if err := gate.Decide(s.ID, "cycle-card", "continue"); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-done; got != "continue" {
+		t.Fatalf("decision=%q", got)
+	}
+}

@@ -9,12 +9,18 @@
   <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/chat.css">
 </head>
-<body class="chat-page">
+  <body class="chat-page">
   <header id="app-shell" class="app-shell window-titlebar" data-page="chat"></header>
+  <div id="chat-title" class="chat-title-line"></div>
   <div id="chat-budget" class="chat-budget" aria-label="Context budget"><span class="chat-budget-fill"></span><span class="chat-budget-tip"></span></div>
   <main id="chat-log" class="chat-log" tabindex="0" aria-live="polite"></main>
 	<footer class="chat-composer">
 		<div id="chat-pending-approval" class="pending-approval" hidden></div>
+		<div id="chat-status-strip" class="chat-status-strip">
+      <button id="chat-run-as-you" class="operator-status chat-run-as-you" type="button" aria-label="Run as you grant off"><img src="/static/assets/operator-off-24.png" srcset="/static/assets/operator-off-48.png 2x" width="24" height="24" alt=""></button>
+      <span id="chat-notice" class="chat-notice" role="status"></span>
+      <button id="chat-retry-model" class="chat-retry" type="button" hidden>Retry</button>
+    </div>
 		<div class="chat-composer-row">
       <input id="chat-file-picker" type="file" multiple hidden>
       <div class="chat-attach-wrap">
@@ -26,11 +32,15 @@
         </div>
       </div>
       <div id="chat-attachments" class="chat-pending-attachments" aria-live="polite"></div>
-      <textarea id="chat-task" rows="5" aria-label="Task"></textarea>
-      <button id="chat-expand" type="button" aria-label="Expand composer">↥</button>
-      <button id="chat-send" type="button" title="Send · Enter sends · Shift+Enter newline">Send</button>
+      <div class="chat-input-wrap">
+        <textarea id="chat-task" rows="5" aria-label="Task"></textarea>
+        <span class="chat-input-actions">
+          <button id="chat-expand" type="button" aria-label="Expand composer">↥</button>
+          <button id="chat-stop" class="stop-sign" type="button" aria-label="Stop"><span aria-hidden="true"></span></button>
+          <button id="chat-send" type="button" aria-label="Send" title="Send · Enter sends · Shift+Enter newline">↵</button>
+        </span>
+      </div>
     </div>
-    <div id="chat-notice" class="chat-notice" role="status"></div>
   </footer>
   <script type="module" src="/static/js/chat.js"></script>
 </body>

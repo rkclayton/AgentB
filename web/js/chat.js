@@ -9,6 +9,8 @@ import { createApprovalCard } from "./approval.js";
 import { callServiceKey, callServiceStatus } from "./call-service-display.js";
 import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, uploadAttachment } from "./attachment-upload.js";
 import { agentAuthor, openSessions } from "./chat-lifecycle.js";
+import { renderOperatorStatus } from "./operator-status.js";
+import { renderStopState } from "./stop-state.js";
 
 const budget = document.getElementById("chat-budget");
 const log = document.getElementById("chat-log");
@@ -25,6 +27,10 @@ const attachExchange = document.getElementById("chat-attach-exchange");
 const exchangeFileList = document.getElementById("chat-exchange-files");
 const filePicker = document.getElementById("chat-file-picker");
 const pendingFiles = document.getElementById("chat-attachments");
+const titleLine = document.getElementById("chat-title");
+const stop = document.getElementById("chat-stop");
+const runAsYou = document.getElementById("chat-run-as-you");
+const retryModel = document.getElementById("chat-retry-model");
 let requested = new URLSearchParams(location.search).get("session");
 const selectedID = () => store.selection.session_id;
 const expanded = new Set();
@@ -68,7 +74,7 @@ jumpButton.onclick = () => {
   page = 0;
   renderLog(store.sessions[selectedID()]);
 };
-initShell({ page: "chat", reportError: (message) => {
+const shell = initShell({ page: "chat", reportError: (message) => {
   localNotice = message;
   localAlarm = true;
   renderComposer(store.sessions[selectedID()]);
@@ -100,6 +106,8 @@ function schedule() {
 
 function render() {
   const session = store.sessions[selectedID()];
+  titleLine.textContent = session?.agent_name || "";
+  titleLine.hidden = !session;
   renderBudget(session);
   renderLog(session);
   renderComposer(session);
@@ -126,7 +134,20 @@ function renderLog(session) {
   if (!session) {
     const empty = document.createElement("div");
     empty.className = "chat-empty";
-    empty.textContent = "No open chats.";
+    const noAgent = !(store.config.agents || []).length;
+    const face = document.createElement("img");
+    face.src = "/static/assets/operator-off-48.png";
+    face.width = 48; face.height = 48; face.alt = "";
+    const line = document.createElement("span");
+    if (noAgent) {
+      line.append("No agent connected — add one in ");
+      const settings = document.createElement("a"); settings.textContent = "Settings"; settings.href = "/#settings/servers";
+      line.append(settings);
+    } else {
+      const launch = document.createElement("button"); launch.type = "button"; launch.textContent = "New chat"; launch.onclick = () => shell?.newChat();
+      line.append(launch);
+    }
+    empty.append(face, line);
     finishLogRender([empty]);
     return;
   }
@@ -170,7 +191,7 @@ function reconcileChildren(parent, nodes) {
 }
 
 function buildEntries(session) {
-  return groupResponses(session.chat || []);
+  return groupResponses((session.chat || []).filter((entry) => !["operator.context", "message.queued", "run.queued"].includes(entry.event?.type)));
 }
 
 function changeBound(value) {
@@ -419,7 +440,10 @@ function noticeContent(session, entry, actionable) {
   content.className = "chat-content";
   if (event.type === "run.stopped") {
     const reason = (data.reason || "").replaceAll("_", " ");
-    content.textContent = `stopped: ${reason}${data.reason === "turn_ceiling" ? ` (${data.turns || session.run.max_turns})` : data.detail ? `, ${data.detail}` : ""}`;
+		if (data.reason === "model_unreachable") {
+			const line=document.createElement("span"); line.textContent=`model unreachable · ${session.model_unreachable?.host || "model"}`; content.append(line);
+			if(data.detail){const details=document.createElement("details");const summary=document.createElement("summary");summary.textContent="Connection detail";const pre=document.createElement("pre");pre.textContent=data.detail;details.append(summary,pre);content.append(details)}
+		} else content.textContent = `stopped: ${reason}${data.reason === "turn_ceiling" ? ` (${data.turns || session.run.max_turns})` : data.detail ? `, ${data.detail}` : ""}`;
     if (data.reason !== "done") content.classList.add("alarm");
   } else if (event.type === "files.delivered") {
     const items = data.items || [];
@@ -466,7 +490,7 @@ function noticeContent(session, entry, actionable) {
   if (entry.agentRole === "c") {
     const label = document.createElement("span");
     label.className = "chat-notice-author";
-    label.textContent = `${agentAuthor(session, "c")} · `;
+    label.textContent = agentAuthor(session, "c");
     content.prepend(label);
   }
   return content;
@@ -474,15 +498,18 @@ function noticeContent(session, entry, actionable) {
 
 function renderComposer(session) {
 	document.body.classList.toggle("no-open-chats", !session);
-	send.textContent = "Send";
   send.disabled = !session || !!store.replay;
   input.disabled = !session || !!store.replay;
   attachButton.disabled = !session || !!store.replay || attachmentsBusy;
   input.removeAttribute("placeholder");
   const queued = session?.queued_messages || 0;
-  const message = localNotice || (session && !session.runnable ? session.not_runnable_reason : queued ? `queued (${queued})` : session?.pending_approval || session?.pending_repo_policy ? "waiting for you" : "");
+  const state = session?.pending_approval || session?.pending_repo_policy ? "waiting for you" : session?.run?.status || "idle";
+  const unreachable = session?.model_unreachable;
+  const operatorUntil = store.shell_identity?.operator_context ? `operator mode · until ${shortTime(store.shell_identity.operator_context_expires_at)}` : "";
+  const queueText = queued ? `queued (${queued})${unreachable ? " · waiting for model" : ""}` : "";
+  const message = [localNotice || (session && !session.runnable ? session.not_runnable_reason : unreachable ? `model unreachable · ${unreachable.host || "model"}` : state), queueText, operatorUntil].filter(Boolean).join(" · ");
   notice.textContent = message;
-  notice.className = `chat-notice ${localAlarm || (session && !session.runnable) ? "alarm" : ""}`;
+  notice.className = `chat-notice ${localAlarm || unreachable || (session && !session.runnable) ? "alarm" : ""}`;
 	pendingFiles.replaceChildren(...queuedAttachments.map((file) => {
     const row = document.createElement("span");
     row.className = "chat-pending-file";
@@ -495,6 +522,12 @@ function renderComposer(session) {
 		replay: store.replay,
 		decide: (callID, decision) => api("/api/approve", { session_id: session.id, call_id: callID, decision }),
 	})] : policyCard ? [policyCard] : []));
+  renderStopState(stop, session, store.replay);
+  renderOperatorStatus(runAsYou, { operator_context: hasChatGrant(session) });
+  runAsYou.disabled = !session || store.replay || !hasChatGrant(session);
+  runAsYou.title = hasChatGrant(session) ? "Run as you active for this chat · click to revoke" : "No Run as you grant for this chat";
+  retryModel.hidden = !unreachable;
+  retryModel.disabled = !session || store.replay;
 }
 
 function createPolicyCard(session) {
@@ -604,6 +637,22 @@ async function queueExchangeFile(item) {
 }
 
 send.onclick = submit;
+stop.onclick = () => {
+  const session = store.sessions[selectedID()];
+  if (session && !store.replay) api("/api/stop", { session_id: session.id }).catch((error) => { localNotice = error.message; localAlarm = true; renderComposer(session); });
+};
+runAsYou.onclick = async () => {
+  const session = store.sessions[selectedID()];
+  if (!session || store.replay || !hasChatGrant(session)) return;
+  try { await api(`/api/sessions/${encodeURIComponent(session.id)}/grants/revoke`, {}); reduce({type:"snapshot", data:await api("/api/state", undefined, "GET")}); }
+  catch (error) { localNotice = error.message; localAlarm = true; renderComposer(session); }
+};
+retryModel.onclick = async () => {
+  const session = store.sessions[selectedID()];
+  if (!session || store.replay) return;
+  try { await api(`/api/servers/${encodeURIComponent(session.b_profile || session.server_id)}/probe`, { session_id: session.id, retry: true }); }
+  catch (error) { localNotice = error.message; localAlarm = true; renderComposer(session); }
+};
 attachButton.onclick = () => { attachMenu.hidden = !attachMenu.hidden; };
 attachBrowse.onclick = () => { attachMenu.hidden = true; filePicker.click(); };
 attachExchange.onclick = () => void refreshExchangeFiles();
@@ -691,4 +740,19 @@ function signed(value) {
 }
 function format(value) {
   return Number(value || 0).toLocaleString("en-US");
+}
+function hasChatGrant(session) {
+  if (!session) return false;
+  if (typeof session.run_as_you === "boolean") return session.run_as_you;
+  let active = false;
+  for (const event of session.timeline || []) {
+    const data = event.data || {};
+    if (["shell.grant", "file.grant"].includes(event.type) && data.scope === "session" && data.identity === "operator") active = true;
+    if (["shell.grant_lapsed", "file.grant_lapsed", "session.closed"].includes(event.type) && data.scope !== "run") active = false;
+  }
+  return active;
+}
+function shortTime(value) {
+  const date = new Date(value || "");
+  return Number.isNaN(date.getTime()) ? "soon" : date.toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
 }

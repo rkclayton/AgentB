@@ -38,9 +38,8 @@ func TestSharedShellIsServedOnAllThreePages(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(source)
-	stopAt, stateAt, operatorAt, pagesAt, settingsAt := strings.Index(text, "right.append(stop"), strings.Index(text, "stop, state"), strings.Index(text, "state, operator"), strings.Index(text, "connection, pages"), strings.Index(text, "pages, settings")
-	if stopAt < 0 || stateAt < stopAt || operatorAt < stateAt || pagesAt < operatorAt || settingsAt < pagesAt {
-		t.Fatalf("shared shell right slot order is not Stop/state/operator/pages/Settings")
+	if !strings.Contains(text, "right.append(pages, settings)") || strings.Contains(text, "right.append(stop") || strings.Contains(text, "shell-operator-status") {
+		t.Fatalf("shared shell right slot must contain page switch and Settings only")
 	}
 }
 

@@ -38,6 +38,18 @@
       "rationale": "Two Stop presses during one active run pin the durable safe-to-emergency transition and the final held queue without dispatching the message behind Stop."
     },
     {
+      "id": "model-unreachable-held",
+      "source": "sources/model-unreachable-held.events",
+      "golden": "golden/model-unreachable-held.golden.json",
+      "origin": "internal/projection/testdata/pins/sources/model-unreachable-held.events",
+      "origin_sha256": "b3865f3ac0939bee4b73c7af2fe159e6e119783a727d9609d5ed5bf1fa25eba1",
+      "origin_records": 8,
+      "decompressed_bytes": 2035,
+      "synthetic": true,
+      "shapes": ["model-unreachable", "held-queue", "probe-release"],
+      "rationale": "A timed-out model accounting call holds one queued message, then a successful probe clears model.unreachable and releases that message in order."
+    },
+    {
       "id": "agent-tabs-multi-run",
       "source": "sources/agent-tabs-multi-run.events",
       "golden": "golden/agent-tabs-multi-run.golden.json",

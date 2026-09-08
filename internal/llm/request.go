@@ -38,10 +38,16 @@ func buildRequest(profile *config.Profile, request Request, stream bool) map[str
 		if effortAllowed {
 			kwargs["reasoning_effort"] = profile.Reasoning.Effort
 		}
+		if profile.Reasoning.MaxTokens > 0 {
+			kwargs["reasoning_budget"] = profile.Reasoning.MaxTokens
+		}
 		body["chat_template_kwargs"] = kwargs
 	case "top_level":
 		if effortAllowed {
 			body["reasoning_effort"] = profile.Reasoning.Effort
+		}
+		if profile.Reasoning.MaxTokens > 0 {
+			body["reasoning_budget"] = profile.Reasoning.MaxTokens
 		}
 	}
 	return body

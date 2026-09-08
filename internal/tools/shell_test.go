@@ -48,6 +48,18 @@ func TestShellDescriptionNamesConfiguredDialect(t *testing.T) {
 	}
 }
 
+func TestOperatorOnlyInterpreterReturnsRunAsYouReason(t *testing.T) {
+	lookup := func(name string) (string, error) {
+		return filepath.Join(`C:\Users\Randy`, "AppData", "Local", "Programs", name+".exe"), nil
+	}
+	if got := operatorOnlyInterpreter("python task.py", lookup, `C:\Users\Randy`); got != "python" {
+		t.Fatalf("interpreter=%q", got)
+	}
+	if got := operatorOnlyInterpreter("node task.js", func(string) (string, error) { return `C:\Program Files\nodejs\node.exe`, nil }, `C:\Users\Randy`); got != "" {
+		t.Fatalf("all-users interpreter=%q", got)
+	}
+}
+
 func TestShellDescriptionOperatorClauseOnlyWhenSplitEnabled(t *testing.T) {
 	cfg := config.Defaults(t.TempDir())
 	shell := NewShell(cfg.Shell)
