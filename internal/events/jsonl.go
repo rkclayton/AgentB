@@ -73,10 +73,20 @@ func (w *Writers) RotateSession(id string) (string, LogCursor, error) {
 			return "", LogCursor{}, err
 		}
 	}
-	path := filepath.Join(w.dir, fmt.Sprintf("%s-%s.jsonl", id, time.Now().UTC().Format("20060102T150405.000000000Z")))
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		return "", LogCursor{}, err
+	stamp := time.Now().UTC()
+	var path string
+	var file *os.File
+	var err error
+	for {
+		path = filepath.Join(w.dir, fmt.Sprintf("%s-%s.jsonl", id, stamp.Format("20060102T150405.000000000Z")))
+		file, err = os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+		if err == nil {
+			break
+		}
+		if !os.IsExist(err) {
+			return "", LogCursor{}, err
+		}
+		stamp = stamp.Add(time.Nanosecond)
 	}
 	info, err := file.Stat()
 	if err != nil {

@@ -12,7 +12,7 @@ func TestReleaseTagMatchesInstallerDisplayVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	match := regexp.MustCompile(`(?m)^\$displayVersion = '([^']+)'$`).FindStringSubmatch(string(installer))
+	match := regexp.MustCompile(`(?m)^\$displayVersion = '([^']+)'\r?$`).FindStringSubmatch(string(installer))
 	if len(match) != 2 {
 		t.Fatal("installer displayVersion not found")
 	}
