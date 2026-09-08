@@ -544,7 +544,15 @@ function noticeContent(session, entry, actionable) {
       if (failed) content.classList.add("alarm");
     }
   } else if (event.type === "run.queued") content.textContent = `waiting for a slot (position ${data.position})`;
+  else if (event.type === "run.aborted") {
+    const pathCount = Array.isArray(data.possibly_written_paths) ? data.possibly_written_paths.length : 0;
+    content.textContent = `harness: ${String(data.reason || "aborted").replaceAll("_", " ")} at turn ${data.turn || 0}${pathCount ? ` · ${pathCount} possibly partial path${pathCount === 1 ? "" : "s"} unverified` : ""}`;
+    content.classList.add("alarm");
+  }
   else if (event.type === "message.queued") content.textContent = `queued (${data.position})`;
+  else if (event.type === "model.retry") content.textContent = data.reason === "truncated_tool_call"
+    ? `harness: retrying truncated ${data.tool || "tool"} call (${data.attempt || 1}/${data.max_attempts || 1})`
+    : `harness: repaired malformed ${data.tool || "tool"} history and retried`;
   else if (event.type === "compaction") content.textContent = `compacted ${signed((data.after || 0) - (data.before || 0))} tokens${data.profile_id ? ` via ${data.profile_id}` : ""}`;
   else if (event.type === "workspace.conflict") {
     content.textContent = `conflict: ${data.path} written by ${data.other_label} ${data.age_s} s ago`;

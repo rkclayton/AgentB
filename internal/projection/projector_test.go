@@ -54,6 +54,20 @@ func TestMessageAttachmentProjectsIntoChatEntry(t *testing.T) {
 	}
 }
 
+func TestAbortAndRetryEventsAreVisibleHarnessNotices(t *testing.T) {
+	state := seeded(t)
+	for index, eventType := range []string{events.ModelRetry, events.RunAborted} {
+		var err error
+		state, _, err = Next(state, Record{Cursor: Cursor{Generation: "main.events", Offset: int64(index + 1)}, Event: events.Event{Seq: int64(index + 1), SessionID: "main", RunID: "r1", Type: eventType, Data: map[string]any{"reason": "test"}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(state.Chat) != 2 || state.Chat[0].Type != "notice" || state.Chat[0].Event.Type != events.ModelRetry || state.Chat[1].Event.Type != events.RunAborted {
+		t.Fatalf("chat=%+v", state.Chat)
+	}
+}
+
 func TestResetOnlyGenerationIsExplicitlyIncomplete(t *testing.T) {
 	state := Empty("main")
 	next, _, err := Next(state, Record{

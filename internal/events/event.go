@@ -37,11 +37,13 @@ const (
 	RunStarted            = "run.started"
 	RunStopping           = "run.stopping"
 	RunStopped            = "run.stopped"
+	RunAborted            = "run.aborted"
 	Stage                 = "stage"
 	ModelRequest          = "model.request"
 	ModelProgress         = "model.progress"
 	ModelDelta            = "model.delta"
 	ModelResponse         = "model.response"
+	ModelRetry            = "model.retry"
 	ModelUnreachable      = "model.unreachable"
 	ModelBusy             = "model.busy"
 	ModelReachable        = "model.reachable"
@@ -74,7 +76,7 @@ const (
 )
 
 var Stages = []string{"assemble", "call_model", "parse", "dispatch", "execute", "append", "compact", "wait_user"}
-var StopReasons = []string{"done", "safe", "emergency", "user_stop", "mailbox_stop", "turn_ceiling", "cycle", "tool_errors", "context_ceiling", "length", "model_error", "model_unreachable", "profile_not_runnable"}
+var StopReasons = []string{"done", "aborted_mid_model", "aborted_mid_tool", "aborted_mid_run", "mailbox_stop", "turn_ceiling", "cycle", "tool_errors", "context_ceiling", "length", "model_error", "model_unreachable", "profile_not_runnable"}
 
 type ToolCall struct {
 	ID        string `json:"id"`

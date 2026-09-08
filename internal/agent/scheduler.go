@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"harness/internal/config"
 	"harness/internal/events"
@@ -19,6 +20,8 @@ type queuedRun struct {
 type activeRun struct {
 	cancel     context.CancelFunc
 	stopReason string
+	runID      string
+	done       chan struct{}
 }
 type SubmitResult struct {
 	RunID    string `json:"run_id"`
@@ -138,17 +141,23 @@ func (s *Scheduler) startLocked(entry queuedRun) {
 		entry.userMessage = events.Message{}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	s.active[entry.s.ID] = &activeRun{cancel: cancel}
+	active := &activeRun{cancel: cancel, runID: entry.runID, done: make(chan struct{})}
+	s.active[entry.s.ID] = active
 	entry.s.SetRun(session.RunState{Status: "running", RunID: entry.runID, MaxTurns: s.cfg().Run.MaxTurns})
 	s.bus.Publish(events.New(events.RunStarted, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "user_message_id": entry.userMessageID}))
 	go func() {
 		reason, detail, turns := s.runner.Run(ctx, entry.s, entry.runID)
 		s.finish(entry, reason, detail, turns)
+		close(active.done)
 	}()
 }
 func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 	s.mu.Lock()
 	active := s.active[entry.s.ID]
+	if active == nil || (active.runID != "" && active.runID != entry.runID) {
+		s.mu.Unlock()
+		return
+	}
 	delete(s.active, entry.s.ID)
 	if active != nil && active.stopReason != "" {
 		reason = active.stopReason
@@ -231,14 +240,17 @@ func (s *Scheduler) repositionLocked() {
 }
 func (s *Scheduler) Stop(sessionID string, all bool) []string {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	stopped := []string{}
+	type waitRun struct {
+		id     string
+		active *activeRun
+		item   *session.Session
+		reason string
+	}
+	waits := []waitRun{}
 	for id, active := range s.active {
 		if all || id == sessionID {
-			reason := "safe"
-			if active.stopReason != "" {
-				reason = "emergency"
-			}
+			reason := s.runner.abortReason(id, active.runID)
 			active.stopReason = reason
 			if len(s.pending[id]) > 0 {
 				s.held[id] = true
@@ -252,6 +264,7 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 			s.bus.Publish(events.New(events.RunStopping, id, itemRunID(item), map[string]any{"reason": reason}))
 			active.cancel()
 			stopped = append(stopped, id)
+			waits = append(waits, waitRun{id: id, active: active, item: item, reason: reason})
 		}
 	}
 	kept := s.queue[:0]
@@ -260,13 +273,13 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 			if len(s.pending[entry.s.ID]) > 0 {
 				s.held[entry.s.ID] = true
 			}
-			s.bus.Publish(events.New(events.RunStopping, entry.s.ID, entry.runID, map[string]any{"reason": "safe"}))
+			s.bus.Publish(events.New(events.RunStopping, entry.s.ID, entry.runID, map[string]any{"reason": "done"}))
 			status := "idle"
 			if s.held[entry.s.ID] {
 				status = "held"
 			}
-			entry.s.SetRun(session.RunState{Status: status, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.pending[entry.s.ID]), LastStopReason: "safe"})
-			s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": "safe", "turns": 0, "queue_held": s.held[entry.s.ID]}))
+			entry.s.SetRun(session.RunState{Status: status, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.pending[entry.s.ID]), LastStopReason: "done"})
+			s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": "done", "detail": "stopped before dispatch", "turns": 0, "queue_held": s.held[entry.s.ID]}))
 			stopped = append(stopped, entry.s.ID)
 		} else {
 			kept = append(kept, entry)
@@ -274,7 +287,49 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 	}
 	s.queue = kept
 	s.repositionLocked()
+	s.mu.Unlock()
+	for _, waiting := range waits {
+		timer := time.NewTimer(cancellationBound)
+		select {
+		case <-waiting.active.done:
+			if !timer.Stop() {
+				<-timer.C
+			}
+		case <-timer.C:
+			detail := abortDetail(true)
+			s.runner.recordAbort(waiting.item, waiting.active.runID, waiting.reason, detail)
+			s.forceFinish(waiting.id, waiting.active, detail)
+		}
+	}
 	return stopped
+}
+
+func (s *Scheduler) forceFinish(sessionID string, expected *activeRun, detail string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active := s.active[sessionID]
+	if active != expected {
+		return
+	}
+	delete(s.active, sessionID)
+	item, _ := s.registry.Get(sessionID)
+	if item == nil {
+		return
+	}
+	turn := item.Snapshot().Run.Turn
+	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: active.stopReason}
+	queueHeld := (s.held[sessionID] || s.unreachable[sessionID]) && len(s.pending[sessionID]) > 0
+	if queueHeld {
+		state.Status, state.QueuePosition = "held", len(s.pending[sessionID])
+	}
+	item.SetRun(state)
+	s.bus.Publish(events.New(events.RunStopped, sessionID, active.runID, map[string]any{"run_id": active.runID, "reason": active.stopReason, "detail": detail, "turns": turn, "queue_held": queueHeld}))
+	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
+		next := s.queue[0]
+		s.queue = s.queue[1:]
+		s.startLocked(next)
+	}
+	s.repositionLocked()
 }
 
 func itemRunID(item *session.Session) string {

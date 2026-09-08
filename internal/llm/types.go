@@ -47,6 +47,8 @@ type Response struct {
 type Delta struct {
 	Kind      string
 	Index     int
+	CallID    string
+	Name      string
 	Text      string
 	Total     int
 	Cache     int

@@ -112,7 +112,9 @@ func TestStopHoldsQueuedMessagesUntilNextExplicitSubmit(t *testing.T) {
 	defer model.Close()
 	cfg, profile, item, scheduler := schedulerFixture(t, model.URL)
 	item.SetRun(session.RunState{Status: "running", RunID: "r0", MaxTurns: cfg.Run.MaxTurns})
-	scheduler.active[item.ID] = &activeRun{cancel: func() {}}
+	done := make(chan struct{})
+	close(done)
+	scheduler.active[item.ID] = &activeRun{cancel: func() {}, runID: "r0", done: done}
 	if result, err := scheduler.Submit(context.Background(), item.ID, "first queued"); err != nil || result.Position != 1 {
 		t.Fatalf("first=%+v err=%v", result, err)
 	}
@@ -227,7 +229,7 @@ func TestLongRunSlowAccountingCompletesEstimatedAndCompacts(t *testing.T) {
 	defer model.Close()
 	_, profile, item, scheduler := schedulerFixture(t, model.URL)
 	profile.RequestTimeoutS = 3
-	profile.Context.NCtx, profile.Context.ReserveOutput = 8192, 1024
+	profile.Context.NCtx, profile.Context.ReserveOutput = 9216, 1024
 	profile.Capabilities.Tokenize = true
 	profile.Capabilities.ApplyTemplate = true
 	profile.Capabilities.ApplyTemplateTools = true
@@ -361,31 +363,41 @@ func TestStopCancelsBlackholedApplyTemplateInUnderOneSecond(t *testing.T) {
 	if elapsed := time.Since(started); scheduler.Active(item.ID) || elapsed >= time.Second {
 		t.Fatalf("stop elapsed=%s active=%t", elapsed, scheduler.Active(item.ID))
 	}
-	if reason := item.Snapshot().Run.LastStopReason; reason != "safe" {
+	if reason := item.Snapshot().Run.LastStopReason; reason != "aborted_mid_run" {
 		t.Fatalf("stop reason=%q", reason)
 	}
 }
 
-func TestSecondStopEscalatesToEmergency(t *testing.T) {
+func TestStopDetachesUncooperativeRunAtBound(t *testing.T) {
 	_, _, item, scheduler := schedulerFixture(t, "http://127.0.0.1:1")
 	item.SetRun(session.RunState{Status: "running", RunID: "r1", MaxTurns: 40})
-	scheduler.active[item.ID] = &activeRun{cancel: func() {}}
+	scheduler.runner.beginFlight(item.ID, "r1")
+	scheduler.runner.setFlightStage(item.ID, "r1", 3, "call_model")
+	scheduler.active[item.ID] = &activeRun{cancel: func() {}, runID: "r1", done: make(chan struct{})}
 	eventStream, unsubscribe := scheduler.bus.Subscribe()
 	defer unsubscribe()
+	started := time.Now()
 	scheduler.Stop(item.ID, false)
-	scheduler.Stop(item.ID, false)
-	if got := scheduler.active[item.ID].stopReason; got != "emergency" {
-		t.Fatalf("stop reason=%q", got)
+	if elapsed := time.Since(started); elapsed < cancellationBound || elapsed > cancellationBound+time.Second {
+		t.Fatalf("stop elapsed=%s bound=%s", elapsed, cancellationBound)
 	}
-	for index, reason := range []string{"safe", "emergency"} {
+	if scheduler.Active(item.ID) || item.Snapshot().Run.LastStopReason != "aborted_mid_model" {
+		t.Fatalf("active=%t run=%+v", scheduler.Active(item.ID), item.Snapshot().Run)
+	}
+	want := map[string]bool{events.RunStopping: false, events.RunAborted: false, events.MessageAppended: false, events.RunStopped: false}
+	for len(want) > 0 {
 		select {
 		case event := <-eventStream:
-			if event.Type != events.RunStopping || event.RunID != "r1" || event.Data.(map[string]any)["reason"] != reason {
-				t.Fatalf("event %d=%+v", index, event)
+			if _, ok := want[event.Type]; ok {
+				delete(want, event.Type)
 			}
 		case <-time.After(time.Second):
-			t.Fatalf("missing %s stop event", reason)
+			t.Fatalf("missing events=%v", want)
 		}
+	}
+	messages := item.MessagesCopy()
+	if len(messages) != 1 || messages[0].Role != "system" || !strings.Contains(messages[0].Content, "HARNESS ABORT RECORD") {
+		t.Fatalf("abort messages=%#v", messages)
 	}
 }
 

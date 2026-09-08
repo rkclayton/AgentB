@@ -45,6 +45,7 @@ type Runner struct {
 	identityChatGrants map[string]string
 	policyGrantMu      sync.Mutex
 	policyChatGrants   map[string]map[string]bool
+	flights            *flightBook
 	renameSession      func(string, string, string) error
 	mailboxBoundary    func(context.Context, string, bool) BoundaryAction
 	ids                atomic.Int64
@@ -57,8 +58,10 @@ type BoundaryAction struct {
 	Err      error
 }
 
+const minimumOutputFloor = 4096
+
 func NewRunner(bus *events.Bus, registry *tools.Registry, prompt *PromptRenderer, profile func(string) (*config.Profile, bool), cfg func() config.Config) *Runner {
-	return &Runner{bus: bus, tools: registry, prompt: prompt, profile: profile, cfg: cfg, gate: NewGate(bus, cfg), budget: NewBudgeter(), compact: contextmgr.New(bus)}
+	return &Runner{bus: bus, tools: registry, prompt: prompt, profile: profile, cfg: cfg, gate: NewGate(bus, cfg), budget: NewBudgeter(), compact: contextmgr.New(bus), flights: newFlightBook()}
 }
 func (r *Runner) Configure(cfg config.Config) {
 	r.tools.Configure(cfg)
@@ -104,6 +107,8 @@ func (r *Runner) AppendUser(s *session.Session, message events.Message) {
 }
 
 func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (string, string, int) {
+	r.beginFlight(s.ID, runID)
+	defer r.endFlight(s.ID, runID)
 	produced := map[string]delivery.Source{}
 	defer func() {
 		if r.deliver != nil {
@@ -113,6 +118,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	defer r.lapseShellGrants(s, runID)
 	defer r.lapseFileRunGrant(s, runID)
 	if stop, detail := r.applyMailboxBoundary(ctx, s, runID, false); stop {
+		if ctx.Err() != nil {
+			return r.stopped(s, runID, 0, detail)
+		}
 		return "mailbox_stop", detail, 0
 	}
 	profile, ok := r.profile(s.ServerID)
@@ -131,15 +139,19 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 	}()
 	turn := 0
 	lengthSeen := false
+	truncatedToolRetry := ""
 	accountingRepairTried := false
 	runCfg := r.cfg().Run
 	guards := newRunGuards(runCfg.CycleWindow, runCfg.MaxConsecutiveToolErrors)
 	currentReasoning := map[string]bool{}
 	for {
 		if ctx.Err() != nil {
-			return "user_stop", "", turn
+			return r.stopped(s, runID, turn, "cancellation requested")
 		}
 		if stop, detail := r.applyMailboxBoundary(ctx, s, runID, false); stop {
+			if ctx.Err() != nil {
+				return r.stopped(s, runID, turn, detail)
+			}
 			return "mailbox_stop", detail, turn
 		}
 		cfg := r.cfg()
@@ -182,6 +194,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				messages = append(messages, converted)
 			}
 			request = llm.Request{Messages: messages, Tools: schemas, ToolChoice: "auto", Thinking: profile.Reasoning.Enabled}
+			if truncatedToolRetry != "" {
+				request.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": truncatedToolRetry}}
+			}
 			budget, budgetErr = r.budget.MeasureWithBusy(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, SystemProject: systemProject, SystemWorkspaceMemory: systemWorkspaceMemory, System: system, WithoutToolSystems: r.withoutToolSystems(profile, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: records}, false, func(err error) {
 				budgetBusy = true
 				r.bus.Publish(events.New(events.ModelBusy, s.ID, runID, map[string]any{"host": modelHost(profile), "detail": err.Error()}))
@@ -203,6 +218,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			r.bus.Publish(events.New(events.ModelReachable, s.ID, runID, map[string]any{"server_id": profile.ID}))
 		}
 		if budgetErr != nil {
+			if ctx.Err() != nil {
+				return r.stopped(s, runID, turn-1, "budget accounting canceled")
+			}
 			r.operationalError(s, runID, "budget", budgetErr)
 			if !accountingRepairTried && r.repairMalformedToolCall(ctx, s, runID, profile, currentReasoning) {
 				accountingRepairTried = true
@@ -217,12 +235,13 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			return "model_error", "budget accounting: " + budgetErr.Error(), turn - 1
 		}
 		guardUsed := guardedPromptTokens(budget)
-		if guardUsed+budget.Reserve >= budget.NCtx {
+		floor := outputFloor(profile)
+		if guardUsed+floor > budget.NCtx {
 			if r.compactToFit(ctx, s, runID, profile, currentReasoning, budget) {
 				turn--
 				continue
 			}
-			return "context_ceiling", fmt.Sprintf("prompt %d tokens + reserve %d leaves no output room in n_ctx %d after compaction", guardUsed, budget.Reserve, budget.NCtx), turn - 1
+			return "context_ceiling", fmt.Sprintf("prompt %d tokens leaves less than the %d-token output floor in n_ctx %d after compaction", guardUsed, floor, budget.NCtx), turn - 1
 		}
 		r.bus.Publish(requestEvent)
 		r.budget.MarkRequest(s.ID, budget.UsedEst)
@@ -233,6 +252,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		requestDone := make(chan struct{})
 		r.stage(s, runID, turn, "call_model", func() {
 			response, callErr = client.ChatStreamStatus(ctx, request, func(delta llm.Delta) {
+				r.addFlightDelta(s.ID, runID, delta)
 				if delta.Kind == "progress" {
 					r.bus.Publish(events.New(events.ModelProgress, s.ID, runID, map[string]any{"turn": turn, "total": delta.Total, "cache": delta.Cache, "processed": delta.Processed}))
 					return
@@ -262,7 +282,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		}
 		if callErr != nil {
 			if ctx.Err() != nil {
-				return "user_stop", "", turn
+				return r.stopped(s, runID, turn, "model call canceled")
 			}
 			if host, unavailable := modelUnavailable(profile, callErr); unavailable {
 				publishFinalBudget = false
@@ -286,23 +306,27 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		r.maybeAutoRename(ctx, s)
 		r.stage(s, runID, turn, "parse", func() {})
 		if response.FinishReason == "length" && len(toolCalls) > 0 {
-			r.appendTruncatedToolReply(ctx, s, runID, profile, turn, request.MaxTokens, response.Content, response.Reasoning, durableToolCalls, currentReasoning)
 			if lengthSeen {
-				return "length", "model output hit the limit twice", turn
+				return "length", fmt.Sprintf("truncated %s call hit the output limit twice", firstToolName(durableToolCalls)), turn
+			}
+			if firstToolName(durableToolCalls) == "" {
+				return "length", "truncated tool call had no function name and could not be retried safely", turn
 			}
 			lengthSeen = true
+			truncatedToolRetry = firstToolName(durableToolCalls)
+			r.bus.Publish(events.New(events.ModelRetry, s.ID, runID, map[string]any{"turn": turn, "next_turn": turn + 1, "reason": "truncated_tool_call", "tool": truncatedToolRetry, "attempt": 1, "max_attempts": 1}))
 			continue
 		}
-		if len(toolCalls) == 0 && response.FinishReason != "tool_calls" {
-			if response.FinishReason == "length" && !lengthSeen {
-				lengthSeen = true
-				message, _ := r.makeMessage(ctx, profile, "user", "Your output was cut off by the token limit. Continue, briefly.", "history", turn)
-				s.Append(message)
-				r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
-				continue
+		if truncatedToolRetry != "" {
+			if len(toolCalls) == 0 || firstToolName(durableToolCalls) != truncatedToolRetry {
+				return "length", fmt.Sprintf("truncated %s call retry did not return that tool call", truncatedToolRetry), turn
 			}
+			truncatedToolRetry = ""
+			lengthSeen = false
+		}
+		if len(toolCalls) == 0 && response.FinishReason != "tool_calls" {
 			if response.FinishReason == "length" {
-				return "length", "model output hit the limit twice", turn
+				return "length", "model output was truncated", turn
 			}
 			message, _ := r.makeMessage(ctx, profile, "assistant", response.Content, "history", turn)
 			message.Reasoning = response.Reasoning
@@ -317,6 +341,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		assistant.ToolCalls = durableToolCalls
 		type result struct {
 			call            events.ToolCall
+			durableCall     events.ToolCall
 			args            map[string]any
 			argErr          error
 			content         string
@@ -329,7 +354,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		}
 		results := []result{}
 		r.stage(s, runID, turn, "dispatch", func() {
-			for _, call := range toolCalls {
+			for index, call := range toolCalls {
 				var args map[string]any
 				decoded, err := tools.DecodeArgs(call.Arguments)
 				if err == nil {
@@ -338,7 +363,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 					args = map[string]any{}
 				}
 				r.bus.Publish(events.New(events.ToolCallEvent, s.ID, runID, map[string]any{"turn": turn, "call_id": call.ID, "name": call.Name, "args": sanitizedToolArguments(call.Name, args)}))
-				results = append(results, result{call: call, args: args, argErr: err})
+				results = append(results, result{call: call, durableCall: durableToolCalls[index], args: args, argErr: err})
 			}
 		})
 		r.stage(s, runID, turn, "execute", func() {
@@ -350,8 +375,10 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 					item.content = "error: " + item.argErr.Error()
 					item.ok = false
 				} else {
+					r.setFlightTool(s.ID, runID, turn, item.durableCall, item.args)
 					outcome := r.executeTool(ctx, s, runID, item.call.ID, item.call.Name, item.args)
 					item.content, item.ok, item.operatorContext = outcome.Content, outcome.OK, outcome.OperatorContext
+					r.setFlightToolOutput(s.ID, runID, item.content)
 					item.category, item.untrusted, item.metadata = outcome.Category, outcome.Untrusted, outcome.Metadata
 					if item.ok && item.call.Name == "read_file" && untrustedAttachmentRead(s, item.args) {
 						item.untrusted = true
@@ -381,7 +408,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			}
 		})
 		if ctx.Err() != nil {
-			return "user_stop", "", turn
+			return r.stopped(s, runID, turn, "tool execution canceled")
 		}
 		r.stage(s, runID, turn, "append", func() {
 			s.Append(assistant)
@@ -410,7 +437,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				decision, err := r.gate.WaitCycleDecision(ctx, s, runID, item.call.ID+"-cycle", map[string]any{"tool": item.call.Name, "detail": detail})
 				if err != nil {
 					if ctx.Err() != nil {
-						return "user_stop", "", turn
+						return r.stopped(s, runID, turn, "approval wait canceled")
 					}
 					return "cycle", err.Error(), turn
 				}
@@ -722,6 +749,7 @@ func (r *Runner) callDetailed(ctx context.Context, s *session.Session, name stri
 
 func (r *Runner) stage(s *session.Session, runID string, turn int, name string, fn func()) {
 	start := time.Now()
+	r.setFlightStage(s.ID, runID, turn, name)
 	r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": name, "state": "enter", "turn": turn, "ms": 0}))
 	fn()
 	r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": name, "state": "exit", "turn": turn, "ms": time.Since(start).Milliseconds()}))
@@ -907,7 +935,11 @@ func guardedPromptTokens(budget events.Budget) int {
 }
 
 func requestTokenLimit(p *config.Profile, budget events.Budget, promptTokens int) int {
-	return max(0, min(p.Context.NCtx, budget.NCtx-promptTokens-budget.Reserve))
+	return max(0, min(max(outputFloor(p), p.Context.ReserveOutput), budget.NCtx-promptTokens))
+}
+
+func outputFloor(p *config.Profile) int {
+	return min(minimumOutputFloor, p.Context.NCtx)
 }
 func roughBodyTokens(body any) int { return int(math.Ceil(float64(jsonSize(body)) / 3.6)) }
 func jsonSize(value any) int       { data, _ := json.Marshal(value); return len(data) }

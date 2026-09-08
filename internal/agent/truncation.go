@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"harness/internal/config"
@@ -11,33 +10,11 @@ import (
 	"harness/internal/tools"
 )
 
-func truncatedToolCallNote(limit int, calls []events.ToolCall) string {
-	names := make([]string, 0, len(calls))
-	seen := map[string]bool{}
-	for _, call := range calls {
-		if call.Name != "" && !seen[call.Name] {
-			seen[call.Name] = true
-			names = append(names, call.Name)
-		}
+func firstToolName(calls []events.ToolCall) string {
+	if len(calls) == 0 {
+		return ""
 	}
-	tool := strings.Join(names, ", ")
-	if tool == "" {
-		tool = "tool"
-	}
-	return fmt.Sprintf("reply was cut off at the %d-token output limit while emitting %s arguments; the call was not executed.", limit, tool)
-}
-
-func (r *Runner) appendTruncatedToolReply(ctx context.Context, s *session.Session, runID string, p *config.Profile, turn, limit int, content, reasoning string, calls []events.ToolCall, currentReasoning map[string]bool) {
-	if content != "" {
-		assistant, _ := r.makeMessage(ctx, p, "assistant", content, "history", turn)
-		assistant.Reasoning = reasoning
-		currentReasoning[assistant.ID] = true
-		s.Append(assistant)
-		r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": assistant}))
-	}
-	note, _ := r.makeMessage(ctx, p, "user", truncatedToolCallNote(limit, calls), "history", turn)
-	s.Append(note)
-	r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": note}))
+	return calls[0].Name
 }
 
 // repairMalformedToolCall removes an assistant tool-call structure that cannot be
@@ -87,8 +64,6 @@ func (r *Runner) repairMalformedToolCall(ctx context.Context, s *session.Session
 		}
 		kept = append(kept, message)
 	}
-	note, _ := r.makeMessage(ctx, p, "user", truncatedToolCallNote(p.Context.ReserveOutput, badCalls), "history", bad.Turn)
-	kept = append(kept, note)
 	s.ReplaceMessages(kept)
 	if strings.TrimSpace(bad.Content) != "" {
 		r.bus.Publish(events.New(events.MessageUpdated, s.ID, runID, map[string]any{"id": bad.ID, "patch": map[string]any{"tool_calls": []events.ToolCall{}}}))
@@ -97,6 +72,6 @@ func (r *Runner) repairMalformedToolCall(ctx context.Context, s *session.Session
 	for _, message := range removed {
 		r.bus.Publish(events.New(events.MessageRemoved, s.ID, runID, map[string]any{"id": message.ID, "reason": "unrenderable_tool_call"}))
 	}
-	r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": note}))
+	r.bus.Publish(events.New(events.ModelRetry, s.ID, runID, map[string]any{"turn": bad.Turn, "reason": "malformed_tool_history", "tool": firstToolName(badCalls), "attempt": 1, "max_attempts": 1}))
 	return true
 }

@@ -172,8 +172,8 @@ func (c *Client) ChatStreamStatus(ctx context.Context, request Request, onDelta 
 				}
 				if part.Function.Arguments != "" {
 					arguments[part.Index].WriteString(part.Function.Arguments)
-					onDelta(Delta{Kind: "tool_call", Index: part.Index, Text: part.Function.Arguments})
 				}
+				onDelta(Delta{Kind: "tool_call", Index: part.Index, CallID: call.ID, Name: call.Function.Name, Text: part.Function.Arguments})
 			}
 			if choice.FinishReason != "" {
 				result.FinishReason = choice.FinishReason
