@@ -2,7 +2,8 @@
 param(
     [switch]$RealModel,
     [string]$RealModelUrl,
-    [string]$RealModelName
+    [string]$RealModelName,
+    [string]$EvidenceDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,7 +14,13 @@ $data = Join-Path $testRoot 'LocalAppData\Agent_b'
 $workspace = Join-Path $testRoot 'ProgramData\Agent_b\workspace'
 $startMenu = Join-Path $testRoot 'Start Menu\Programs'
 $registry = 'HKCU:\Software\Agent_bChatAcceptance-' + [Guid]::NewGuid().ToString('N') + '\Agent_b'
-$evidence = Join-Path $sourceRoot 'logs\evidence\2026-09-08-v0.13.2-chat-suite'
+$evidence = if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
+    $EvidenceDirectory
+} elseif (-not [string]::IsNullOrWhiteSpace($env:AGENTB_CHAT_ACCEPTANCE_EVIDENCE)) {
+    $env:AGENTB_CHAT_ACCEPTANCE_EVIDENCE
+} else {
+    Join-Path $sourceRoot 'logs\evidence\2026-09-08-v0.13.2-chat-suite'
+}
 
 try {
     & (Join-Path $PSScriptRoot 'install-Agent_b.ps1') `
