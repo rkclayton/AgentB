@@ -3,25 +3,32 @@ const producingTools = new Set(["write_file", "edit_file"]);
 export function filesFromResponse(items) {
   const callRuns = new Map();
   for (const item of items || []) {
-    if (item.type !== "agent") continue;
-    for (const callID of item.toolCallIDs || []) callRuns.set(callID, item.run_id || "");
+    try {
+      if (item?.type !== "agent") continue;
+      for (const callID of item.toolCallIDs || []) callRuns.set(callID, item.run_id || "");
+    } catch {}
   }
   const files = new Map();
   for (const item of items || []) {
-    if (item.type !== "tool" || !producingTools.has(item.name) || item.result?.ok !== true) continue;
-    const recorded = item.result?.file;
-    const path = recorded?.path || legacyRelativePath(item.args?.path);
-    if (!path) continue;
-    files.set(path.toLowerCase(), {
-      path,
-      bytes: Number.isFinite(recorded?.bytes) ? recorded.bytes : null,
-      callID: item.callID || "",
-      runID: callRuns.get(item.callID) || "",
-      openScope: "workspace",
-      openPath: path,
-    });
+    try {
+      if (item?.type !== "tool" || !producingTools.has(item.name) || item.result?.ok !== true) continue;
+      const recorded = item.result?.file;
+      const path = recorded?.path || legacyRelativePath(item.args?.path);
+      if (typeof path !== "string" || !path) continue;
+      files.set(path.toLowerCase(), {
+        path,
+        bytes: Number.isFinite(recorded?.bytes) ? recorded.bytes : null,
+        callID: item.callID || "",
+        runID: callRuns.get(item.callID) || "",
+        openScope: "workspace",
+        openPath: path,
+      });
+    } catch {}
   }
-  const delivery = (items || []).find((item) => item.type === "notice" && item.event?.type === "files.delivered")?.event?.data;
+  const delivery = (items || []).find((item) => {
+    try { return item?.type === "notice" && item.event?.type === "files.delivered"; }
+    catch { return false; }
+  })?.event?.data;
   if (delivery?.mode === "folder") return [];
   if (delivery?.mode === "both") {
     for (const item of delivery.items || []) {

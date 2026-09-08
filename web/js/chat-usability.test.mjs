@@ -116,6 +116,7 @@ test("Composer is five lines with no placeholder and expands upward", () => {
 
 test("Chat uses the narrow monospace label gutter and the agent_b tab restores its robot", () => {
 	assert.match(css, /\.chat-entry\s*\{[\s\S]*grid-template-columns:\s*90px minmax\(0, 1fr\)/);
+	assert.match(css, /\.chat-render-failure \.chat-content\s*\{[\s\S]*white-space:\s*nowrap/);
 	assert.match(shell, /agentID === "agent_b"[\s\S]*agent-tab-robot[\s\S]*assets\/agent\.svg/);
 	assert.match(tokens, /\.agent-tab-robot\{width:16px;height:16px/);
 });

@@ -3,6 +3,7 @@ param(
     [switch]$RealModel,
     [string]$RealModelUrl,
     [string]$RealModelName,
+    [string]$ReplayPath,
     [string]$EvidenceDirectory
 )
 
@@ -48,6 +49,14 @@ try {
     }
     & (Get-Command node.exe -ErrorAction Stop).Source @arguments
     if ($LASTEXITCODE -ne 0) { throw "Chat acceptance failed with exit code $LASTEXITCODE." }
+    if (-not [string]::IsNullOrWhiteSpace($ReplayPath)) {
+        & (Get-Command node.exe -ErrorAction Stop).Source `
+            (Join-Path $PSScriptRoot 'chat-replay-acceptance.mjs') `
+            '--app' $application `
+            '--data' $data `
+            '--replay' $ReplayPath
+        if ($LASTEXITCODE -ne 0) { throw "Chat replay acceptance failed with exit code $LASTEXITCODE." }
+    }
 } finally {
     if (Test-Path -LiteralPath $registry) { Remove-Item -LiteralPath $registry -Recurse -Force }
     $resolvedTemp = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'

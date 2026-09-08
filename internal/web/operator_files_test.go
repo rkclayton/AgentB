@@ -77,7 +77,7 @@ func TestUIErrorRelayPublishesSessionScopedHarnessEvent(t *testing.T) {
 	server, _ := operatorFileServer(t)
 	channel, cancel := server.bus.Subscribe()
 	defer cancel()
-	body := strings.NewReader(`{"session_id":"s1","kind":"unhandledrejection","message":"render failed","stack":"at render"}`)
+	body := strings.NewReader(`{"session_id":"s1","kind":"unhandledrejection","message":"render failed","stack":"at render","repeat_count":25,"capped":true}`)
 	response := httptest.NewRecorder()
 	server.uiError(response, httptest.NewRequest(http.MethodPost, "/api/ui-errors", body))
 	if response.Code != http.StatusNoContent {
@@ -86,7 +86,7 @@ func TestUIErrorRelayPublishesSessionScopedHarnessEvent(t *testing.T) {
 	select {
 	case event := <-channel:
 		data, _ := json.Marshal(event.Data)
-		if event.Type != events.Error || event.SessionID != "s1" || !strings.Contains(string(data), `"where":"ui"`) || !strings.Contains(string(data), "render failed") {
+		if event.Type != events.Error || event.SessionID != "s1" || !strings.Contains(string(data), `"where":"ui"`) || !strings.Contains(string(data), "render failed") || !strings.Contains(string(data), `"repeat_count":25`) || !strings.Contains(string(data), `"capped":true`) {
 			t.Fatalf("event=%+v", event)
 		}
 	case <-time.After(time.Second):

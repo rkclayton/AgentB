@@ -6,7 +6,7 @@ globalThis.window = { addEventListener: () => {} };
 const stored = new Map();
 globalThis.sessionStorage = { getItem: (key) => stored.get(key) || null, setItem: (key, value) => stored.set(key, value) };
 globalThis.EventSource = class { addEventListener() {} };
-const { reduce, setSelection, store } = await import("./bus.js");
+const { reduce, setSelection, store, subscribe } = await import("./bus.js");
 
 function snapshot(session = {}) {
   reduce({ type: "snapshot", data: { sessions: { main: { id: "main", cursor: { generation: "g", offset: 10 }, run: { status: "idle" }, tools: [], messages: [], timeline: [], ...session } }, replay: false, servers: [], config: {} } });
@@ -87,4 +87,16 @@ test("one agent and chat selection object persists across page loads", () => {
   assert.equal(stored.get("agentb.selection"), JSON.stringify(store.selection));
   reduce({ type: "snapshot", data: { sessions: store.sessions, replay: false, servers: [], config: {} } });
   assert.deepEqual(store.selection, { agent_id: "agent_b", session_id: "main" });
+});
+
+test("session-scoped UI error evidence never notifies rendering subscribers", () => {
+  snapshot();
+  let notifications = 0;
+  const unsubscribe = subscribe((_state, event) => { if (event.type !== "init") notifications++; });
+  reduce({ type: "error", data: { where: "ui", message: "render failed" } });
+  assert.equal(store.error.message, "render failed");
+  assert.equal(notifications, 0);
+  reduce({ type: "error", data: { where: "server", message: "request failed" } });
+  assert.equal(notifications, 1);
+  unsubscribe();
 });

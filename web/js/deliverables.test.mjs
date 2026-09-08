@@ -57,3 +57,18 @@ test("a replay file absent from the workspace renders missing", async () => {
   assert.equal(chip.children.some((child) => child.textContent === "download"), false);
   assert.equal(chip.children.at(-1).disabled, true);
 });
+
+test("a malformed write entry cannot abort deliverable discovery for its neighbors", () => {
+  const malformed = new Proxy({ type: "tool", name: "write_file", result: { ok: true } }, {
+    get(target, key) {
+      if (key === "args") throw new Error("malformed projected args");
+      return target[key];
+    },
+  });
+  assert.deepEqual(filesFromResponse([
+    malformed,
+    { type: "tool", callID: "kept", name: "edit_file", args: { path: "kept.txt" }, result: { ok: true } },
+  ]), [
+    { path: "kept.txt", bytes: null, callID: "kept", runID: "", openScope: "workspace", openPath: "kept.txt" },
+  ]);
+});

@@ -151,7 +151,13 @@ function renderLog(session) {
     finishLogRender([empty]);
     return;
   }
-  const entries = buildEntries(session);
+  let entries;
+  try {
+    entries = buildEntries(session);
+  } catch (error) {
+    finishLogRender([renderHistoryFailure(error)]);
+    return;
+  }
   if (!entries.length) {
     const empty = document.createElement("div");
     empty.className = "chat-empty";
@@ -166,7 +172,7 @@ function renderLog(session) {
     earlierButton.textContent = `earlier: ${start} entries`;
     nodes.push(earlierButton);
   }
-  for (const entry of entries.slice(start, end)) nodes.push(renderEntry(session, entry));
+  for (const [index, entry] of entries.slice(start, end).entries()) nodes.push(renderEntrySafely(session, entry, start + index));
   jumpButton.hidden = follow && page === 0;
   nodes.push(jumpButton);
   finishLogRender(nodes);
@@ -191,7 +197,8 @@ function reconcileChildren(parent, nodes) {
 }
 
 function buildEntries(session) {
-  return groupResponses((session.chat || []).filter((entry) => !["operator.context", "message.queued", "run.queued"].includes(entry.event?.type)));
+  const chat = Array.isArray(session?.chat) ? session.chat : [];
+  return groupResponses(chat.filter((entry) => !["operator.context", "message.queued", "run.queued"].includes(entry?.event?.type)));
 }
 
 function changeBound(value) {
@@ -206,9 +213,14 @@ function groupResponses(entries) {
   let response = null;
   let boundary = "orphan";
   for (const entry of entries) {
-    if (entry.type === "user") {
+    if (entry?.type === "user") {
       grouped.push(entry);
-      boundary = entry.key;
+      boundary = entry.key || `user:${grouped.length}`;
+      response = null;
+      continue;
+    }
+    if (!entry || typeof entry !== "object") {
+      grouped.push(entry);
       response = null;
       continue;
     }
@@ -221,7 +233,17 @@ function groupResponses(entries) {
   return grouped;
 }
 
+function renderEntrySafely(session, entry, index) {
+  try {
+    return renderEntry(session, entry);
+  } catch (error) {
+    return renderFailure(entry, error, index, false);
+  }
+}
+
 function renderEntry(session, entry) {
+  if (!entry || typeof entry !== "object") throw new Error("entry is missing or is not an object");
+  if (!entry.key) throw new Error("entry key is missing");
   if (entry.type === "notice") return renderNotice(session, entry);
   if (entry.type === "response") return renderResponse(session, entry);
   let view = entryViews.get(entry.key);
@@ -236,6 +258,7 @@ function renderEntry(session, entry) {
     entryViews.set(entry.key, view);
   }
   usedEntryViews.add(entry.key);
+  view.row.dataset.entryKey = entry.key;
   view.author.lastElementChild.textContent = entry.type === "user" ? "you" : agentAuthor(session, entry.agentRole);
   view.row.className = `chat-entry ${entry.type === "user" ? "chat-user" : entry.type === "tool" ? "tool-entry" : "chat-agent"}`;
   const content = view.content;
@@ -289,21 +312,48 @@ function renderResponse(session, entry) {
   view.author.lastElementChild.textContent = agentAuthor(session);
   const nodes = [];
   const usedItems = new Set();
-  for (const item of entry.items) {
-    usedItems.add(item.key);
-    if (item.type === "notice") {
-		const notice = noticeContent(session, item, false);
-      notice.classList.add("chat-response-notice");
-      nodes.push(notice);
-      continue;
+  for (const [index, item] of entry.items.entries()) {
+    const key = item?.key || `invalid:${index}`;
+    usedItems.add(key);
+    try {
+      nodes.push(renderResponseItem(session, view, item, key));
+    } catch (error) {
+      nodes.push(renderFailure(item, error, index, true));
     }
-    let itemView = view.items.get(item.key);
+  }
+  const files = filesFromResponse(entry.items.filter((item) => item && typeof item === "object"));
+  if (files.length) {
+    let chips = view.chips;
+    if (!chips) {
+      chips = document.createElement("div");
+      chips.className = "file-chips";
+      view.chips = chips;
+    }
+    chips.replaceChildren(...files.map((file) => renderFileChip(session, file)));
+    nodes.push(chips);
+  }
+  reconcileChildren(view.content, nodes);
+  for (const key of view.items.keys()) if (!usedItems.has(key)) view.items.delete(key);
+  return view.row;
+}
+
+function renderResponseItem(session, view, item, key) {
+  if (!item || typeof item !== "object") throw new Error("entry is missing or is not an object");
+  if (!item.key) throw new Error("entry key is missing");
+  if (item.type === "notice") {
+    const notice = noticeContent(session, item, false);
+    notice.classList.add("chat-response-notice");
+    notice.dataset.entryKey = item.key;
+    return notice;
+  }
+  let itemView = view.items.get(key);
     if (!itemView) {
       const step = document.createElement("div");
       step.className = `chat-response-step ${item.type === "tool" ? "chat-response-tool" : ""}`;
       itemView = { step, answer: null, caret: null, answerText: "" };
-      view.items.set(item.key, itemView);
+      view.items.set(key, itemView);
     }
+    itemView.step.dataset.entryKey = item.key;
     const stepNodes = [];
     if (item.type === "agent") {
       const tokens = item.reasoningTokens || Math.ceil(Array.from(item.reasoning || "").length / 3.6);
@@ -326,24 +376,56 @@ function renderResponse(session, entry) {
       }
     } else if (item.type === "tool") {
       stepNodes.push(toolTick(item));
+    } else {
+      throw new Error(`unsupported entry type ${String(item.type || "(missing)")}`);
     }
     reconcileChildren(itemView.step, stepNodes);
-    nodes.push(itemView.step);
-  }
-  const files = filesFromResponse(entry.items);
-  if (files.length) {
-    let chips = view.chips;
-    if (!chips) {
-      chips = document.createElement("div");
-      chips.className = "file-chips";
-      view.chips = chips;
-    }
-    chips.replaceChildren(...files.map((file) => renderFileChip(session, file)));
-    nodes.push(chips);
-  }
-  reconcileChildren(view.content, nodes);
-  for (const key of view.items.keys()) if (!usedItems.has(key)) view.items.delete(key);
-  return view.row;
+    return itemView.step;
+}
+
+function renderFailure(entry, error, index, nested) {
+  const row = document.createElement(nested ? "div" : "section");
+  row.className = nested ? "chat-response-step chat-response-notice alarm chat-render-failure" : "chat-entry chat-notice-row alarm chat-render-failure";
+  const key = safeEntryValue(entry, "key");
+  if (key) row.dataset.entryKey = key;
+  const content = document.createElement("div");
+  content.className = "chat-content";
+  const label = entryLabel(entry, index);
+  const reason = errorReason(error);
+  content.textContent = `${label} could not render · ${reason}`;
+  row.append(content);
+  console.error("chat render failure", label, reason);
+  return row;
+}
+
+function renderHistoryFailure(error) {
+  const row = document.createElement("div");
+  row.className = "chat-empty alarm chat-render-failure";
+  const reason = errorReason(error);
+  row.textContent = `Chat history could not render · ${reason}`;
+  console.error("chat render failure", "history", reason);
+  return row;
+}
+
+function entryLabel(entry, index) {
+  if (!entry || typeof entry !== "object") return `entry ${index + 1}`;
+  const type = safeEntryValue(entry, "type");
+  const key = safeEntryValue(entry, "key");
+  if (type === "tool") return `tool ${safeEntryValue(entry, "name") || safeEntryValue(entry, "callID") || key || index + 1}`;
+  if (type === "notice") return `notice ${safeEntryValue(safeEntryValue(entry, "event"), "type") || key || index + 1}`;
+  return `${type || "entry"} ${key || index + 1}`;
+}
+
+function errorReason(error) {
+  let value = error;
+  try { value = error?.message || error; } catch {}
+  try { return String(value || "unknown render failure").replace(/\s+/g, " ").slice(0, 240); }
+  catch { return "unknown render failure"; }
+}
+
+function safeEntryValue(entry, key) {
+  try { return entry && typeof entry === "object" ? entry[key] : undefined; }
+  catch { return undefined; }
 }
 
 function renderFileChip(session, file) {
@@ -391,6 +473,7 @@ function thinking(entry, tokens) {
 }
 
 function toolTick(entry) {
+  if (!entry.args || typeof entry.args !== "object" || Array.isArray(entry.args)) throw new Error("tool arguments are missing or are not an object");
   const root = document.createElement("div");
   const button = document.createElement("button");
   button.type = "button";
@@ -435,7 +518,8 @@ function renderNotice(session, entry) {
 
 function noticeContent(session, entry, actionable) {
   const event = entry.event;
-  const data = event.data || {};
+  if (!event || typeof event !== "object") throw new Error("notice event is missing or is not an object");
+  const data = event.data && typeof event.data === "object" ? event.data : {};
   const content = document.createElement("div");
   content.className = "chat-content";
   if (event.type === "run.stopped") {
@@ -443,7 +527,7 @@ function noticeContent(session, entry, actionable) {
 		if (data.reason === "model_unreachable") {
 			const line=document.createElement("span"); line.textContent=`model unreachable · ${session.model_unreachable?.host || "model"}`; content.append(line);
 			if(data.detail){const details=document.createElement("details");const summary=document.createElement("summary");summary.textContent="Connection detail";const pre=document.createElement("pre");pre.textContent=data.detail;details.append(summary,pre);content.append(details)}
-		} else content.textContent = `stopped: ${reason}${data.reason === "turn_ceiling" ? ` (${data.turns || session.run.max_turns})` : data.detail ? `, ${data.detail}` : ""}`;
+		} else content.textContent = `stopped: ${reason}${data.reason === "turn_ceiling" ? ` (${data.turns || session?.run?.max_turns || 0})` : data.detail ? `, ${data.detail}` : ""}`;
     if (data.reason !== "done") content.classList.add("alarm");
   } else if (event.type === "files.delivered") {
     const items = data.items || [];
@@ -744,9 +828,10 @@ function resize() {
   expandComposer.setAttribute("aria-label", composerExpanded ? "Collapse composer" : "Expand composer");
 }
 function busy(session) {
-  return !!session && ["running", "queued", "paused", "stopping"].includes(session.run.status);
+  return !!session && ["running", "queued", "paused", "stopping"].includes(session.run?.status);
 }
 function keyArgument(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return "";
   const service = callServiceKey(args);
   if (service) return service;
   for (const key of ["path", "command", "pattern", "note"]) if (args[key] !== undefined) return String(args[key]);

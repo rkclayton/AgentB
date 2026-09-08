@@ -443,6 +443,12 @@
 .chat-notice-row .chat-content {
   grid-column: 2;
 }
+.chat-render-failure .chat-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-empty.chat-render-failure { color: var(--alarm); }
 .chat-notice-author { color: var(--mute); font: 12px/20px var(--mono); }
 .chat-approval button {
   min-height: 20px;

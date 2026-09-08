@@ -294,6 +294,53 @@ if (realModel) {
   assert.equal(session?.id, sessionID, "selected new chat must exist in the server snapshot");
   record("new-chat");
 
+  const missingArgsFixture = await browser.evaluate(`(async () => {
+    const bus = await import('/static/js/bus.js');
+    const session = bus.store.sessions[${JSON.stringify(sessionID)}];
+    session.chat = [
+      { type: 'user', key: 'hotfix:user', text: 'before malformed tool' },
+      { type: 'tool', key: 'hotfix:missing-args', name: 'read_file' },
+      { type: 'agent', key: 'hotfix:answer', text: 'after malformed tool', done: true }
+    ];
+    bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
+    await new Promise(resolve => setTimeout(resolve, 120));
+    return { rows: document.querySelectorAll('[data-entry-key]').length, text: document.querySelector('#chat-log')?.innerText || '' };
+  })()`);
+  assert.equal(missingArgsFixture.rows, 3);
+  assert.match(missingArgsFixture.text, /tool read_file could not render · tool arguments are missing or are not an object/);
+  assert.match(missingArgsFixture.text, /before malformed tool/);
+  assert.match(missingArgsFixture.text, /after malformed tool/);
+  record("missing-tool-args-isolated");
+
+  let events = await sessionEvents(sessionID);
+  const beforeRenderFailure = events.at(-1)?.seq || 0;
+  const throwingFixture = await browser.evaluate(`(async () => {
+    const bus = await import('/static/js/bus.js');
+    const session = bus.store.sessions[${JSON.stringify(sessionID)}];
+    const args = new Proxy({}, { ownKeys() { throw new Error('deliberate render failure'); } });
+    session.chat = [
+      { type: 'user', key: 'hotfix:kept', text: 'other entry remains' },
+      { type: 'tool', key: 'hotfix:throwing', name: 'shell', args }
+    ];
+    for (let index = 0; index < 32; index++) {
+      bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
+      await new Promise(resolve => setTimeout(resolve, 65));
+    }
+    return document.querySelector('#chat-log')?.innerText || '';
+  })()`);
+  assert.match(throwingFixture, /tool shell could not render · deliberate render failure/);
+  assert.match(throwingFixture, /other entry remains/);
+  assert.doesNotMatch(throwingFixture, /No agent connected/);
+  await waitEvent(sessionID, (event) => event.type === "error" && event.seq > beforeRenderFailure && event.data?.where === "ui" && event.data?.capped === true, "capped UI render failure", 6000);
+  events = await sessionEvents(sessionID);
+  const relayedRenderFailures = events.filter((event) => event.type === "error" && event.seq > beforeRenderFailure && event.data?.where === "ui" && event.data?.message?.includes("tool shell deliberate render failure"));
+  assert.equal(relayedRenderFailures.length, 2, JSON.stringify(relayedRenderFailures.map((event) => event.data)));
+  assert.deepEqual(relayedRenderFailures.map((event) => [event.data.repeat_count, event.data.capped]), [[1, false], [25, true]]);
+  record("render-failure-empty-state-and-bounded-relay-2");
+
+  await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
+  await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('deliberate render failure')`, "server snapshot restored");
+
   const geometry = await browser.evaluate(`(() => { const textarea=document.querySelector('#chat-task').getBoundingClientRect(); const row=document.querySelector('.chat-composer-row').getBoundingClientRect(); const expand=document.querySelector('#chat-expand').getBoundingClientRect(); const robot=document.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab-robot').getBoundingClientRect(); return {textarea:textarea.width,row:row.width,expandTop:expand.top-textarea.top,expandRight:textarea.right-expand.right,robot:robot.width}; })()`);
   assert.ok(geometry.textarea >= geometry.row - 50, JSON.stringify(geometry));
   assert.ok(geometry.expandTop >= 0 && geometry.expandTop <= 8 && geometry.expandRight >= 0 && geometry.expandRight <= 8, JSON.stringify(geometry));
@@ -313,7 +360,7 @@ if (realModel) {
   await browser.wait(`[...document.querySelectorAll('.approval-card')].some(item=>item.innerText.toLowerCase().includes('run as you'))`, "Run as you card");
   assert.equal(await clickText(".approval-card button", "Yes, for this chat"), true);
   await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Acceptance answer rendered after the approved shell call.')`, "answer rendered");
-  let events = await sessionEvents(sessionID);
+  events = await sessionEvents(sessionID);
   assert.ok(events.some((event) => event.type === "shell.grant" && event.data.scope === "session"));
   assert.ok(events.some((event) => event.type === "tool.result" && event.data.name === "shell" && event.data.ok === true));
   const gutter = await browser.evaluate(`getComputedStyle(document.querySelector('.chat-entry')).gridTemplateColumns.split(' ')[0]`);

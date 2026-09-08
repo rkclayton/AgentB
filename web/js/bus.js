@@ -58,7 +58,12 @@ export function reduce(event) {
         operator_context_expires_at: data.expires_at || "", reason: data.enabled ? data.reason || store.shell_identity.reason : "" };
       operatorReconciler.observed();
       break;
-    case "error": store.error = data; break;
+    case "error":
+      store.error = data;
+      // A relayed UI error is evidence about the current render. Notifying view
+      // subscribers here would schedule the render that produced it again.
+      if (data.where === "ui") return;
+      break;
     default: return;
   }
   notify(event);

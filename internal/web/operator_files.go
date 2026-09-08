@@ -116,10 +116,12 @@ func (s *Server) uiError(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		SessionID string `json:"session_id"`
-		Kind      string `json:"kind"`
-		Message   string `json:"message"`
-		Stack     string `json:"stack"`
+		SessionID   string `json:"session_id"`
+		Kind        string `json:"kind"`
+		Message     string `json:"message"`
+		Stack       string `json:"stack"`
+		RepeatCount int    `json:"repeat_count"`
+		Capped      bool   `json:"capped"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -135,6 +137,9 @@ func (s *Server) uiError(w http.ResponseWriter, r *http.Request) {
 			body.SessionID = ""
 		}
 	}
-	s.bus.Publish(events.New(events.Error, body.SessionID, "", map[string]any{"where": "ui", "kind": body.Kind, "message": body.Message, "stack": body.Stack}))
+	if body.RepeatCount < 1 {
+		body.RepeatCount = 1
+	}
+	s.bus.Publish(events.New(events.Error, body.SessionID, "", map[string]any{"where": "ui", "kind": body.Kind, "message": body.Message, "stack": body.Stack, "repeat_count": body.RepeatCount, "capped": body.Capped}))
 	w.WriteHeader(http.StatusNoContent)
 }
