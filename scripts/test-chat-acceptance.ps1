@@ -66,7 +66,8 @@ try {
             (Join-Path $PSScriptRoot 'chat-replay-acceptance.mjs') `
             '--app' $application `
             '--data' $data `
-            '--replay' $ReplayPath
+            '--replay' $ReplayPath `
+            '--evidence' $evidence
         if ($LASTEXITCODE -ne 0) { throw "Chat replay acceptance failed with exit code $LASTEXITCODE." }
     }
 } finally {
