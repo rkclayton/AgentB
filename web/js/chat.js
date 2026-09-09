@@ -28,7 +28,6 @@ const attachExchange = document.getElementById("chat-attach-exchange");
 const exchangeFileList = document.getElementById("chat-exchange-files");
 const filePicker = document.getElementById("chat-file-picker");
 const pendingFiles = document.getElementById("chat-attachments");
-const titleLine = document.getElementById("chat-title");
 const stop = document.getElementById("chat-stop");
 const runAsYou = document.getElementById("chat-run-as-you");
 const retryModel = document.getElementById("chat-retry-model");
@@ -111,8 +110,6 @@ function schedule() {
 
 function render() {
   const session = store.sessions[selectedID()];
-  titleLine.textContent = session?.agent_name || "";
-  titleLine.hidden = !session;
   renderBudget(session);
   renderLog(session);
   renderComposer(session);

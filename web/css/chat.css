@@ -1,6 +1,6 @@
 .chat-page {
   display: grid;
-  grid-template-rows: 40px auto 4px minmax(0, 1fr) auto;
+  grid-template-rows: 40px 4px minmax(0, 1fr) auto;
   height: 100dvh;
   overflow: hidden;
   background: var(--bezel);
@@ -10,8 +10,6 @@
 .chat-page * {
   box-sizing: border-box;
 }
-.chat-title-line { min-height:0; padding:2px 10px; color:var(--ink); font-weight:500; background:var(--bezel); }
-.chat-title-line[hidden] { display:none; }
 .chat-page button,
 .chat-page textarea,
 .chat-page select {
@@ -569,7 +567,7 @@
 
 /* Compact application frame shared with Console. */
 .chat-page {
-  grid-template-rows: var(--app-header-height) auto 4px minmax(0, 1fr) auto;
+  grid-template-rows: var(--app-header-height) 4px minmax(0, 1fr) auto;
 }
 .chat-header {
   grid-row: 1;
@@ -577,10 +575,9 @@
   gap: 6px;
   padding: 0 8px;
 }
-.chat-title-line { grid-row: 2; }
-.chat-budget { grid-row: 3; }
-.chat-log { grid-row: 4; }
-.chat-composer { grid-row: 5; }
+.chat-budget { grid-row: 2; }
+.chat-log { grid-row: 3; }
+.chat-composer { grid-row: 4; }
 .chat-content.operator-mode-enabled {
   padding: 2px 6px;
   color: var(--well);
@@ -710,7 +707,7 @@
 }
 .chat-input-actions .stop-sign { width:24px; height:24px; min-height:24px; padding:0; }
 .chat-notice:empty { display: none; }
-.no-open-chats { grid-template-rows: var(--app-header-height) 0 0 minmax(0, 1fr) 0; }
+.no-open-chats { grid-template-rows: var(--app-header-height) 0 minmax(0, 1fr) 0; }
 .no-open-chats .chat-budget,
 .no-open-chats .chat-composer { display: none; }
 

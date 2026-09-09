@@ -316,8 +316,10 @@ if (realModel) {
   await waitProjectedChatText(sessionID, "VISIBLE PARTIAL COMPLETE", "completed prose stream");
   record("mid-stream-prose-visible-without-expansion");
 
-  assert.deepEqual(await page.locator(".shell-page").allTextContents(), ["Plan"]);
+  assert.equal(await page.locator('.shell-page[aria-label="plan"] .shell-page-icon').count(), 1);
+  assert.equal(await page.locator(".shell-page").getAttribute("title"), "plan");
   assert.equal(await page.locator(".shell-settings").count(), 1);
+  assert.equal(await page.locator("#chat-title").count(), 0);
   const chatSide = await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').evaluate((node) => ({
     side: node.dataset.side,
     color: getComputedStyle(node).color,
@@ -330,13 +332,15 @@ if (realModel) {
     page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click()
   ]);
   await page.locator("#console-lifetime").waitFor({ state: "visible" });
-  assert.deepEqual(await page.locator(".shell-page").allTextContents(), ["Plan"]);
+  assert.equal(await page.locator('.shell-page[aria-label="plan"] .shell-page-icon').count(), 1);
   const consoleSide = await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').evaluate((node) => ({
     side: node.dataset.side,
-    color: getComputedStyle(node).color
+    color: getComputedStyle(node).color,
+    background: getComputedStyle(node.closest(".agent-tab-wrap")).backgroundColor
   }));
   assert.equal(consoleSide.side, "console");
-  assert.equal(consoleSide.color, "rgb(242, 178, 51)");
+  assert.equal(consoleSide.color, "rgb(216, 221, 227)");
+  assert.equal(consoleSide.background, "rgba(216, 221, 227, 0.16)");
   await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click({ button: "right" });
   const toggleMenu = page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-chat-menu');
   await toggleMenu.waitFor({ state: "visible" });
@@ -760,7 +764,7 @@ if (realModel) {
   await setTask("acceptance: unreachable");
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('model unreachable')`, "unreachable strip");
   await waitEvent(sessionID, (event) => event.type === "model.unreachable", "model.unreachable");
-  await browser.wait(`document.querySelector('.agent-tab[data-agent="agent_b"] .agent-state')?.classList.contains('offline')`, "offline agent lamp");
+  await browser.wait(`document.querySelector('.agent-tab[data-agent="agent_b"] .agent-tab-robot')?.classList.contains('offline')`, "offline agent eyes");
   assert.equal(await page.locator("#chat-task").isEnabled(), true);
   assert.equal(await page.locator("#chat-send").isEnabled(), true);
   const unreachableText = await browserText("#chat-status-strip");
@@ -772,7 +776,7 @@ if (realModel) {
   await page.locator("#chat-retry-model").click();
   await waitProjectedChatText(sessionID, "Recovered after Retry.", "Retry recovery", 20000);
   await waitEvent(sessionID, (event) => event.type === "model.reachable", "model.reachable");
-  await browser.wait(`!document.querySelector('.agent-tab[data-agent="agent_b"] .agent-state')?.classList.contains('offline')`, "recovered agent lamp");
+  await browser.wait(`!document.querySelector('.agent-tab[data-agent="agent_b"] .agent-tab-robot')?.classList.contains('offline')`, "recovered agent eyes");
   record("model-unreachable-retry-release");
 
   await setTask("acceptance: busy");

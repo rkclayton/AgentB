@@ -35,10 +35,12 @@ export function initShell(options = {}) {
   const right = node("div", "shell-right");
   const pages = node("nav", "shell-pages");
   pages.setAttribute("aria-label", "Pages");
-  for (const [id, label, path] of [["plan", "Plan", "/plan"]]) {
+  for (const [id, path] of [["plan", "/plan"]]) {
     const link = node("a", `shell-page ${page === id ? "selected" : ""}`);
     link.dataset.page = id;
-    link.textContent = label;
+    link.innerHTML = '<svg class="shell-page-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4.5A3.5 3.5 0 0 0 5.5 8v.5A3.5 3.5 0 0 0 4 15a3 3 0 0 0 3 3h2m6-13.5A3.5 3.5 0 0 1 18.5 8v.5A3.5 3.5 0 0 1 20 15a3 3 0 0 1-3 3h-2M9 4.5V20m6-15.5V20M9 8H7m8 0h2M9 12H6.5m8.5 0h2.5M9 16H7m8 0h2"/></svg>';
+    link.setAttribute("aria-label", "plan");
+    link.title = "plan";
     link.href = path;
     if (page === id) {
       link.setAttribute("aria-current", "page");
@@ -108,9 +110,12 @@ export function initShell(options = {}) {
       const side = selected && (page === "chat" || page === "console") ? page : rememberedAgentSide(agentID);
       tab.dataset.agent = agentID;
       tab.dataset.side = side;
+      tab.removeAttribute("title");
       tab.classList.add(`side-${side}`);
+      wrap.classList.add(`side-${side}`);
       tab.setAttribute("aria-label", `${agentID} · ${agentName(agentID)} · ${side}`);
-      tab.innerHTML = `<span class="agent-state ${glyphState}" aria-hidden="true">${glyphState === "waiting" ? "!" : glyphState === "running" ? "●" : "○"}</span>${agentID === "agent_b" ? '<img class="agent-tab-robot" src="/static/assets/agent.svg" alt="">' : ""}<span>${escapeHTML(agentID)}</span>`;
+      const robot = agentID.slice(-1);
+      tab.innerHTML = `<span class="agent-tab-robot agent-tab-robot-${robot} ${glyphState}" aria-hidden="true"><img src="/static/assets/agent.svg" alt=""><span class="agent-tab-eyes"></span></span><span>${escapeHTML(agentID)}</span>`;
       tab.onclick = () => {
         const current = store.selection.session_id;
         const owned = sessionsFor(agentID, false);
