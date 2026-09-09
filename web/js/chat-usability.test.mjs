@@ -86,7 +86,7 @@ test("No-agent and blank Plan wells are explicit and Console links to active too
 
 test("New, list, close, and rename live in the agent right-click menu", () => {
   assert.match(html, /id="app-shell"[^>]+data-page="chat"/);
-  assert.doesNotMatch(shell, /button\("\+"/);
+  assert.match(shell, /button\("\+", `New chat with \$\{agentID\}`, "agent-tab-new"\)/);
   assert.match(shell, /button\("New chat…"/);
   assert.match(shell, /oncontextmenu/);
   assert.match(shell, /agent-chat-rename/);
@@ -111,6 +111,8 @@ test("Composer is five lines with no placeholder and expands upward", () => {
 	assert.match(css, /\.chat-input-wrap\s*\{\s*grid-column:\s*3/);
 	assert.match(css, /#chat-expand\s*\{[\s\S]*position:\s*absolute;[\s\S]*top:\s*4px;[\s\S]*right:\s*4px/);
   assert.match(html, /id="chat-send"[^>]+aria-label="Send"[^>]*>↵<\/button>/);
+  assert.match(css, /#chat-send \{[\s\S]*?height: 24px;[\s\S]*?min-height: 24px;/);
+  assert.match(css, /\.chat-input-actions \.stop-sign \{ width:24px; height:24px;/);
   assert.doesNotMatch(html, />Send<\/button>/);
 });
 

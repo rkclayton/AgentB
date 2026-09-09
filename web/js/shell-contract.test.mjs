@@ -31,6 +31,8 @@ test("agent tabs are ordered and expose idle running waiting glyphs", () => {
   assert.match(shell, /glyphState === "waiting" \? "!" : glyphState === "running" \? "●" : "○"/);
   assert.match(tokens, /\.agent-state\.running\{color:var\(--trace\)\}/);
   assert.match(tokens, /\.agent-state\.waiting,.shell-state\.waiting\{color:var\(--alarm\)\}/);
+  assert.match(shell, /button\("\+", `New chat with \$\{agentID\}`, "agent-tab-new"\)/);
+  assert.match(tokens, /\.agent-tab-wrap\{[^}]*flex:0 1 auto/);
 });
 
 test("agent menu owns open close and inline rename for open and closed chats", () => {

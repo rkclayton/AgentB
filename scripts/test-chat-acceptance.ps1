@@ -4,7 +4,8 @@ param(
     [string]$RealModelUrl,
     [string]$RealModelName,
     [string]$ReplayPath,
-    [string]$EvidenceDirectory
+    [string]$EvidenceDirectory,
+    [switch]$SkipBuild
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,15 +25,18 @@ $evidence = if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
 }
 
 try {
-    & (Join-Path $PSScriptRoot 'install-Agent_b.ps1') `
-        -SourceDirectory $sourceRoot `
-        -ApplicationDirectory $application `
-        -DataDirectory $data `
-        -WorkspaceDirectory $workspace `
-        -StartMenuDirectory $startMenu `
-        -UninstallRegistryPath $registry `
-        -TestMode
-    if ($LASTEXITCODE -ne 0) { throw "Disposable install failed with exit code $LASTEXITCODE." }
+    $installArguments = @{
+        SourceDirectory = $sourceRoot
+        ApplicationDirectory = $application
+        DataDirectory = $data
+        WorkspaceDirectory = $workspace
+        StartMenuDirectory = $startMenu
+        UninstallRegistryPath = $registry
+        TestMode = $true
+    }
+    if ($SkipBuild) { $installArguments.SkipBuild = $true }
+    & (Join-Path $PSScriptRoot 'install-Agent_b.ps1') @installArguments
+    if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Disposable install failed with exit code $LASTEXITCODE." }
 
     $arguments = @(
         (Join-Path $PSScriptRoot 'chat-acceptance.mjs'),

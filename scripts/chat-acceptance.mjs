@@ -267,12 +267,11 @@ if (realModel) {
   await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('REAL MODEL ACCEPTANCE OK')`, "real model answer", 120000);
   record("real-model-answer");
 } else {
-  await page.locator(".agent-tab").first().click({ button: "right" });
-  await page.getByRole("button", { name: "New chat…", exact: true }).click();
+  await page.locator(".agent-tab-new").click();
   await page.locator("button.shell-new-choice").filter({ hasText: /^Default ·/ }).click();
   let snapshot;
   await browser.wait(`new URLSearchParams(location.search).get('session')?.startsWith('s')`, "new session selected");
-  record("agent-tab-context-menu-idle");
+  record("agent-tab-new-chat-idle");
   snapshot = await state();
   const sessionID = await browser.evaluate(`new URLSearchParams(location.search).get('session')`);
   const session = snapshot.sessions[sessionID];
@@ -400,11 +399,14 @@ if (realModel) {
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('deliberate render failure')`, "server snapshot restored");
 
-  const geometry = await browser.evaluate(`(() => { const textarea=document.querySelector('#chat-task').getBoundingClientRect(); const row=document.querySelector('.chat-composer-row').getBoundingClientRect(); const expand=document.querySelector('#chat-expand').getBoundingClientRect(); const robot=document.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab-robot').getBoundingClientRect(); return {textarea:textarea.width,row:row.width,expandTop:expand.top-textarea.top,expandRight:textarea.right-expand.right,robot:robot.width}; })()`);
+  const geometry = await browser.evaluate(`(() => { const textarea=document.querySelector('#chat-task').getBoundingClientRect(); const row=document.querySelector('.chat-composer-row').getBoundingClientRect(); const expand=document.querySelector('#chat-expand').getBoundingClientRect(); const robot=document.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab-robot').getBoundingClientRect(); const tab=document.querySelector('.agent-tab-wrap[data-agent="agent_b"]').getBoundingClientRect(); const plus=document.querySelector('.agent-tab-new').getBoundingClientRect(); const send=document.querySelector('#chat-send').getBoundingClientRect(); const stop=document.querySelector('#chat-stop').getBoundingClientRect(); return {textarea:textarea.width,row:row.width,rowHeight:row.height,expandTop:expand.top-textarea.top,expandRight:textarea.right-expand.right,robot:robot.width,tab:tab.width,plus:{width:plus.width,height:plus.height},send:{width:send.width,height:send.height},stop:{width:stop.width,height:stop.height}}; })()`);
   assert.ok(geometry.textarea >= geometry.row - 50, JSON.stringify(geometry));
   assert.ok(geometry.expandTop >= 0 && geometry.expandTop <= 8 && geometry.expandRight >= 0 && geometry.expandRight <= 8, JSON.stringify(geometry));
   assert.ok(geometry.robot > 0, JSON.stringify(geometry));
-  record("composer-flex-width-expand-robot");
+  assert.ok(geometry.tab < 180 && geometry.plus.width === 20 && geometry.plus.height === 20, JSON.stringify(geometry));
+  assert.deepEqual(geometry.send, geometry.stop, JSON.stringify(geometry));
+  assert.ok(Math.abs(geometry.send.height - 24) < 0.01, JSON.stringify(geometry));
+  record("composer-flex-width-expand-robot-tab-plus-equal-controls");
 
   await setTask(`Please inspect acceptance directory "${bound}" and report.`);
   await browser.wait(`document.querySelector('.workspace-bind-card')?.innerText.includes('Bind this chat to')`, "bind offer");

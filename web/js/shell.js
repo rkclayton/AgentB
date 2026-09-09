@@ -81,11 +81,13 @@ export function initShell(options = {}) {
 	const selected = store.sessions[store.selection.session_id];
 	const configured = (store.config.agents || []).find((agent) => agentKey(agent) === selected?.agent_id) || store.config.agents?.[0];
 	if (configured?.c) agents.push("agent_c");
-	if (configured?.d) agents.push("agent_d");
+    if (configured?.d) agents.push("agent_d");
     for (const agentID of agents) {
       const wrap = node("div", "agent-tab-wrap");
       wrap.dataset.agent = agentID;
-      const tab = button("", `${agentID} · ${agentName(agentID)}`, `agent-tab ${store.selection.agent_id === agentID ? "selected" : ""}`);
+      const selected = store.selection.agent_id === agentID;
+      if (selected) wrap.classList.add("selected");
+      const tab = button("", `${agentID} · ${agentName(agentID)}`, `agent-tab ${selected ? "selected" : ""}`);
       const glyphState = agentState(agentID);
       tab.dataset.agent = agentID;
       tab.innerHTML = `<span class="agent-state ${glyphState}" aria-hidden="true">${glyphState === "waiting" ? "!" : glyphState === "running" ? "●" : "○"}</span>${agentID === "agent_b" ? '<img class="agent-tab-robot" src="/static/assets/agent.svg" alt="">' : ""}<span>${escapeHTML(agentID)}</span>`;
@@ -102,7 +104,18 @@ export function initShell(options = {}) {
         renderAgentMenu(menu, agentID);
         revealMenu(menu, tab);
       };
-      wrap.append(tab, menu);
+      wrap.append(tab);
+      if (agentID === "agent_b") {
+        const add = button("+", `New chat with ${agentID}`, "agent-tab-new");
+        add.disabled = store.replay || !(store.config.agents || []).length;
+        add.onclick = (event) => {
+          event.stopPropagation();
+          for (const other of tabs.querySelectorAll(".shell-menu")) if (other !== menu) other.hidden = true;
+          void showNewChatMenu(menu, agentID, add);
+        };
+        wrap.append(add);
+      }
+      wrap.append(menu);
       tabs.append(wrap);
     }
     const overflowWrap = node("div", "agent-overflow-wrap");
