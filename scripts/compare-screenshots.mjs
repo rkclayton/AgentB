@@ -32,6 +32,8 @@ try {
     let channelDelta = 0;
     let maxChannelDelta = 0;
     let top32Changed = 0;
+    let top32MinX = baseline.width;
+    let top32MaxX = -1;
     let minX = baseline.width;
     let minY = baseline.height;
     let maxX = -1;
@@ -49,7 +51,11 @@ try {
       const pixel = offset / 4;
       const x = pixel % baseline.width;
       const y = Math.floor(pixel / baseline.width);
-      if (y < 32) top32Changed++;
+      if (y < 32) {
+        top32Changed++;
+        top32MinX = Math.min(top32MinX, x);
+        top32MaxX = Math.max(top32MaxX, x);
+      }
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
       maxX = Math.max(maxX, x);
@@ -63,6 +69,7 @@ try {
       mean_abs_channel_delta: channelDelta / (total * 4),
       max_channel_delta: maxChannelDelta,
       top_32_changed_pixels: top32Changed,
+      top_32_difference_x: top32Changed ? { min_x: top32MinX, max_x: top32MaxX } : null,
       difference_bounds: changed ? { min_x: minX, min_y: minY, max_x: maxX, max_y: maxY } : null,
     };
   }, images);
