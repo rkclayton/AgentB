@@ -10,6 +10,7 @@ $testStart = Join-Path $testRoot 'StartMenu'
 $testRegistry = 'HKCU:\Software\Agent_b-Installer-Test-' + [Guid]::NewGuid().ToString('N')
 $installer = Join-Path $PSScriptRoot 'install-Agent_b.ps1'
 $uninstaller = Join-Path $PSScriptRoot 'uninstall-Agent_b.ps1'
+$installerWrapper = Join-Path (Split-Path -Parent $PSScriptRoot) 'install-Agent_b.cmd'
 
 function Assert-TemporaryTestPath {
     param([string]$Path)
@@ -18,6 +19,42 @@ function Assert-TemporaryTestPath {
     if (-not $full.StartsWith($temp, [StringComparison]::OrdinalIgnoreCase) -or
         -not (Split-Path -Leaf $full).StartsWith('Agent_b-installer-test-', [StringComparison]::Ordinal)) {
         throw "Refusing to clean unexpected test path: $full"
+    }
+}
+
+function Get-FreeTcpPort {
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    try {
+        $listener.Start()
+        return ([Net.IPEndPoint]$listener.LocalEndpoint).Port
+    } finally { $listener.Stop() }
+}
+
+function Get-AgentBProcessesAtPath {
+    param([string]$Executable)
+    return @(Get-Process -Name 'Agent_b' -ErrorAction SilentlyContinue | Where-Object {
+        try { [IO.Path]::GetFullPath($_.Path).Equals([IO.Path]::GetFullPath($Executable), [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+    })
+}
+
+function Get-FilePrefixHash {
+    param([string]$Path, [long]$Length)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $buffer = New-Object byte[] 65536
+        $remaining = $Length
+        while ($remaining -gt 0) {
+            $read = $stream.Read($buffer, 0, [Math]::Min($buffer.Length, $remaining))
+            if ($read -le 0) { throw "File became shorter while hashing its prefix: $Path" }
+            $null = $sha.TransformBlock($buffer, 0, $read, $buffer, 0)
+            $remaining -= $read
+        }
+        $null = $sha.TransformFinalBlock([byte[]]::new(0), 0, 0)
+        return ([BitConverter]::ToString($sha.Hash) -replace '-', '')
+    } finally {
+        $sha.Dispose()
+        $stream.Dispose()
     }
 }
 
@@ -141,13 +178,16 @@ try {
     }
 
     $configPath = Join-Path $testData 'harness.json'
-    $configHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
     $installedConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
     if (-not ([string]$installedConfig.workspace).Equals($testWorkspace, [StringComparison]::OrdinalIgnoreCase) -or
         -not ([string]$installedConfig.log_dir).Equals((Join-Path $testData 'logs'), [StringComparison]::OrdinalIgnoreCase) -or
         -not ([string]$installedConfig.memory.dir).Equals((Join-Path $testData 'memory'), [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Installed configuration does not use the three-root layout.'
     }
+    $testPort = Get-FreeTcpPort
+    $installedConfig.listen = "127.0.0.1:$testPort"
+    [IO.File]::WriteAllText($configPath, ($installedConfig | ConvertTo-Json -Depth 100) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $configHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
     $credentialPath = Join-Path $testData '.agentb-shell-credential.dpapi'
     [IO.File]::WriteAllBytes($credentialPath, [byte[]](1, 2, 3, 4))
     $credentialHash = (Get-FileHash -LiteralPath $credentialPath -Algorithm SHA256).Hash
@@ -178,8 +218,63 @@ try {
     $staleFile = Join-Path $webDirectory 'stale-upgrade-test.txt'
     Set-Content -LiteralPath $staleFile -Value 'removed by upgrade'
 
-    & powershell.exe -NoLogo -NoProfile -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
-    if ($LASTEXITCODE -ne 0) { throw "Upgrade exited $LASTEXITCODE." }
+    $installedBinary = Join-Path $testApplication 'Agent_b.exe'
+    $beforeStdout = Join-Path $testRoot 'running-before-stdout.log'
+    $beforeStderr = Join-Path $testRoot 'running-before-stderr.log'
+    $beforeArguments = '-config "' + $configPath + '" -app-root "' + $testApplication + '" -data-root "' + $testData + '"'
+    $beforeProcess = Start-Process -FilePath $installedBinary -ArgumentList $beforeArguments -WorkingDirectory $testData -WindowStyle Hidden -RedirectStandardOutput $beforeStdout -RedirectStandardError $beforeStderr -PassThru
+    $ready = $false
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 200
+        try {
+            $beforeState = Invoke-RestMethod -Uri "http://127.0.0.1:$testPort/api/state" -TimeoutSec 1
+            $ready = $true
+        } catch { }
+    } while (-not $ready -and -not $beforeProcess.HasExited -and [DateTime]::UtcNow -lt $deadline)
+    if (-not $ready) { throw 'Installed Agent_b did not become ready before the running-instance upgrade.' }
+
+    $dataBefore = @(Get-ChildItem -LiteralPath $testData -File -Recurse | Where-Object { -not $_.FullName.StartsWith((Join-Path $testData 'logs') + '\', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object {
+        [pscustomobject]@{ Path = $_.FullName; SHA256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+    })
+    $workspaceBefore = @(Get-ChildItem -LiteralPath $testWorkspace -File -Recurse | ForEach-Object {
+        [pscustomobject]@{ Path = $_.FullName; SHA256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+    })
+    $logsBefore = @(Get-ChildItem -LiteralPath (Join-Path $testData 'logs') -File -Recurse | ForEach-Object {
+        [pscustomobject]@{ Path = $_.FullName; Length = $_.Length; PrefixSHA256 = Get-FilePrefixHash -Path $_.FullName -Length $_.Length }
+    })
+
+    $savedInstallLog = $env:AGENT_B_INSTALL_LOG
+    $savedNoPause = $env:AGENT_B_INSTALL_NO_PAUSE
+    $savedNoBrowser = $env:AGENT_B_INSTALL_NO_BROWSER
+    $env:AGENT_B_INSTALL_LOG = Join-Path $testData 'logs\running-upgrade-transcript.log'
+    $env:AGENT_B_INSTALL_NO_PAUSE = '1'
+    $env:AGENT_B_INSTALL_NO_BROWSER = '1'
+    try {
+        $upgradeOutput = (& $installerWrapper -SourceDirectory (Split-Path -Parent $PSScriptRoot) -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode -SkipBuild 2>&1 | Out-String)
+        $upgradeExit = $LASTEXITCODE
+    } finally {
+        $env:AGENT_B_INSTALL_LOG = $savedInstallLog
+        $env:AGENT_B_INSTALL_NO_PAUSE = $savedNoPause
+        $env:AGENT_B_INSTALL_NO_BROWSER = $savedNoBrowser
+    }
+    if ($upgradeExit -ne 0) { throw "Running-instance wrapper upgrade exited $upgradeExit.`n$upgradeOutput" }
+    if ($upgradeOutput -notmatch 'STOPPING: Agent_b PID' -or $upgradeOutput -notmatch 'STOPPED: Agent_b PID' -or $upgradeOutput -notmatch "Agent_b is ready at http://127\.0\.0\.1:$testPort/chat") {
+        throw "Running-instance upgrade did not report stop and restart lifecycle.`n$upgradeOutput"
+    }
+    $beforeProcess.WaitForExit(15000) | Out-Null
+    if (-not $beforeProcess.HasExited) { throw 'The pre-upgrade Agent_b process did not exit.' }
+    if ((Get-Content -LiteralPath $beforeStdout -Raw) -notmatch 'stopping on terminated') {
+        throw 'The pre-upgrade Agent_b process did not record graceful signal shutdown.'
+    }
+    $afterProcesses = @(Get-AgentBProcessesAtPath -Executable $installedBinary)
+    if ($afterProcesses.Count -ne 1 -or $afterProcesses[0].Id -eq $beforeProcess.Id) {
+        throw "Running-instance upgrade did not finish with exactly one restarted instance: $(@($afterProcesses.Id) -join ', ')"
+    }
+    $afterState = Invoke-RestMethod -Uri "http://127.0.0.1:$testPort/api/state" -TimeoutSec 5
+    if ([bool]$afterState.build.dirty -ne [bool]$beforeState.build.dirty -or $afterState.build.commit -ne $beforeState.build.commit) {
+        throw 'Restarted Agent_b identity does not match the installed build.'
+    }
     if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -ne $configHash) {
         throw 'Upgrade changed the installed connection configuration.'
     }
@@ -192,6 +287,25 @@ try {
     if (Test-Path -LiteralPath $staleFile) {
         throw 'Upgrade retained a stale program file.'
     }
+    foreach ($entry in $dataBefore) {
+        if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) { throw "Upgrade removed production data: $($entry.Path)" }
+    }
+    foreach ($entry in $workspaceBefore) {
+        if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf) -or (Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash -ne $entry.SHA256) {
+            throw "Upgrade changed workspace evidence: $($entry.Path)"
+        }
+    }
+    foreach ($entry in $logsBefore) {
+        if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) { throw "Upgrade removed log evidence: $($entry.Path)" }
+        $afterLength = (Get-Item -LiteralPath $entry.Path).Length
+        if ($afterLength -lt $entry.Length -or (Get-FilePrefixHash -Path $entry.Path -Length $entry.Length) -ne $entry.PrefixSHA256) {
+            throw "Upgrade changed an existing log prefix: $($entry.Path)"
+        }
+    }
+    & (Join-Path $env:SystemRoot 'System32\taskkill.exe') /PID $afterProcesses[0].Id | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not stop the restarted disposable Agent_b.' }
+    $afterProcesses[0].WaitForExit(15000) | Out-Null
+    if (-not $afterProcesses[0].HasExited) { throw 'Restarted disposable Agent_b did not exit.' }
 
     & powershell.exe -NoLogo -NoProfile -File $uninstaller -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -ExpectedOperatorSid ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) -ExpectedOperatorLocalAppData ([Environment]::GetFolderPath('LocalApplicationData')) -Quiet -TestMode
     if ($LASTEXITCODE -ne 0) { throw "Preserving uninstall exited $LASTEXITCODE." }
@@ -225,6 +339,42 @@ try {
     if (Test-Path -LiteralPath $testRoot) {
         Assert-TemporaryTestPath $testRoot
         Remove-Item -LiteralPath $testRoot -Recurse -Force
+    }
+}
+
+function Get-FreeTcpPort {
+    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
+    try {
+        $listener.Start()
+        return ([Net.IPEndPoint]$listener.LocalEndpoint).Port
+    } finally { $listener.Stop() }
+}
+
+function Get-AgentBProcessesAtPath {
+    param([string]$Executable)
+    return @(Get-Process -Name 'Agent_b' -ErrorAction SilentlyContinue | Where-Object {
+        try { [IO.Path]::GetFullPath($_.Path).Equals([IO.Path]::GetFullPath($Executable), [StringComparison]::OrdinalIgnoreCase) } catch { $false }
+    })
+}
+
+function Get-FilePrefixHash {
+    param([string]$Path, [long]$Length)
+    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        $buffer = New-Object byte[] 65536
+        $remaining = $Length
+        while ($remaining -gt 0) {
+            $read = $stream.Read($buffer, 0, [Math]::Min($buffer.Length, $remaining))
+            if ($read -le 0) { throw "File became shorter while hashing its prefix: $Path" }
+            $null = $sha.TransformBlock($buffer, 0, $read, $buffer, 0)
+            $remaining -= $read
+        }
+        $null = $sha.TransformFinalBlock([byte[]]::new(0), 0, 0)
+        return ([BitConverter]::ToString($sha.Hash) -replace '-', '')
+    } finally {
+        $sha.Dispose()
+        $stream.Dispose()
     }
 }
 
