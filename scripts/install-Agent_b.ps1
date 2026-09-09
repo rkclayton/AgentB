@@ -107,14 +107,40 @@ function Find-Go {
     return $null
 }
 
-function Test-InstalledProcess {
+function Get-InstalledProcesses {
     param([string]$Executable)
+    $matches = @()
     foreach ($process in Get-Process -Name 'Agent_b' -ErrorAction SilentlyContinue) {
         try {
-            if ((Get-FullPath $process.Path).Equals((Get-FullPath $Executable), [StringComparison]::OrdinalIgnoreCase)) { return $true }
+            if ((Get-FullPath $process.Path).Equals((Get-FullPath $Executable), [StringComparison]::OrdinalIgnoreCase)) {
+                $matches += $process
+            }
         } catch { }
     }
-    return $false
+    return @($matches)
+}
+
+function Stop-InstalledProcesses {
+    param([System.Diagnostics.Process[]]$Processes)
+    if (-not $Processes.Count) { return }
+    $taskkill = Join-Path $env:SystemRoot 'System32\taskkill.exe'
+    foreach ($process in $Processes) {
+        Write-Host "STOPPING: Agent_b PID $($process.Id)"
+        & $taskkill /PID $process.Id
+        if ($LASTEXITCODE -ne 0) {
+            throw "Agent_b PID $($process.Id) could not be stopped gracefully (taskkill exit $LASTEXITCODE). Installation was not changed."
+        }
+    }
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        $remaining = @($Processes | Where-Object { Get-Process -Id $_.Id -ErrorAction SilentlyContinue })
+        if (-not $remaining.Count) { break }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($remaining.Count) {
+        throw "Agent_b PID(s) $(@($remaining.Id) -join ', ') did not exit after the graceful stop signal. Installation was not changed."
+    }
+    Write-Host "STOPPED: Agent_b PID(s) $(@($Processes.Id) -join ', ')"
 }
 
 function Copy-ProgramDirectory {
@@ -258,9 +284,8 @@ if ($WhatIfPreference) {
     exit 0
 }
 
-if (Test-InstalledProcess $installedBinary) {
-    throw 'Agent_b is running from the application directory. Close it, then run the installer again.'
-}
+$installedProcesses = @(Get-InstalledProcesses $installedBinary)
+Stop-InstalledProcesses -Processes $installedProcesses
 
 $go = Find-Go $sourceRoot
 if ($SkipBuild) {
