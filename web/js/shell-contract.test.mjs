@@ -31,7 +31,9 @@ test("agent tabs are ordered and expose idle running waiting glyphs", () => {
   assert.match(shell, /return "waiting"[\s\S]*return "running"[\s\S]*return "idle"/);
   assert.match(shell, /glyphState === "waiting" \? "!" : glyphState === "running" \? "●" : "○"/);
   assert.match(tokens, /\.agent-state\.running\{color:var\(--trace\)\}/);
+  assert.match(tokens, /\.agent-state\.offline\{color:var\(--alarm\)\}/);
   assert.match(tokens, /\.agent-state\.waiting,.shell-state\.waiting\{color:var\(--alarm\)\}/);
+  assert.match(shell, /sessions\.some\(\(item\) => item\.model_unreachable\)\) return "offline"/);
   assert.match(shell, /button\("\+", `New chat with \$\{agentID\}`, "agent-tab-new"\)/);
   assert.match(tokens, /\.agent-tab-wrap\{[^}]*flex:0 1 auto/);
   assert.match(shell, /location\.assign\(next === "chat" \? `\/chat\$\{suffix\}` : `\/\$\{suffix\}`\)/);

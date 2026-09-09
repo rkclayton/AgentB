@@ -84,6 +84,7 @@ export function initShell(options = {}) {
 
   function agentState(agentID) {
     const sessions = sessionsFor(agentID, false);
+    if (sessions.some((item) => item.model_unreachable)) return "offline";
     if (sessions.some((item) => item.pending_approval || item.pending_repo_policy || item.run?.status === "paused")) return "waiting";
     if (sessions.some((item) => activeRunStates.has(item.run?.status))) return "running";
     return "idle";

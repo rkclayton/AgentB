@@ -760,12 +760,19 @@ if (realModel) {
   await setTask("acceptance: unreachable");
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('model unreachable')`, "unreachable strip");
   await waitEvent(sessionID, (event) => event.type === "model.unreachable", "model.unreachable");
+  await browser.wait(`document.querySelector('.agent-tab[data-agent="agent_b"] .agent-state')?.classList.contains('offline')`, "offline agent lamp");
+  assert.equal(await page.locator("#chat-task").isEnabled(), true);
+  assert.equal(await page.locator("#chat-send").isEnabled(), true);
+  const unreachableText = await browserText("#chat-status-strip");
   await setTask("acceptance: recovered");
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('queued (1)')`, "recovery queued");
+  assert.ok(unreachableText.includes("model unreachable"));
+  assert.ok((await browserText("#chat-status-strip")).includes("model unreachable"));
   await startFake(modelPort);
   await page.locator("#chat-retry-model").click();
   await waitProjectedChatText(sessionID, "Recovered after Retry.", "Retry recovery", 20000);
   await waitEvent(sessionID, (event) => event.type === "model.reachable", "model.reachable");
+  await browser.wait(`!document.querySelector('.agent-tab[data-agent="agent_b"] .agent-state')?.classList.contains('offline')`, "recovered agent lamp");
   record("model-unreachable-retry-release");
 
   await setTask("acceptance: busy");

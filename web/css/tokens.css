@@ -48,6 +48,7 @@ button:hover{background:rgba(216,221,227,.12)}button:active{background:rgba(216,
 .app-shell .agent-tab-new{width:20px;height:20px;min-height:20px;padding:0}
 .agent-state{display:inline-block;width:12px;margin-right:4px;color:var(--mute);font:12px/16px var(--mono);text-align:center}
 .agent-state.running{color:var(--trace)}
+.agent-state.offline{color:var(--alarm)}
 .agent-state.waiting,.shell-state.waiting{color:var(--alarm)}
 .agent-tab-robot{width:16px;height:16px;margin-right:4px;opacity:.72}
 .shell-state.stopping{color:var(--trace)}
