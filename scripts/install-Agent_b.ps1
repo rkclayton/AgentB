@@ -9,9 +9,10 @@ param(
     [string]$OperatorSid,
     [string]$OperatorLocalAppData,
 	[switch]$Alpha,
-	[switch]$SkipBuild,
+    [switch]$SkipBuild,
     [string]$SigningThumbprint,
-    [switch]$TestMode
+    [switch]$TestMode,
+    [string]$TranscriptPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -20,6 +21,31 @@ $displayVersion = '0.18.1'
 function Get-FullPath {
     param([string]$Path)
     return [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($Path)).TrimEnd('\')
+}
+
+function Stop-InstallTranscript {
+    if (-not $script:installTranscriptStarted) { return }
+    $savedWhatIf = $WhatIfPreference
+    $WhatIfPreference = $false
+    try { $null = Stop-Transcript } finally {
+        $WhatIfPreference = $savedWhatIf
+        $script:installTranscriptStarted = $false
+    }
+}
+
+function Start-InstallTranscript {
+    param([string]$Path)
+    $parent = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        $null = New-Item -ItemType Directory -Path $parent -Force
+    }
+    $savedWhatIf = $WhatIfPreference
+    $WhatIfPreference = $false
+    try {
+        $null = Start-Transcript -LiteralPath $Path -Append
+        $script:installTranscriptStarted = $true
+    } finally { $WhatIfPreference = $savedWhatIf }
+    Write-Host "Transcript: $Path"
 }
 
 function Test-IsAdministrator {
@@ -201,11 +227,29 @@ function Set-ApplicationDirectoryAcl {
     Set-Acl -LiteralPath $Path -AclObject $acl
 }
 
+$script:installTranscriptStarted = $false
+$script:installTranscriptPath = $null
+trap {
+    $reason = $_.Exception.Message
+    if (-not $script:installTranscriptStarted -and $script:installTranscriptPath) {
+        try { Start-InstallTranscript -Path $script:installTranscriptPath } catch { }
+    }
+    Write-Host "INSTALLATION FAILED: $reason"
+    if ($script:installTranscriptPath) { Write-Host "Transcript: $script:installTranscriptPath" }
+    Stop-InstallTranscript
+    exit 1
+}
+
 if ($env:OS -ne 'Windows_NT') { throw 'Agent_b installation is supported only on Windows.' }
 if ([string]::IsNullOrWhiteSpace($SourceDirectory)) { $SourceDirectory = Split-Path -Parent $PSScriptRoot }
 if ([string]::IsNullOrWhiteSpace($OperatorSid)) { $OperatorSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
 if ([string]::IsNullOrWhiteSpace($OperatorLocalAppData)) { $OperatorLocalAppData = [Environment]::GetFolderPath('LocalApplicationData') }
 if ([string]::IsNullOrWhiteSpace($DataDirectory)) { $DataDirectory = Join-Path $OperatorLocalAppData 'Agent_b' }
+if ([string]::IsNullOrWhiteSpace($TranscriptPath)) {
+    $TranscriptPath = Join-Path (Join-Path $DataDirectory 'logs') ("installer-{0}.log" -f [DateTime]::Now.ToString('yyyyMMdd-HHmmss-fff'))
+}
+$script:installTranscriptPath = Get-FullPath $TranscriptPath
+Start-InstallTranscript -Path $script:installTranscriptPath
 
 $sourceRoot = Get-FullPath $SourceDirectory
 $applicationRoot = Assert-SafeAgentBPath $ApplicationDirectory 'ApplicationDirectory'
@@ -238,6 +282,29 @@ if (-not $TestMode) {
     }
 }
 
+$sourceBinary = Join-Path $sourceRoot 'Agent_b.exe'
+$installedBinary = Join-Path $applicationRoot 'Agent_b.exe'
+$go = Find-Go $sourceRoot
+foreach ($directory in @('web', 'prompts', 'scripts', 'docs')) {
+    $required = Join-Path $sourceRoot $directory
+    if (-not (Test-Path -LiteralPath $required -PathType Container)) { throw "Required program directory is missing: $required" }
+}
+foreach ($file in @('harness.example.json', 'SECURITY.md', 'LICENSE', 'scripts\launch-installed.cmd')) {
+    $required = Join-Path $sourceRoot $file
+    if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "Required program file is missing: $required" }
+}
+if ($SkipBuild -and -not (Test-Path -LiteralPath $sourceBinary -PathType Leaf)) {
+    throw "SkipBuild requires an existing binary: $sourceBinary"
+}
+if (-not $SkipBuild -and -not $go -and -not (Test-Path -LiteralPath $sourceBinary -PathType Leaf)) {
+    throw 'Go 1.24 or newer was not found and Agent_b.exe has not already been built.'
+}
+$preflightProcesses = @(Get-InstalledProcesses $installedBinary)
+if ($preflightProcesses.Count) {
+    Write-Host "PREFLIGHT: running Agent_b PID(s) $(@($preflightProcesses.Id) -join ', ') will be stopped after elevation."
+}
+Write-Host 'PREFLIGHT COMPLETE'
+
 if ((-not (Test-IsAdministrator) -or $PSVersionTable.PSEdition -ne 'Desktop') -and -not $WhatIfPreference -and -not $TestMode) {
     $arguments = @(
         '-NoLogo', '-NoProfile', '-File', $PSCommandPath,
@@ -246,14 +313,16 @@ if ((-not (Test-IsAdministrator) -or $PSVersionTable.PSEdition -ne 'Desktop') -a
         '-DataDirectory', $dataRoot,
         '-WorkspaceDirectory', $workspaceRoot,
         '-StartMenuDirectory', $StartMenuDirectory,
-        '-UninstallRegistryPath', $UninstallRegistryPath,
-        '-OperatorSid', $OperatorSid,
-		'-OperatorLocalAppData', $OperatorLocalAppData
+		'-UninstallRegistryPath', $UninstallRegistryPath,
+		'-OperatorSid', $OperatorSid,
+		'-OperatorLocalAppData', $OperatorLocalAppData,
+        '-TranscriptPath', $script:installTranscriptPath
 	)
 	if ($Alpha) { $arguments += '-Alpha' }
 	if ($SkipBuild) { $arguments += '-SkipBuild' }
     if ($SigningThumbprint) { $arguments += @('-SigningThumbprint', $SigningThumbprint) }
     $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    Stop-InstallTranscript
     if (Test-IsAdministrator) {
         & $windowsPowerShell @arguments
         exit $LASTEXITCODE
@@ -267,8 +336,6 @@ if (-not $currentSid.Value.Equals($OperatorSid, [StringComparison]::OrdinalIgnor
     throw "Installation refused: elevation changed identity from $OperatorSid to $($currentSid.Value). Use same-user UAC; over-the-shoulder administrator credentials would select the wrong LocalAppData and DPAPI owner."
 }
 
-$sourceBinary = Join-Path $sourceRoot 'Agent_b.exe'
-$installedBinary = Join-Path $applicationRoot 'Agent_b.exe'
 Write-Host 'Agent_b admin-protected program installation with per-operator registration and data'
 Write-Host "Application: $applicationRoot"
 Write-Host "Operator data: $dataRoot"
@@ -281,17 +348,14 @@ if ($WhatIfPreference) {
     $null = $PSCmdlet.ShouldProcess($applicationRoot, 'Install or upgrade admin-only program files')
     $null = $PSCmdlet.ShouldProcess($dataRoot, 'Create or preserve private operator data')
     $null = $PSCmdlet.ShouldProcess($workspaceRoot, 'Create or preserve service workspace')
+    Stop-InstallTranscript
     exit 0
 }
 
 $installedProcesses = @(Get-InstalledProcesses $installedBinary)
 Stop-InstalledProcesses -Processes $installedProcesses
 
-$go = Find-Go $sourceRoot
 if ($SkipBuild) {
-	if (-not (Test-Path -LiteralPath $sourceBinary -PathType Leaf)) {
-		throw "SkipBuild requires an existing binary: $sourceBinary"
-	}
 	Write-Host 'BUILD: using the commit-stamped binary supplied by deploy-alpha.ps1.'
 } elseif ($go) {
 	Write-Host "BUILD: $go"
@@ -471,3 +535,5 @@ Write-Host "Start Menu: $shortcutPath"
 Write-Host 'Registration: HKCU and the operator Start Menu, matching the LocalAppData configuration and user-scoped DPAPI owner.'
 Write-Host 'Settings: created once in LocalAppData and preserved on upgrades'
 Write-Host 'Next: open Agent_b from Start, then apply and verify Host protections in Settings > Security.'
+Write-Host "Transcript: $script:installTranscriptPath"
+Stop-InstallTranscript
