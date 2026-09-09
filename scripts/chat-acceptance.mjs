@@ -17,6 +17,7 @@ const children = [];
 let browser;
 let edgeContext;
 let page;
+let shellFlipEvidence;
 let app;
 let model;
 let modelPort;
@@ -267,6 +268,32 @@ edgeContext = await chromium.launchPersistentContext("", {
   viewport: { width: 1250, height: 975 },
   args: [`--app=http://127.0.0.1:${appPort}/chat`, "--window-size=1250,975"],
 });
+await edgeContext.addInitScript(() => {
+  const timing = window.__agentbLoadTiming = { dom_content_loaded: null, load: null, event_source_constructed: null, event_source_open: null, snapshot: null, first_surface_content: null, state_fetches: [] };
+  document.addEventListener("DOMContentLoaded", () => { timing.dom_content_loaded = performance.now(); });
+  window.addEventListener("load", () => { timing.load = performance.now(); });
+  const NativeEventSource = window.EventSource;
+  window.EventSource = class extends NativeEventSource {
+    constructor(...values) {
+      super(...values);
+      timing.event_source_constructed = performance.now();
+      this.addEventListener("open", () => { timing.event_source_open ??= performance.now(); });
+      this.addEventListener("snapshot", () => { timing.snapshot ??= performance.now(); });
+    }
+  };
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = async (...values) => {
+    const path = String(values[0]);
+    if (!path.includes("/api/state")) return nativeFetch(...values);
+    const sample = { start: performance.now(), end: null };
+    timing.state_fetches.push(sample);
+    try { return await nativeFetch(...values); }
+    finally { sample.end = performance.now(); }
+  };
+  new MutationObserver(() => {
+    if (timing.first_surface_content === null && document.querySelector(".chat-entry,.timeline-run,.timeline-model")) timing.first_surface_content = performance.now();
+  }).observe(document, { childList: true, subtree: true });
+});
 page = edgeContext.pages()[0] || await edgeContext.newPage();
 page.on("pageerror", (error) => process.stderr.write(`PAGE ERROR: ${error.stack || error}\n`));
 browser = {
@@ -327,11 +354,41 @@ if (realModel) {
   }));
   assert.equal(chatSide.side, "chat");
   assert.equal(chatSide.color, "rgb(216, 221, 227)");
+  const captureShellGeometry = () => page.evaluate(() => Object.fromEntries([
+    ["shell", "#app-shell"],
+    ["tabs", ".agent-tabs"],
+    ["wrap", '.agent-tab-wrap[data-agent="agent_b"]'],
+    ["tab", '.agent-tab[data-agent="agent_b"]'],
+    ["plus", ".agent-tab-new"],
+    ["plan", ".shell-page"],
+    ["settings", ".shell-settings"],
+  ].map(([key, selector]) => {
+    const rect = document.querySelector(selector).getBoundingClientRect();
+    return [key, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }];
+  })));
+  const captureLoadTiming = () => page.evaluate(() => {
+    const navigation = performance.getEntriesByType("navigation")[0];
+    return {
+      ...window.__agentbLoadTiming,
+      ready: performance.now(),
+      navigation: navigation ? {
+        response_start: navigation.responseStart,
+        response_end: navigation.responseEnd,
+        dom_interactive: navigation.domInteractive,
+        dom_content_loaded: navigation.domContentLoadedEventEnd,
+        load: navigation.loadEventEnd,
+      } : null,
+    };
+  });
+  const chatGeometry = await captureShellGeometry();
+  const chatToConsoleStarted = performance.now();
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/" && url.searchParams.get("session") === sessionID),
     page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click()
   ]);
   await page.locator("#console-lifetime").waitFor({ state: "visible" });
+  await page.waitForFunction(() => window.__agentbLoadTiming?.snapshot !== null);
+  const chatToConsoleMS = performance.now() - chatToConsoleStarted;
   assert.equal(await page.locator('.shell-page[aria-label="plan"] .shell-page-icon').count(), 1);
   const consoleSide = await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').evaluate((node) => ({
     side: node.dataset.side,
@@ -341,6 +398,9 @@ if (realModel) {
   assert.equal(consoleSide.side, "console");
   assert.equal(consoleSide.color, "rgb(216, 221, 227)");
   assert.equal(consoleSide.background, "rgba(216, 221, 227, 0.16)");
+  const consoleGeometry = await captureShellGeometry();
+  const consoleLoadTiming = await captureLoadTiming();
+  assert.deepEqual(consoleGeometry, chatGeometry, JSON.stringify({ chatGeometry, consoleGeometry }));
   await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click({ button: "right" });
   const toggleMenu = page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-chat-menu');
   await toggleMenu.waitFor({ state: "visible" });
@@ -348,12 +408,19 @@ if (realModel) {
   assert.equal(await toggleMenu.locator(".agent-chat-close").count(), await toggleMenu.locator(".agent-chat-row").count());
   assert.equal(await toggleMenu.locator(".agent-chat-delete").count(), await toggleMenu.locator(".agent-chat-row").count());
   await page.locator("#console-lifetime").click();
+  const consoleToChatStarted = performance.now();
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/chat" && url.searchParams.get("session") === sessionID),
     page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click()
   ]);
   await page.locator("#chat-task").waitFor({ state: "visible" });
+  await page.waitForFunction(() => window.__agentbLoadTiming?.snapshot !== null && document.querySelector(".chat-entry"));
+  const consoleToChatMS = performance.now() - consoleToChatStarted;
   assert.equal(await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').getAttribute("data-side"), "chat");
+  const returnedChatGeometry = await captureShellGeometry();
+  const chatLoadTiming = await captureLoadTiming();
+  assert.deepEqual(returnedChatGeometry, chatGeometry, JSON.stringify({ chatGeometry, returnedChatGeometry }));
+  shellFlipEvidence = { chat: chatGeometry, console: consoleGeometry, returned_chat: returnedChatGeometry, chat_to_console_ms: chatToConsoleMS, console_to_chat_ms: consoleToChatMS, console_load: consoleLoadTiming, chat_load: chatLoadTiming };
   record("agent-tab-left-toggle-preserves-chat-and-right-menu");
 
   const baselineDirectory = join(args.evidence, "baseline-initial");
@@ -889,7 +956,7 @@ if (realModel) {
   assert.equal((await state()).sessions[sessionID], undefined, "confirmed trash control must remove the session registry entry");
   record("agent-menu-inline-delete-keeps-memory-default");
   record("fake-model-script-complete");
-  await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID }, null, 2));
+  await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID, shell_flip: shellFlipEvidence }, null, 2));
   const evidenceLogs = join(evidenceRun, "jsonl");
   await mkdir(evidenceLogs, { recursive: true });
   for (const name of (await readdir(join(args.data, "logs"))).filter((item) => item.endsWith(".jsonl"))) {

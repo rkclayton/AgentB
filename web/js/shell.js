@@ -175,7 +175,8 @@ export function initShell(options = {}) {
     if (!overflowWrap || !overflowButton) return;
     for (const entry of entries) entry.hidden = false;
     overflowWrap.hidden = true;
-    const layout = agentTabLayout(entries.length, tabs.clientWidth);
+    const reservedWidth = entries[0]?.getBoundingClientRect().width || 92;
+    const layout = agentTabLayout(entries.length, tabs.clientWidth, reservedWidth);
     const visible = new Set(Array.from({ length: layout.visible }, (_, index) => index));
     const selectedIndex = entries.findIndex((entry) => entry.dataset.agent === store.selection.agent_id);
     if (layout.hidden && selectedIndex >= layout.visible) {

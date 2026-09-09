@@ -38,7 +38,9 @@ test("agent tabs are ordered and expose state through per-letter robot eyes", ()
   assert.match(shell, /sessions\.some\(\(item\) => item\.model_unreachable\)\) return "offline"/);
   assert.match(shell, /\(store\.servers \|\| \[\]\)\.find/);
   assert.match(shell, /button\("\+", `New chat with \$\{agentID\}`, "agent-tab-new"\)/);
-  assert.match(tokens, /\.agent-tab-wrap\{[^}]*flex:0 1 auto/);
+  assert.match(tokens, /--agent-tab-width:92px/);
+  assert.match(tokens, /\.agent-tab-wrap\{[^}]*flex:0 0 var\(--agent-tab-width\)/);
+  assert.match(tokens, /\.agent-tab\{[^}]*flex:0 0 69px;[^}]*width:69px/);
   assert.match(shell, /location\.assign\(next === "chat" \? `\/chat\$\{suffix\}` : `\/\$\{suffix\}`\)/);
   assert.match(shell, /agentb\.side\.\$\{agentID\}/);
   assert.match(tokens, /\.agent-tab\.side-chat\{color:var\(--ink\)\}/);
@@ -74,7 +76,7 @@ test("agent menu is the counted open and closed chat history with glyph controls
 });
 
 test("overflow menu keeps extra Agents reachable without a horizontal scrollbar", () => {
-  assert.match(shell, /agentTabLayout\(entries\.length, tabs\.clientWidth\)/);
+  assert.match(shell, /agentTabLayout\(entries\.length, tabs\.clientWidth, reservedWidth\)/);
   assert.match(shell, /button\("", "More agents", "agent-overflow"\)/);
   assert.match(shell, /overflowButton\.textContent = `\+\$\{hidden\.length\}`/);
   assert.doesNotMatch(tokens + appCSS + chatCSS, /overflow(?:-x)?:\s*(?:auto|scroll)/);
@@ -89,7 +91,7 @@ test("Stop follows the selected chat from each page-local lower control", () => 
 
 test("top bar belongs to shrinking non-scrolling agent tabs and right controls", () => {
   assert.match(tokens, /\.shell-left,\.agent-tabs\{overflow:hidden/);
-  assert.match(tokens, /\.agent-tab-wrap\{[^}]*min-width:72px/);
+  assert.match(tokens, /\.agent-tab-wrap\{[^}]*min-width:var\(--agent-tab-width\)/);
   assert.match(tokens, /\.agent-tab[^\n]*white-space:nowrap/);
   assert.doesNotMatch(shell, /shell-selection/);
 });
