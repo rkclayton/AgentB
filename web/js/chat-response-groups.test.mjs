@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { groupResponseRows, isThinThought, responseSummary, thinThoughtTokenLimit } from "./chat-response-groups.js";
+import { groupResponseRows, isThinThought, responseBlocks, responseSummary, thinThoughtTokenLimit } from "./chat-response-groups.js";
 
 const tool = (key, name, ok = true, ms = 1) => ({ type: "tool", key, name, args: {}, result: { ok, ms } });
 const thought = (key, tokens, text = "") => ({ type: "agent", key, reasoning: "x", reasoningTokens: tokens, text, done: true, thinkingMS: 2 });
@@ -32,4 +32,34 @@ test("only an explicit failed tool result counts as a tool failure", () => {
   assert.equal(responseSummary([{ type: "tool", key: "bad", name: "read_file" }]).failed, 0);
   assert.equal(responseSummary([{ type: "notice", key: "bad-render", event: { type: "error", data: { where: "ui" } } }]).failed, 0);
   assert.equal(responseSummary([tool("failed", "read_file", false)]).failed, 1);
+});
+
+test("response blocks keep prose visible and assign only their following steps", () => {
+  const items = [
+    thought("leading", 8),
+    { type: "agent", key: "first", text: "First prose", reasoning: "first thought", reasoningTokens: 3, done: true },
+    tool("after-first", "read_file"),
+    { type: "notice", key: "notice-first", event: { type: "compaction", data: {} } },
+    { type: "agent", key: "second", text: "Second prose", reasoning: "second thought", reasoningTokens: 4, done: true },
+    tool("after-second", "shell"),
+  ];
+  const blocks = responseBlocks(items);
+  assert.deepEqual(blocks.map((block) => ({
+    key: block.key,
+    prose: block.prose?.text || "",
+    steps: block.steps.map((item) => item.key),
+  })), [
+    { key: "response-block:leading:leading", prose: "", steps: ["leading"] },
+    { key: "response-block:first", prose: "First prose", steps: ["thought:first", "after-first", "notice-first"] },
+    { key: "response-block:second", prose: "Second prose", steps: ["thought:second", "after-second"] },
+  ]);
+  assert.equal(blocks[1].steps[0].text, "");
+  assert.equal(blocks[1].steps[0].reasoning, "first thought");
+});
+
+test("tool-only responses create no empty prose region", () => {
+  const blocks = responseBlocks([tool("only", "recall")]);
+  assert.equal(blocks.length, 1);
+  assert.equal(blocks[0].prose, null);
+  assert.deepEqual(blocks[0].steps.map((item) => item.key), ["only"]);
 });

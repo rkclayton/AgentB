@@ -11,7 +11,7 @@ import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, 
 import { agentAuthor, isRunning, openSessions } from "./chat-lifecycle.js";
 import { renderOperatorStatus } from "./operator-status.js";
 import { renderStopState } from "./stop-state.js";
-import { groupResponseRows, itemFailed, responseSummary } from "./chat-response-groups.js";
+import { groupResponseRows, itemFailed, responseBlocks, responseSummary } from "./chat-response-groups.js";
 
 const budget = document.getElementById("chat-budget");
 const log = document.getElementById("chat-log");
@@ -300,7 +300,8 @@ function renderResponse(session, entry) {
     summary.type = "button";
     summary.className = "chat-response-summary";
     summary.onclick = () => {
-      expanded.has(entry.key) ? expanded.delete(entry.key) : expanded.add(entry.key);
+      const allOpen = view.stepKeys.length > 0 && view.stepKeys.every((key) => expanded.has(key));
+      for (const key of view.stepKeys) allOpen ? expanded.delete(key) : expanded.add(key);
       render();
     };
     const rows = document.createElement("div");
@@ -308,20 +309,86 @@ function renderResponse(session, entry) {
     content.append(summary, rows);
     const author = speaker(agentAuthor(session));
     row.append(author, content);
-    view = { row, author, content, summary, rows, items: new Map() };
+    view = { row, author, content, summary, rows, blocks: new Map(), stepKeys: [] };
     entryViews.set(entry.key, view);
   }
   usedEntryViews.add(entry.key);
   view.author.lastElementChild.textContent = agentAuthor(session);
   const totals = responseSummary(entry.items);
   const active = isRunning(session) && entry.items.some((item) => item?.run_id && item.run_id === session.run?.run_id);
-  const open = active || expanded.has(entry.key);
+  const blocks = responseBlocks(entry.items);
+  view.stepKeys = blocks.filter((block) => block.steps.length).map((block) => block.key);
+  const open = active || (view.stepKeys.length > 0 && view.stepKeys.every((key) => expanded.has(key)));
   view.summary.setAttribute("aria-expanded", String(open));
-  const usedItems = new Set();
-  for (const [index, item] of entry.items.entries()) usedItems.add(item?.key || `invalid:${index}`);
+  view.summary.textContent = `${open ? "▾" : "▸"} ${responseSummaryText(totals, entry.items.length)}`;
+  view.row.classList.toggle("alarm", totals.failed > 0);
+  const usedBlocks = new Set(blocks.map((block) => block.key));
+  reconcileChildren(view.rows, blocks.map((block) => renderResponseBlock(session, view, block, active)));
+  for (const key of view.blocks.keys()) if (!usedBlocks.has(key)) view.blocks.delete(key);
+  return view.row;
+}
+
+function renderResponseBlock(session, view, block, active) {
+  let blockView = view.blocks.get(block.key);
+  if (!blockView) {
+    const root = document.createElement("div");
+    root.className = "chat-response-block";
+    blockView = { root, items: new Map(), prose: null, proseText: "", proseCaret: null, fold: null, head: null, rows: null };
+    view.blocks.set(block.key, blockView);
+  }
+  const nodes = [];
+  if (block.prose) nodes.push(renderResponseProse(blockView, block.prose));
+  if (block.steps.length) nodes.push(renderResponseStepFold(session, blockView, block, active));
+  reconcileChildren(blockView.root, nodes);
+  return blockView.root;
+}
+
+function renderResponseProse(view, item) {
+  if (!view.prose) {
+    view.prose = document.createElement("div");
+    view.prose.className = "chat-response-prose";
+    view.answer = document.createElement("div");
+    view.answer.className = "chat-response-answer";
+  }
+  view.prose.dataset.entryKey = item.key;
+  if (view.proseText !== item.text) renderMarkdown(view.answer, item.text);
+  view.proseText = item.text;
+  const nodes = [view.answer];
+  if (!item.done) {
+    if (!view.proseCaret) {
+      view.proseCaret = document.createElement("span");
+      view.proseCaret.className = "stream-caret";
+    }
+    nodes.push(view.proseCaret);
+  }
+  reconcileChildren(view.prose, nodes);
+  return view.prose;
+}
+
+function renderResponseStepFold(session, view, block, active) {
+  if (!view.fold) {
+    view.fold = document.createElement("div");
+    view.fold.className = "chat-step-fold";
+    view.head = document.createElement("button");
+    view.head.type = "button";
+    view.head.className = "chat-step-summary";
+    view.head.onclick = () => {
+      expanded.has(block.key) ? expanded.delete(block.key) : expanded.add(block.key);
+      render();
+    };
+    view.rows = document.createElement("div");
+    view.rows.className = "chat-step-rows";
+    view.fold.append(view.head, view.rows);
+  }
+  const totals = responseSummary(block.steps);
+  const open = active || expanded.has(block.key);
+  view.fold.classList.toggle("alarm", totals.failed > 0);
+  view.head.setAttribute("aria-expanded", String(open));
+  view.head.textContent = `${open ? "▾" : "▸"} ${responseSummaryText(totals, block.steps.length)}`;
+  const usedItems = new Set(block.steps.map((item, index) => item?.key || `invalid:${index}`));
   const nodes = [];
   if (open) {
-    const rows = active ? entry.items : groupResponseRows(entry.items);
+    const rows = active ? block.steps : groupResponseRows(block.steps);
     for (const [index, item] of rows.entries()) {
       try {
         if (item?.kind === "tool-group") {
@@ -335,23 +402,19 @@ function renderResponse(session, entry) {
         nodes.push(renderFailure(item, error, index, true));
       }
     }
-    const files = filesFromResponse(entry.items.filter((item) => item && typeof item === "object"));
+    const files = filesFromResponse(block.steps.filter((item) => item && typeof item === "object"));
     if (files.length) {
-      let chips = view.chips;
-      if (!chips) {
-        chips = document.createElement("div");
-        chips.className = "file-chips";
-        view.chips = chips;
+      if (!view.chips) {
+        view.chips = document.createElement("div");
+        view.chips.className = "file-chips";
       }
-      reconcileChildren(chips, files.map((file) => renderFileChip(session, file)));
-      nodes.push(chips);
+      reconcileChildren(view.chips, files.map((file) => renderFileChip(session, file)));
+      nodes.push(view.chips);
     }
   }
-  view.summary.textContent = `${open ? "▾" : "▸"} ${responseSummaryText(totals, entry.items.length)}`;
-  view.row.classList.toggle("alarm", totals.failed > 0);
   reconcileChildren(view.rows, nodes);
   for (const key of view.items.keys()) if (!usedItems.has(key)) view.items.delete(key);
-  return view.row;
+  return view.fold;
 }
 
 function responseSummaryText(summary, rowCount) {

@@ -29,6 +29,30 @@ export function groupResponseRows(items = []) {
   }));
 }
 
+export function responseBlocks(items = []) {
+  const blocks = [];
+  let block = null;
+  const finish = () => {
+    if (block && (block.prose || block.steps.length)) blocks.push(block);
+    block = null;
+  };
+  const ensureLeading = (item, index) => {
+    if (!block) block = { key: `response-block:leading:${item?.key || index}`, prose: null, steps: [] };
+    return block;
+  };
+  for (const [index, item] of items.entries()) {
+    if (item?.type === "agent" && item.text) {
+      finish();
+      block = { key: `response-block:${item.key || index}`, prose: item, steps: [] };
+      if (item.reasoning) block.steps.push({ ...item, key: `thought:${item.key || index}`, text: "", done: true });
+      continue;
+    }
+    ensureLeading(item, index).steps.push(item);
+  }
+  finish();
+  return blocks;
+}
+
 export function responseSummary(items = []) {
   const tools = items.filter((item) => item?.type === "tool").length;
   const thoughts = items.filter((item) => item?.type === "agent" && (thoughtTokens(item) > 0 || !item.done)).length;

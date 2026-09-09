@@ -102,6 +102,13 @@ const fakeHandler = async (request, response) => {
     await new Promise((resolve) => { releaseQueue = resolve; response.on("close", resolve); });
     return stream(response, { content: "Queue leader completed." });
   }
+  if (user.includes("acceptance: prose stream")) {
+    response.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+    response.write(`data: ${JSON.stringify({ choices: [{ delta: { content: "VISIBLE PARTIAL" }, finish_reason: null }] })}\n\n`);
+    await sleep(700);
+    response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: " COMPLETE" }, finish_reason: "stop" }], usage: { prompt_tokens: response.agentbPromptTokens || 120, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 80 } } })}\n\ndata: [DONE]\n\n`);
+    return;
+  }
   if (user.includes("acceptance: menu stream")) {
     const count = toolCountAfterLatestUser(body);
     await sleep(400);
@@ -288,6 +295,21 @@ if (realModel) {
   assert.equal(session?.id, sessionID, "selected new chat must exist in the server snapshot");
   record("new-chat");
 
+  await page.locator("#chat-task").fill("acceptance: prose stream");
+  await page.locator("#chat-send").click();
+  await waitProjectedChatText(sessionID, "VISIBLE PARTIAL", "mid-stream prose partial");
+  await browser.wait(`document.querySelector('.chat-response-prose')?.innerText.includes('VISIBLE PARTIAL')`, "partial prose visible without expansion");
+  const partialProse = await browser.evaluate(`(() => ({
+    text: document.querySelector('.chat-response-prose')?.innerText || '',
+    turnExpanded: document.querySelector('.chat-response-summary')?.getAttribute('aria-expanded'),
+    caret: document.querySelector('.chat-response-prose .stream-caret')?.isConnected || false
+  }))()`);
+  assert.match(partialProse.text, /VISIBLE PARTIAL/);
+  assert.equal(partialProse.turnExpanded, "true");
+  assert.equal(partialProse.caret, true);
+  await waitProjectedChatText(sessionID, "VISIBLE PARTIAL COMPLETE", "completed prose stream");
+  record("mid-stream-prose-visible-without-expansion");
+
   const baselineDirectory = join(args.evidence, "baseline-initial");
   await mkdir(baselineDirectory, { recursive: true });
   await page.screenshot({ path: join(baselineDirectory, "chat-idle.png") });
@@ -458,7 +480,7 @@ if (realModel) {
     summary?.click();
     await new Promise(resolve => setTimeout(resolve, 120));
     const group = document.querySelector('.chat-tool-group-head');
-    const rows = document.querySelectorAll('.chat-response-rows > *').length;
+    const rows = document.querySelectorAll('.chat-step-rows > *').length;
     const groupText = group?.innerText || '';
     group?.click();
     await new Promise(resolve => setTimeout(resolve, 120));
@@ -473,7 +495,7 @@ if (realModel) {
     };
   })()`);
   assert.match(groupingFixture.collapsed, /3 tool calls · 1 failed · 2 thoughts · 25 ms/);
-  assert.equal(groupingFixture.collapsedRows, 0);
+  assert.equal(groupingFixture.collapsedRows, 1);
   assert.equal(groupingFixture.rows, 3);
   assert.match(groupingFixture.groupText, /read_file ×2 · \+1 thought · 1 failed · 12 ms/);
   assert.equal(groupingFixture.calls, 2);
@@ -482,6 +504,100 @@ if (realModel) {
   record("three-level-chat-fold-adjacent-thin-failure-complete");
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('TWO COMPLETE FAILURE')`, "grouping fixture restored");
+
+  const proseBlocksFixture = await browser.evaluate(`(async () => {
+    const bus = await import('/static/js/bus.js');
+    const session = bus.store.sessions[${JSON.stringify(sessionID)}];
+    session.run = { ...session.run, status: 'idle' };
+    session.chat = [
+      { type: 'user', key: 'prose:user', text: 'keep every prose block visible' },
+      { type: 'agent', key: 'prose:first', text: 'FIRST PROSE BLOCK', reasoning: 'FIRST PRIVATE THOUGHT', reasoningTokens: 8, done: true },
+      { type: 'tool', key: 'prose:first-tool', name: 'read_file', args: { path: 'first.txt' }, content: 'FIRST TOOL RESULT', result: { ok: true, ms: 4 } },
+      { type: 'notice', key: 'prose:first-notice', event: { type: 'compaction', data: { before: 20, after: 10 } } },
+      { type: 'agent', key: 'prose:second', text: 'SECOND PROSE BLOCK', reasoning: 'SECOND PRIVATE THOUGHT', reasoningTokens: 9, done: true },
+      { type: 'tool', key: 'prose:second-tool', name: 'shell', args: { command: 'echo second' }, content: 'SECOND TOOL RESULT', result: { ok: true, ms: 5 } }
+    ];
+    bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const response = document.querySelector('.chat-response');
+    const turn = response.querySelector('.chat-response-summary');
+    let folds = [...response.querySelectorAll('.chat-step-summary')];
+    let prose = [...response.querySelectorAll('.chat-response-prose')];
+    const firstProse = prose[0];
+    const initial = {
+      prose: prose.map(node => node.innerText),
+      foldCount: folds.length,
+      open: folds.map(node => node.getAttribute('aria-expanded')),
+      stepRows: [...response.querySelectorAll('.chat-step-rows')].map(node => node.children.length)
+    };
+    folds[0].click();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    folds = [...response.querySelectorAll('.chat-step-summary')];
+    const afterFirst = {
+      open: folds.map(node => node.getAttribute('aria-expanded')),
+      first: folds[0].nextElementSibling.innerText,
+      firstKeys: [...folds[0].nextElementSibling.querySelectorAll('[data-entry-key]')].map(node => node.dataset.entryKey),
+      secondRows: folds[1].nextElementSibling.children.length,
+      proseStable: firstProse === response.querySelectorAll('.chat-response-prose')[0] && firstProse.isConnected
+    };
+    turn.click();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    folds = [...response.querySelectorAll('.chat-step-summary')];
+    const afterTurnOpen = folds.map(node => node.getAttribute('aria-expanded'));
+    const afterTurnOpenKeys = folds.map(node => [...node.nextElementSibling.querySelectorAll('[data-entry-key]')].map(row => row.dataset.entryKey));
+    turn.click();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    folds = [...response.querySelectorAll('.chat-step-summary')];
+    prose = [...response.querySelectorAll('.chat-response-prose')];
+    return {
+      initial,
+      afterFirst,
+      afterTurnOpen,
+      afterTurnOpenKeys,
+      afterTurnClose: folds.map(node => node.getAttribute('aria-expanded')),
+      finalProse: prose.map(node => node.innerText),
+      proseStable: firstProse === prose[0] && firstProse.isConnected,
+      secondCollapsedText: folds[1].nextElementSibling.innerText
+    };
+  })()`);
+  assert.deepEqual(proseBlocksFixture.initial.prose, ["FIRST PROSE BLOCK", "SECOND PROSE BLOCK"]);
+  assert.equal(proseBlocksFixture.initial.foldCount, 2);
+  assert.deepEqual(proseBlocksFixture.initial.open, ["false", "false"]);
+  assert.deepEqual(proseBlocksFixture.initial.stepRows, [0, 0]);
+  assert.deepEqual(proseBlocksFixture.afterFirst.open, ["true", "false"]);
+  assert.equal(proseBlocksFixture.afterFirst.secondRows, 0);
+  assert.deepEqual(proseBlocksFixture.afterFirst.firstKeys, ["thought:prose:first", "prose:first-tool", "prose:first-notice"]);
+  assert.match(proseBlocksFixture.afterFirst.first, /compacted −10 tokens/);
+  assert.equal(proseBlocksFixture.afterFirst.proseStable, true);
+  assert.deepEqual(proseBlocksFixture.afterTurnOpen, ["true", "true"]);
+  assert.deepEqual(proseBlocksFixture.afterTurnOpenKeys, [
+    ["thought:prose:first", "prose:first-tool", "prose:first-notice"],
+    ["thought:prose:second", "prose:second-tool"]
+  ]);
+  assert.deepEqual(proseBlocksFixture.afterTurnClose, ["false", "false"]);
+  assert.deepEqual(proseBlocksFixture.finalProse, ["FIRST PROSE BLOCK", "SECOND PROSE BLOCK"]);
+  assert.equal(proseBlocksFixture.proseStable, true);
+  assert.equal(proseBlocksFixture.secondCollapsedText, "");
+  await page.setViewportSize({ width: 320, height: 720 });
+  const narrowProse = await browser.evaluate(`(() => {
+    const response = document.querySelector('.chat-response');
+    const prose = response.querySelector('.chat-response-prose').getBoundingClientRect();
+    const fold = response.querySelector('.chat-step-fold').getBoundingClientRect();
+    const log = document.querySelector('#chat-log');
+    return {
+      inset: fold.left - prose.left,
+      foldRight: fold.right,
+      proseRight: prose.right,
+      logOverflow: log.scrollWidth - log.clientWidth,
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth
+    };
+  })()`);
+  assert.ok(narrowProse.inset >= 4 && narrowProse.foldRight <= narrowProse.proseRight + 0.5, JSON.stringify(narrowProse));
+  assert.ok(narrowProse.logOverflow <= 0 && narrowProse.pageOverflow <= 0, JSON.stringify(narrowProse));
+  await page.setViewportSize({ width: 1250, height: 975 });
+  record("prose-always-visible-independent-step-folds-no-horizontal-scroll");
+  await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
+  await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('FIRST PROSE BLOCK')`, "prose fixture restored");
 
   const geometry = await browser.evaluate(`(() => { const textarea=document.querySelector('#chat-task').getBoundingClientRect(); const row=document.querySelector('.chat-composer-row').getBoundingClientRect(); const expand=document.querySelector('#chat-expand').getBoundingClientRect(); const robot=document.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab-robot').getBoundingClientRect(); const tab=document.querySelector('.agent-tab-wrap[data-agent="agent_b"]').getBoundingClientRect(); const plus=document.querySelector('.agent-tab-new').getBoundingClientRect(); const send=document.querySelector('#chat-send').getBoundingClientRect(); const stop=document.querySelector('#chat-stop').getBoundingClientRect(); return {textarea:textarea.width,row:row.width,rowHeight:row.height,expandTop:expand.top-textarea.top,expandRight:textarea.right-expand.right,robot:robot.width,tab:tab.width,plus:{width:plus.width,height:plus.height},send:{width:send.width,height:send.height},stop:{width:stop.width,height:stop.height}}; })()`);
   assert.ok(geometry.textarea >= geometry.row - 50, JSON.stringify(geometry));
