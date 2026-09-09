@@ -41,6 +41,8 @@ test("agent menu owns open close and inline rename for open and closed chats", (
   assert.match(shell, /button\("Rename"/);
   assert.match(shell, /agent-chat-rename-form/);
   assert.match(shell, /\{ label \}/);
+  assert.match(shell, /revealMenu\(menu, tab\)/);
+  assert.match(tokens, /\.shell-menu\{position:fixed/);
 });
 
 test("overflow menu keeps extra Agents reachable without a horizontal scrollbar", () => {

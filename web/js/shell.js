@@ -100,7 +100,7 @@ export function initShell(options = {}) {
         event.preventDefault();
         for (const other of tabs.querySelectorAll(".shell-menu")) if (other !== menu) other.hidden = true;
         renderAgentMenu(menu, agentID);
-        menu.hidden = false;
+        revealMenu(menu, tab);
       };
       wrap.append(tab, menu);
       tabs.append(wrap);
@@ -113,8 +113,12 @@ export function initShell(options = {}) {
     overflowButton.onclick = (event) => {
       event.stopPropagation();
       for (const other of tabs.querySelectorAll(".shell-menu")) if (other !== overflowMenu) other.hidden = true;
+      if (!overflowMenu.hidden) {
+        overflowMenu.hidden = true;
+        return;
+      }
       renderOverflowMenu(overflowMenu);
-      overflowMenu.hidden = !overflowMenu.hidden;
+      revealMenu(overflowMenu, overflowButton);
     };
     overflowWrap.append(overflowButton, overflowMenu);
     tabs.append(overflowWrap);
@@ -216,7 +220,16 @@ export function initShell(options = {}) {
     } catch (error) { report(error.message); }
   }
 
-  async function showNewChatMenu(menu, agentID = "agent_b") {
+  function revealMenu(menu, anchor) {
+    menu.hidden = false;
+    const anchorRect = anchor.getBoundingClientRect();
+    const menuRect = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(8, Math.min(anchorRect.left, innerWidth - menuRect.width - 8))}px`;
+    menu.style.right = "auto";
+    menu.style.top = `${Math.max(8, Math.min(anchorRect.bottom, innerHeight - menuRect.height - 8))}px`;
+  }
+
+  async function showNewChatMenu(menu, agentID = "agent_b", anchor = null) {
     if (store.replay) return;
     try {
       const choices = await api("/api/pick-folder", undefined, "GET");
@@ -237,7 +250,8 @@ export function initShell(options = {}) {
         } catch (error) { if (!String(error.message).includes("canceled")) report(error.message); }
       };
       menu.append(browse);
-      menu.hidden = false;
+      if (anchor) revealMenu(menu, anchor);
+      else menu.hidden = false;
     } catch (error) { report(error.message); }
   }
 
@@ -273,7 +287,8 @@ export function initShell(options = {}) {
     report,
     newChat() {
       const menu = tabs.querySelector('.agent-tab-wrap[data-agent="agent_b"] .shell-menu');
-      if (menu) void showNewChatMenu(menu, "agent_b");
+      const tab = tabs.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab');
+      if (menu && tab) void showNewChatMenu(menu, "agent_b", tab);
     },
   };
 }
