@@ -384,10 +384,18 @@ if (realModel) {
     const collapsed = summary?.innerText || '';
     summary?.click();
     await new Promise(resolve => setTimeout(resolve, 120));
-    return { collapsed, rows: document.querySelectorAll('[data-entry-key]').length, text: document.querySelector('#chat-log')?.innerText || '' };
+    return {
+      collapsed,
+      rows: document.querySelectorAll('[data-entry-key]').length,
+      responseAlarm: summary?.closest('.chat-response')?.classList.contains('alarm') || false,
+      failureAlarm: document.querySelector('.chat-render-failure')?.classList.contains('alarm') || false,
+      text: document.querySelector('#chat-log')?.innerText || ''
+    };
   })()`);
-  assert.match(missingArgsFixture.collapsed, /1 failed/);
+  assert.doesNotMatch(missingArgsFixture.collapsed, /failed/);
   assert.equal(missingArgsFixture.rows, 3);
+  assert.equal(missingArgsFixture.responseAlarm, false);
+  assert.equal(missingArgsFixture.failureAlarm, false);
   assert.match(missingArgsFixture.text, /tool read_file could not render · tool arguments are missing or are not an object/);
   assert.match(missingArgsFixture.text, /before malformed tool/);
   assert.match(missingArgsFixture.text, /after malformed tool/);
@@ -408,11 +416,18 @@ if (realModel) {
       await new Promise(resolve => setTimeout(resolve, 65));
       if (index === 0) document.querySelector('.chat-response-summary')?.click();
     }
-    return document.querySelector('#chat-log')?.innerText || '';
+    const failure = document.querySelector('.chat-render-failure');
+    return {
+      text: document.querySelector('#chat-log')?.innerText || '',
+      responseAlarm: document.querySelector('.chat-response')?.classList.contains('alarm') || false,
+      failureAlarm: failure?.classList.contains('alarm') || false
+    };
   })()`);
-  assert.match(throwingFixture, /tool shell could not render · deliberate render failure/);
-  assert.match(throwingFixture, /other entry remains/);
-  assert.doesNotMatch(throwingFixture, /No agent connected/);
+  assert.match(throwingFixture.text, /tool shell could not render · deliberate render failure/);
+  assert.match(throwingFixture.text, /other entry remains/);
+  assert.doesNotMatch(throwingFixture.text, /No agent connected/);
+  assert.equal(throwingFixture.responseAlarm, false);
+  assert.equal(throwingFixture.failureAlarm, false);
   await waitEvent(sessionID, (event) => event.type === "error" && event.seq > beforeRenderFailure && event.data?.where === "ui" && event.data?.capped === true, "capped UI render failure", 6000);
   events = await sessionEvents(sessionID);
   const relayedRenderFailures = events.filter((event) => event.type === "error" && event.seq > beforeRenderFailure && event.data?.where === "ui" && event.data?.message?.includes("tool shell deliberate render failure"));

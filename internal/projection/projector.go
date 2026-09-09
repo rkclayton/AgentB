@@ -89,7 +89,7 @@ type ChatEntry struct {
 	ToolCallIDs              []string            `json:"toolCallIDs,omitempty"`
 	CallID                   string              `json:"callID,omitempty"`
 	Name                     string              `json:"name,omitempty"`
-	Args                     map[string]any      `json:"args,omitempty"`
+	Args                     *map[string]any     `json:"args,omitempty"`
 	Result                   map[string]any      `json:"result,omitempty"`
 	Content                  string              `json:"content,omitempty"`
 	Event                    *events.Event       `json:"event,omitempty"`
@@ -420,7 +420,8 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		}
 	case events.ToolCallEvent:
 		next.Activity.ActiveTool = stringValue(data["name"])
-		next.Chat = appendChat(next.Chat, ChatEntry{Type: "tool", Key: "tool:" + stringValue(data["call_id"]), CallID: stringValue(data["call_id"]), Name: stringValue(data["name"]), Args: mapValue(data["args"])})
+		args := mapValue(data["args"])
+		next.Chat = appendChat(next.Chat, ChatEntry{Type: "tool", Key: "tool:" + stringValue(data["call_id"]), CallID: stringValue(data["call_id"]), Name: stringValue(data["name"]), Args: &args})
 	case events.ToolResult:
 		next.Activity.ActiveTool = ""
 		next.Tools = cloneTools(next.Tools)

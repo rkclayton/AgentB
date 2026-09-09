@@ -320,7 +320,6 @@ function renderResponse(session, entry) {
   const usedItems = new Set();
   for (const [index, item] of entry.items.entries()) usedItems.add(item?.key || `invalid:${index}`);
   const nodes = [];
-  let renderFailures = open ? 0 : Number(view.renderFailures || 0);
   if (open) {
     const rows = active ? entry.items : groupResponseRows(entry.items);
     for (const [index, item] of rows.entries()) {
@@ -333,7 +332,6 @@ function renderResponse(session, entry) {
           nodes.push(renderResponseItem(session, view, item, key));
         }
       } catch (error) {
-        if (!itemFailed(item)) renderFailures++;
         nodes.push(renderFailure(item, error, index, true));
       }
     }
@@ -348,12 +346,9 @@ function renderResponse(session, entry) {
       reconcileChildren(chips, files.map((file) => renderFileChip(session, file)));
       nodes.push(chips);
     }
-    renderFailures += [...view.items.values()].reduce((total, itemView) => total + Number(itemView.renderFailures || 0), 0);
-    view.renderFailures = renderFailures;
   }
-  const displayedTotals = { ...totals, failed: totals.failed + renderFailures };
-  view.summary.textContent = `${open ? "▾" : "▸"} ${responseSummaryText(displayedTotals, entry.items.length)}`;
-  view.row.classList.toggle("alarm", displayedTotals.failed > 0);
+  view.summary.textContent = `${open ? "▾" : "▸"} ${responseSummaryText(totals, entry.items.length)}`;
+  view.row.classList.toggle("alarm", totals.failed > 0);
   reconcileChildren(view.rows, nodes);
   for (const key of view.items.keys()) if (!usedItems.has(key)) view.items.delete(key);
   return view.row;
@@ -385,7 +380,7 @@ function renderResponseToolGroup(session, view, group) {
     const children = document.createElement("div");
     children.className = "chat-tool-group-calls";
     root.append(head, children);
-    groupView = { root, head, children, group: true, renderFailures: 0 };
+    groupView = { root, head, children, group: true };
     view.items.set(group.key, groupView);
   }
   const open = expanded.has(group.key);
@@ -396,18 +391,15 @@ function renderResponseToolGroup(session, view, group) {
   groupView.root.classList.toggle("alarm", group.failed > 0);
   groupView.head.setAttribute("aria-expanded", String(open));
   groupView.head.textContent = `${open ? "▾" : "▸"} ${parts.join(" · ")}`;
-  let renderFailures = open ? 0 : groupView.renderFailures;
   const children = open ? group.items.map((item, index) => {
     try {
       if (item?.type === "agent" && item.reasoning) expanded.add(item.key);
       return renderResponseItem(session, view, item, item?.key || `invalid:group:${index}`, item?.type === "tool");
     }
     catch (error) {
-      if (!itemFailed(item)) renderFailures++;
       return renderFailure(item, error, index, true);
     }
   }) : [];
-  if (open) groupView.renderFailures = renderFailures;
   reconcileChildren(groupView.children, children);
   return groupView.root;
 }
@@ -460,7 +452,7 @@ function renderResponseItem(session, view, item, key, forceToolOpen = false) {
 
 function renderFailure(entry, error, index, nested) {
   const row = document.createElement(nested ? "div" : "section");
-  row.className = nested ? "chat-response-step chat-response-notice alarm chat-render-failure" : "chat-entry chat-notice-row alarm chat-render-failure";
+  row.className = nested ? "chat-response-step chat-response-notice chat-render-failure" : "chat-entry chat-notice-row chat-render-failure";
   const key = safeEntryValue(entry, "key");
   if (key) row.dataset.entryKey = key;
   const content = document.createElement("div");
@@ -475,7 +467,7 @@ function renderFailure(entry, error, index, nested) {
 
 function renderHistoryFailure(error) {
   const row = document.createElement("div");
-  row.className = "chat-empty alarm chat-render-failure";
+  row.className = "chat-empty chat-render-failure";
   const reason = errorReason(error);
   row.textContent = `Chat history could not render · ${reason}`;
   console.error("chat render failure", "history", reason);

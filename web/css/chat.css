@@ -439,7 +439,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.chat-empty.chat-render-failure { color: var(--alarm); }
+.chat-empty.chat-render-failure { color: var(--mute); }
 .chat-notice-author { color: var(--mute); font: 12px/20px var(--mono); }
 .chat-approval button {
   min-height: 20px;

@@ -24,6 +24,20 @@ test("browser applies authoritative replace and append operations", () => {
   assert.equal(store.sessions.main.cursor.offset, 12);
 });
 
+test("append initializes an omitted empty projected string", () => {
+  snapshot({
+    run: { status: "running" },
+    chat: [{ type: "agent", key: "turn:r1:1", reasoning: "thinking" }],
+  });
+  patch(11, [
+    { op: "append", path: "/run/partial", value: "answer" },
+    { op: "append", path: "/chat/turn:r1:1/text", value: "answer" },
+  ], 10);
+  assert.equal(store.sessions.main.run.partial, "answer");
+  assert.equal(store.sessions.main.chat[0].text, "answer");
+  assert.equal(store.sessions.main.cursor.offset, 11);
+});
+
 test("projection replacement cannot merge stale budget/tool fields", () => {
   snapshot({ tools: [{ name: "removed", marginal_tokens: 145 }], budget: { tool_marginal_tokens: { removed: 145 } } });
   patch(11, [

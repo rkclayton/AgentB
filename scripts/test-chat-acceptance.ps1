@@ -5,7 +5,8 @@ param(
     [string]$RealModelName,
     [string]$ReplayPath,
     [string]$EvidenceDirectory,
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+    [switch]$ReplayOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -42,21 +43,24 @@ try {
     & (Join-Path $PSScriptRoot 'install-Agent_b.ps1') @installArguments
     if ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Disposable install failed with exit code $LASTEXITCODE." }
 
-    $arguments = @(
-        (Join-Path $PSScriptRoot 'chat-acceptance.mjs'),
-        '--app', $application,
-        '--data', $data,
-        '--workspace', $workspace,
-        '--evidence', $evidence
-    )
-    if ($RealModel) {
-        if ([string]::IsNullOrWhiteSpace($RealModelUrl) -or [string]::IsNullOrWhiteSpace($RealModelName)) {
-            throw '-RealModel requires -RealModelUrl and -RealModelName.'
+    if (-not $ReplayOnly) {
+        $arguments = @(
+            (Join-Path $PSScriptRoot 'chat-acceptance.mjs'),
+            '--app', $application,
+            '--data', $data,
+            '--workspace', $workspace,
+            '--evidence', $evidence
+        )
+        if ($RealModel) {
+            if ([string]::IsNullOrWhiteSpace($RealModelUrl) -or [string]::IsNullOrWhiteSpace($RealModelName)) {
+                throw '-RealModel requires -RealModelUrl and -RealModelName.'
+            }
+            $arguments += @('--real-model-url', $RealModelUrl, '--real-model-name', $RealModelName)
         }
-        $arguments += @('--real-model-url', $RealModelUrl, '--real-model-name', $RealModelName)
+        & (Get-Command node.exe -ErrorAction Stop).Source @arguments
+        if ($LASTEXITCODE -ne 0) { throw "Chat acceptance failed with exit code $LASTEXITCODE." }
     }
-    & (Get-Command node.exe -ErrorAction Stop).Source @arguments
-    if ($LASTEXITCODE -ne 0) { throw "Chat acceptance failed with exit code $LASTEXITCODE." }
+    if ($ReplayOnly -and [string]::IsNullOrWhiteSpace($ReplayPath)) { throw '-ReplayOnly requires -ReplayPath.' }
     if (-not [string]::IsNullOrWhiteSpace($ReplayPath)) {
         & (Get-Command node.exe -ErrorAction Stop).Source `
             (Join-Path $PSScriptRoot 'chat-replay-acceptance.mjs') `

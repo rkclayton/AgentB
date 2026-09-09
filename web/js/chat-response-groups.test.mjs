@@ -22,12 +22,14 @@ test("Chat ports adjacent grouping and absorbs only fixed-token thin thoughts", 
 
 test("collapsed turn arithmetic exposes failures and preserves every item", () => {
   const items = [thought("t1", 8), tool("a", "read_file", false, 7), { type: "notice", key: "n", event: { type: "run.aborted", data: {} } }, { type: "agent", key: "answer", text: "done", done: true }];
-  assert.deepEqual(responseSummary(items), { tools: 1, thoughts: 1, answers: 1, failed: 2, duration: 9 });
+  assert.deepEqual(responseSummary(items), { tools: 1, thoughts: 1, answers: 1, failed: 1, duration: 9 });
   const expanded = groupResponseRows([tool("a", "read_file"), thought("t2", 4), tool("b", "read_file")])[0].items;
   assert.equal(expanded.length, 3);
   assert.deepEqual(expanded.map((item) => item.key), ["a", "t2", "b"]);
 });
 
-test("malformed tool rows count as failures before expansion", () => {
-  assert.equal(responseSummary([{ type: "tool", key: "bad", name: "read_file" }]).failed, 1);
+test("only an explicit failed tool result counts as a tool failure", () => {
+  assert.equal(responseSummary([{ type: "tool", key: "bad", name: "read_file" }]).failed, 0);
+  assert.equal(responseSummary([{ type: "notice", key: "bad-render", event: { type: "error", data: { where: "ui" } } }]).failed, 0);
+  assert.equal(responseSummary([tool("failed", "read_file", false)]).failed, 1);
 });

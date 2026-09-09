@@ -103,10 +103,20 @@ function applyOperation(target, operation) {
     else return false;
     return true;
   }
-  if (parts.length === 2 && operation.op === "upsert" && Array.isArray(target[parts[0]])) {
-    const index = target[parts[0]].findIndex((value) => value.key === parts[1] || value.id === parts[1] || value.name === parts[1]);
-    if (index >= 0) target[parts[0]][index] = operation.value;
-    else target[parts[0]].push(operation.value);
+  if (parts.length === 2) {
+    const parent = target[parts[0]];
+    const key = parts[1];
+    if (operation.op === "upsert" && Array.isArray(parent)) {
+      const index = parent.findIndex((value) => value.key === key || value.id === key || value.name === key);
+      if (index >= 0) parent[index] = operation.value;
+      else parent.push(operation.value);
+      return true;
+    }
+    if (!parent || typeof parent !== "object") return false;
+    if (operation.op === "replace") parent[key] = operation.value;
+    else if (operation.op === "append" && (typeof parent[key] === "string" || parent[key] === undefined))
+      parent[key] = String(parent[key] || "") + String(operation.value || "");
+    else return false;
     return true;
   }
   let parent = target[parts[0]];
@@ -115,7 +125,8 @@ function applyOperation(target, operation) {
   const key = parts[2];
   if (!parent || !key) return false;
   if (operation.op === "replace") parent[key] = operation.value;
-  else if (operation.op === "append" && typeof parent[key] === "string") parent[key] += String(operation.value || "");
+  else if (operation.op === "append" && (typeof parent[key] === "string" || parent[key] === undefined))
+    parent[key] = String(parent[key] || "") + String(operation.value || "");
   else return false;
   return true;
 }

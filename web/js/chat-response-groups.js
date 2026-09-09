@@ -39,15 +39,7 @@ export function responseSummary(items = []) {
 }
 
 export function itemFailed(item) {
-  if (!item || typeof item !== "object" || !item.key) return true;
-  if (item.type === "tool") return !item.args || typeof item.args !== "object" || Array.isArray(item.args) || item.result?.ok === false;
-  if (item.type !== "notice") return false;
-  const event = item.event;
-  if (!event || typeof event !== "object") return true;
-  if (event.type === "run.aborted" || event.type === "workspace.conflict" || event.type === "error") return true;
-  if (event.type === "run.stopped") return event.data?.reason && event.data.reason !== "done";
-  if (event.type === "files.delivered") return (event.data?.items || []).some((value) => value.status === "failed");
-  return event.data?.outcome === "error" || event.data?.decision === "deny";
+  return item?.type === "tool" && item.result?.ok === false;
 }
 
 function itemDuration(item) {

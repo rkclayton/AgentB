@@ -54,6 +54,34 @@ func TestMessageAttachmentProjectsIntoChatEntry(t *testing.T) {
 	}
 }
 
+func TestEmptyToolArgumentsRemainAnObjectInProjectedJSON(t *testing.T) {
+	state := seeded(t)
+	next, _, err := Next(state, Record{Cursor: Cursor{Generation: "empty-args.events", Offset: 200}, Event: events.Event{
+		SessionID: "main", RunID: "r1", Type: events.ToolCallEvent,
+		Data: map[string]any{"call_id": "call-empty", "name": "recall", "args": map[string]any{}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(next.Chat) != 1 || next.Chat[0].Args == nil || len(*next.Chat[0].Args) != 0 {
+		t.Fatalf("chat=%+v", next.Chat)
+	}
+	encoded, err := json.Marshal(next.Chat[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(encoded), `"args":{}`) {
+		t.Fatalf("empty arguments were not preserved as an object: %s", encoded)
+	}
+	encodedAgent, err := json.Marshal(ChatEntry{Type: "agent", Key: "turn:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encodedAgent), `"args"`) {
+		t.Fatalf("non-tool entry gained an args field: %s", encodedAgent)
+	}
+}
+
 func TestAbortAndRetryEventsAreVisibleHarnessNotices(t *testing.T) {
 	state := seeded(t)
 	for index, eventType := range []string{events.ModelRetry, events.RunAborted} {

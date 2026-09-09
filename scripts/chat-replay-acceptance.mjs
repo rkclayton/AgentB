@@ -1,67 +1,39 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
+import { chromium } from "@playwright/test";
 
 const args = Object.fromEntries(Array.from({ length: Math.floor(process.argv.slice(2).length / 2) }, (_, index) => {
   const offset = index * 2 + 2;
   return [process.argv[offset].replace(/^--/, ""), process.argv[offset + 1]];
 }));
 for (const key of ["app", "data", "replay"]) assert.ok(args[key], `missing --${key}`);
-const config = JSON.parse(await readFile(join(args.data, "harness.json"), "utf8"));
-const port = Number(String(config.listen).split(":").at(-1));
+const configPath = join(args.data, "harness.json");
+const config = JSON.parse(await readFile(configPath, "utf8"));
+const portProbe = createServer();
+await new Promise((resolve) => portProbe.listen(0, "127.0.0.1", resolve));
+const port = portProbe.address().port;
+await new Promise((resolve) => portProbe.close(resolve));
+config.listen = `127.0.0.1:${port}`;
+await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
+const tape = await readFile(args.replay, "utf8");
+const recordCount = tape.split(/\r?\n/).filter(Boolean).length;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const freePort = async () => {
-  const probe = createServer();
-  await new Promise((resolve) => probe.listen(0, "127.0.0.1", resolve));
-  const value = probe.address().port;
-  await new Promise((resolve) => probe.close(resolve));
-  return value;
-};
-const browserPort = await freePort();
 const json = async (url) => {
   const response = await fetch(url);
   const value = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(`${response.status} ${JSON.stringify(value)}`);
   return value;
 };
-const waitHTTP = async (url, timeout = 15000) => {
+const waitHTTP = async (url, timeout = Math.max(30000, recordCount * 5)) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     try { return await json(url); } catch { await sleep(50); }
   }
   throw new Error(`timed out waiting for ${url}`);
 };
-class CDP {
-  constructor(url) {
-    this.id = 0;
-    this.pending = new Map();
-    this.ws = new WebSocket(url);
-    this.ready = new Promise((resolve, reject) => { this.ws.onopen = resolve; this.ws.onerror = reject; });
-    this.ws.onmessage = ({ data }) => {
-      const message = JSON.parse(data);
-      if (!message.id) return;
-      const pending = this.pending.get(message.id);
-      if (!pending) return;
-      this.pending.delete(message.id);
-      if (message.error) pending.reject(new Error(JSON.stringify(message.error)));
-      else pending.resolve(message.result);
-    };
-  }
-  async call(method, params = {}) {
-    await this.ready;
-    const id = ++this.id;
-    const result = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return result;
-  }
-  async evaluate(expression) {
-    const result = await this.call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-    if (result.exceptionDetails) throw new Error(result.exceptionDetails.exception?.description || result.exceptionDetails.text);
-    return result.result.value;
-  }
-}
 
 const children = [];
 let browser;
@@ -70,34 +42,99 @@ try {
   children.push(app);
   app.stdout.on("data", (chunk) => process.stdout.write(chunk));
   app.stderr.on("data", (chunk) => process.stderr.write(chunk));
-  const state = await waitHTTP(`http://127.0.0.1:${port}/api/state`);
-  const session = state.sessions.main;
-  assert.ok(session, "operator main session missing from replay");
-  assert.equal(session.chat.length, 19, "operator main tape must project 19 entries");
-  const edge = process.env["ProgramFiles(x86)"] ? join(process.env["ProgramFiles(x86)"], "Microsoft", "Edge", "Application", "msedge.exe") : "msedge.exe";
-  const edgeProcess = spawn(edge, ["--headless=new", `--remote-debugging-port=${browserPort}`, `--user-data-dir=${join(args.data, "edge-replay")}`, "--no-first-run", "--disable-extensions", `--app=http://127.0.0.1:${port}/chat?session=main&instant=1`], { windowsHide: true, stdio: "ignore" });
-  children.push(edgeProcess);
-  let target;
-  for (let attempt = 0; attempt < 200; attempt++) {
-    try { target = (await json(`http://127.0.0.1:${browserPort}/json/list`)).find((item) => item.type === "page"); if (target) break; } catch {}
-    await sleep(50);
+  const finalState = await waitHTTP(`http://127.0.0.1:${port}/api/state`);
+  const finalSession = finalState.sessions?.main;
+  assert.ok(finalSession, "operator main session missing from replay");
+
+  browser = await chromium.launch({ channel: "msedge", headless: true });
+  const context = await browser.newContext();
+  await context.addInitScript(() => {
+    const evidence = window.__agentbStreamingReplay = { renderErrors: [], remounts: [], toolKeys: [], patchEvents: 0, stateFetches: [] };
+    const NativeEventSource = window.EventSource;
+    window.EventSource = class extends NativeEventSource {
+      constructor(...values) {
+        super(...values);
+        this.addEventListener("projection.patch", () => { evidence.patchEvents++; });
+      }
+    };
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = (...values) => {
+      if (String(values[0]).includes("/api/state")) evidence.stateFetches.push(new Error("state fetch").stack);
+      return nativeFetch(...values);
+    };
+    const originalError = console.error.bind(console);
+    console.error = (...values) => {
+      const line = values.map((value) => {
+        try { return typeof value === "string" ? value : JSON.stringify(value); }
+        catch { return String(value); }
+      }).join(" ");
+      if (line.includes("chat render failure")) evidence.renderErrors.push(line);
+      originalError(...values);
+    };
+    const rows = new Map();
+    const inspect = (root) => {
+      if (!(root instanceof Element)) return;
+      const candidates = root.matches("[data-entry-key]") ? [root] : [];
+      candidates.push(...root.querySelectorAll("[data-entry-key]"));
+      for (const row of candidates) {
+        const tool = row.querySelector(".tool-tick");
+        const failure = row.classList.contains("chat-render-failure");
+        if (!tool && !failure) continue;
+        const key = row.dataset.entryKey;
+        if (!key) continue;
+        const previous = rows.get(key);
+        if (previous && previous !== row) evidence.remounts.push({ key, from: previous.className, to: row.className });
+        rows.set(key, row);
+        if (tool && !evidence.toolKeys.includes(key)) evidence.toolKeys.push(key);
+      }
+    };
+    new MutationObserver((mutations) => {
+      for (const mutation of mutations) for (const node of mutation.addedNodes) inspect(node);
+    }).observe(document, { childList: true, subtree: true });
+  });
+  const page = await context.newPage();
+  const replayTimeout = Math.max(30000, recordCount * 25);
+  page.setDefaultTimeout(replayTimeout);
+  await page.goto(`http://127.0.0.1:${port}/chat?session=main`, { waitUntil: "domcontentloaded" });
+  const finalCursor = finalSession.cursor;
+  const replayDeadline = Date.now() + replayTimeout;
+  let streamedCursor;
+  while (Date.now() < replayDeadline) {
+    streamedCursor = await page.evaluate(async () => (await import("/static/js/bus.js")).store.sessions?.main?.cursor);
+    if (streamedCursor?.generation === finalCursor.generation && Number(streamedCursor?.offset || 0) === Number(finalCursor.offset || 0)) break;
+    await sleep(100);
   }
-  assert.ok(target?.webSocketDebuggerUrl, "Edge DevTools target did not appear");
-  browser = new CDP(target.webSocketDebuggerUrl);
-  await browser.call("Runtime.enable");
-  const deadline = Date.now() + 15000;
-  let result;
-  while (Date.now() < deadline) {
-    result = await browser.evaluate(`({ rows: document.querySelectorAll('[data-entry-key]').length, failures: document.querySelectorAll('.chat-render-failure').length, text: document.querySelector('#chat-log')?.innerText || '' })`);
-    if (result.rows === 19) break;
-    await sleep(50);
-  }
-  assert.equal(result.rows, 19, JSON.stringify(result));
-  assert.equal(result.failures, 1, JSON.stringify(result));
-  assert.match(result.text, /tool .+ could not render · tool arguments are missing or are not an object/);
-  process.stdout.write("PASS operator-main-19-entry-replay\n");
+  assert.deepEqual(streamedCursor, finalCursor, `streaming replay did not reach the final cursor in ${replayTimeout} ms`);
+  await page.waitForTimeout(150);
+  const result = await page.evaluate(async () => {
+    const { store } = await import("/static/js/bus.js");
+    return {
+      cursor: store.sessions?.main?.cursor,
+      mountedRenderFailures: document.querySelectorAll(".chat-render-failure").length,
+      ...window.__agentbStreamingReplay,
+    };
+  });
+  assert.deepEqual(result.cursor, finalCursor, JSON.stringify(result));
+  assert.equal(result.patchEvents, recordCount, `streaming replay frame count differs from tape records: ${JSON.stringify(result)}`);
+  assert.deepEqual(result.stateFetches.filter((stack) => stack.includes("at resync")), [], JSON.stringify(result.stateFetches));
+  assert.ok(result.toolKeys.length > 0, `streaming replay did not mount any condensed tool rows: ${JSON.stringify(result)}`);
+  assert.deepEqual(result.remounts, [], JSON.stringify(result.remounts));
+  assert.deepEqual(result.renderErrors, [], JSON.stringify(result.renderErrors));
+  assert.equal(result.mountedRenderFailures, 0, JSON.stringify(result));
+  process.stdout.write(`${JSON.stringify({
+    result: "PASS streaming replay",
+    tape: args.replay,
+    records: recordCount,
+    projectedChatEntries: finalSession.chat?.length || 0,
+    condensedToolRowsObserved: result.toolKeys.length,
+    condensedToolRowRemounts: result.remounts.length,
+    projectionPatchesObserved: result.patchEvents,
+    chatRenderFailureErrors: result.renderErrors.length,
+    mountedRenderFailures: result.mountedRenderFailures,
+    cursor: result.cursor,
+  }, null, 2)}\n`);
 } finally {
-  try { browser?.ws?.close(); } catch {}
+  await browser?.close().catch(() => {});
   for (const child of children.reverse()) { try { child.kill(); } catch {} }
   await sleep(250);
 }
