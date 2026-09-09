@@ -544,6 +544,5 @@ Write-Host 'INSTALLATION COMPLETE'
 Write-Host "Start Menu: $shortcutPath"
 Write-Host 'Registration: HKCU and the operator Start Menu, matching the LocalAppData configuration and user-scoped DPAPI owner.'
 Write-Host 'Settings: created once in LocalAppData and preserved on upgrades'
-Write-Host 'Next: open Agent_b from Start, then apply and verify Host protections in Settings > Security.'
 Write-Host "Transcript: $script:installTranscriptPath"
 Stop-InstallTranscript

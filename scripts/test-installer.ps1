@@ -136,7 +136,7 @@ try {
         if ($shellSource -match [regex]::Escape($removed)) { throw "Installed application retains removed page switch $removed." }
     }
     $chatCSS = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\css\chat.css')
-    foreach ($required in @('.chat-budget { grid-row: 3; }', '.chat-log { grid-row: 4; }', '.chat-composer { grid-row: 5; }', '#chat-send {')) {
+    foreach ($required in @('.chat-budget { grid-row: 2; }', '.chat-log { grid-row: 3; }', '.chat-composer { grid-row: 4; }', '#chat-send {')) {
         if ($chatCSS -notmatch [regex]::Escape($required)) { throw "Installed Chat layout is missing: $required" }
     }
     $chatScript = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\chat.js')
@@ -244,10 +244,11 @@ try {
         [pscustomobject]@{ Path = $_.FullName; Length = $_.Length; PrefixSHA256 = Get-FilePrefixHash -Path $_.FullName -Length $_.Length }
     })
 
+    $upgradeTranscriptPath = Join-Path $testData 'logs\running-upgrade-transcript.log'
     $savedInstallLog = $env:AGENT_B_INSTALL_LOG
     $savedNoPause = $env:AGENT_B_INSTALL_NO_PAUSE
     $savedNoBrowser = $env:AGENT_B_INSTALL_NO_BROWSER
-    $env:AGENT_B_INSTALL_LOG = Join-Path $testData 'logs\running-upgrade-transcript.log'
+    $env:AGENT_B_INSTALL_LOG = $upgradeTranscriptPath
     $env:AGENT_B_INSTALL_NO_PAUSE = '1'
     $env:AGENT_B_INSTALL_NO_BROWSER = '1'
     try {
@@ -261,6 +262,17 @@ try {
     if ($upgradeExit -ne 0) { throw "Running-instance wrapper upgrade exited $upgradeExit.`n$upgradeOutput" }
     if ($upgradeOutput -notmatch 'STOPPING: Agent_b PID' -or $upgradeOutput -notmatch 'STOPPED: Agent_b PID' -or $upgradeOutput -notmatch "Agent_b is ready at http://127\.0\.0\.1:$testPort/chat") {
         throw "Running-instance upgrade did not report stop and restart lifecycle.`n$upgradeOutput"
+    }
+    $strictUtf8 = [Text.UTF8Encoding]::new($false, $true)
+    $upgradeTranscript = $strictUtf8.GetString([IO.File]::ReadAllBytes($upgradeTranscriptPath))
+    if ($upgradeTranscript.Contains([char]0) -or $upgradeTranscript.Contains([char]0xfffd)) {
+        throw 'Running-instance transcript is not one continuous UTF-8 encoding.'
+    }
+    if ($upgradeTranscript -notmatch 'AUTOSTART COMPLETE: Agent_b started through ' -or
+        $upgradeTranscript -notmatch "Agent_b is ready at http://127\.0\.0\.1:$testPort/chat" -or
+        $upgradeTranscript -match 'Next: open Agent_b from Start' -or
+        $upgradeTranscript -notmatch [regex]::Escape("Transcript: $upgradeTranscriptPath")) {
+        throw 'Running-instance transcript is missing its UTF-8 autostart record/path or retains contradictory closing guidance.'
     }
     $beforeProcess.WaitForExit(15000) | Out-Null
     if (-not $beforeProcess.HasExited) { throw 'The pre-upgrade Agent_b process did not exit.' }
