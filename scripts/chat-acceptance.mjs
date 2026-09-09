@@ -104,7 +104,7 @@ const fakeHandler = async (request, response) => {
   }
   if (user.includes("acceptance: menu stream")) {
     const count = toolCountAfterLatestUser(body);
-    await sleep(100);
+    await sleep(400);
     if (count < 8) {
       const path = count < 2 ? "long-tool.txt" : "AGENTS.md";
       return stream(response, { tool_calls: [{ index: 0, id: `menu-stream-${count}`, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path }) } }] }, "tool_calls");
@@ -166,6 +166,15 @@ const waitFileContains = async (path, text, timeout = 12000) => {
 };
 
 const browserText = async (selector) => browser.evaluate(`document.querySelector(${JSON.stringify(selector)})?.innerText || ""`);
+const projectedChatText = async (sessionID) => JSON.stringify((await state()).sessions[sessionID]?.chat || []);
+const waitProjectedChatText = async (sessionID, text, label, timeout = 12000) => {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if ((await projectedChatText(sessionID)).includes(text)) return;
+    await sleep(50);
+  }
+  throw new Error(`projection timeout: ${label}`);
+};
 const setTask = async (text) => {
   await page.locator("#chat-task").fill(text);
   await page.locator("#chat-send").click();
@@ -246,6 +255,7 @@ edgeContext = await chromium.launchPersistentContext("", {
   args: [`--app=http://127.0.0.1:${appPort}/chat`, "--window-size=1250,975"],
 });
 page = edgeContext.pages()[0] || await edgeContext.newPage();
+page.on("pageerror", (error) => process.stderr.write(`PAGE ERROR: ${error.stack || error}\n`));
 browser = {
   evaluate: (expression) => page.evaluate(expression),
   wait: async (expression, label, timeout = 12000) => {
@@ -264,7 +274,7 @@ record("open-chat");
 
 if (realModel) {
   await setTask("Reply with the exact words REAL MODEL ACCEPTANCE OK.");
-  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('REAL MODEL ACCEPTANCE OK')`, "real model answer", 120000);
+  await waitProjectedChatText((await state()).active, "REAL MODEL ACCEPTANCE OK", "real model answer", 120000);
   record("real-model-answer");
 } else {
   await page.locator(".agent-tab-new").click();
@@ -302,6 +312,11 @@ if (realModel) {
   await page.locator("#chat-task").fill("acceptance: menu stream");
   await page.locator("#chat-send").click();
   const lifecycleRunStarted = await waitEvent(sessionID, (event) => event.type === "run.started", "tool-tick lifecycle run started");
+  await waitProjectedChatText(sessionID, "menu-stream-0", "first projected lifecycle tool");
+  const lifecycleTurn = page.locator(".chat-response-summary").last();
+  await lifecycleTurn.waitFor({ state: "visible" });
+  if (await lifecycleTurn.getAttribute("aria-expanded") !== "true") await lifecycleTurn.click();
+  assert.equal(await page.locator(".chat-tool-group-head").count(), 0, "active responses must not regroup live tool nodes");
   await page.locator("button.tool-tick").first().waitFor({ state: "visible" });
   const toolButton = page.locator("button.tool-tick").first();
   await toolButton.waitFor({ state: "visible" });
@@ -365,8 +380,13 @@ if (realModel) {
     ];
     bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
     await new Promise(resolve => setTimeout(resolve, 120));
-    return { rows: document.querySelectorAll('[data-entry-key]').length, text: document.querySelector('#chat-log')?.innerText || '' };
+    const summary = document.querySelector('.chat-response-summary');
+    const collapsed = summary?.innerText || '';
+    summary?.click();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    return { collapsed, rows: document.querySelectorAll('[data-entry-key]').length, text: document.querySelector('#chat-log')?.innerText || '' };
   })()`);
+  assert.match(missingArgsFixture.collapsed, /1 failed/);
   assert.equal(missingArgsFixture.rows, 3);
   assert.match(missingArgsFixture.text, /tool read_file could not render · tool arguments are missing or are not an object/);
   assert.match(missingArgsFixture.text, /before malformed tool/);
@@ -386,6 +406,7 @@ if (realModel) {
     for (let index = 0; index < 32; index++) {
       bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
       await new Promise(resolve => setTimeout(resolve, 65));
+      if (index === 0) document.querySelector('.chat-response-summary')?.click();
     }
     return document.querySelector('#chat-log')?.innerText || '';
   })()`);
@@ -401,6 +422,51 @@ if (realModel) {
 
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('deliberate render failure')`, "server snapshot restored");
+
+  const groupingFixture = await browser.evaluate(`(async () => {
+    const bus = await import('/static/js/bus.js');
+    const session = bus.store.sessions[${JSON.stringify(sessionID)}];
+    session.run = { ...session.run, status: 'idle' };
+    session.chat = [
+      { type: 'user', key: 'group:user', text: 'group every recorded row' },
+      { type: 'tool', key: 'group:read-1', name: 'read_file', args: { path: 'one.txt' }, content: 'ONE COMPLETE', result: { ok: true, ms: 4 } },
+      { type: 'agent', key: 'group:thin', reasoning: 'thin recorded thought', reasoningTokens: 12, thinkingMS: 3, done: true },
+      { type: 'tool', key: 'group:read-2', name: 'read_file', args: { path: 'two.txt' }, content: 'TWO COMPLETE FAILURE', result: { ok: false, ms: 5 } },
+      { type: 'agent', key: 'group:long', reasoning: 'long recorded thought', reasoningTokens: 65, thinkingMS: 7, done: true },
+      { type: 'tool', key: 'group:read-3', name: 'read_file', args: { path: 'three.txt' }, content: 'THREE COMPLETE', result: { ok: true, ms: 6 } }
+    ];
+    bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const summary = document.querySelector('.chat-response-summary');
+    const collapsed = summary?.innerText || '';
+    const collapsedRows = document.querySelectorAll('.chat-response-rows > *').length;
+    summary?.click();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    const group = document.querySelector('.chat-tool-group-head');
+    const rows = document.querySelectorAll('.chat-response-rows > *').length;
+    const groupText = group?.innerText || '';
+    group?.click();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    document.querySelector('[data-entry-key="group:long"] .thinking-line')?.click();
+    document.querySelector('[data-entry-key="group:read-3"] .tool-tick')?.click();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    return {
+      collapsed, collapsedRows, rows, groupText,
+      calls: document.querySelectorAll('.chat-tool-group-calls .tool-tick').length,
+      details: document.querySelectorAll('.chat-tool-group-calls .tool-detail').length,
+      text: document.querySelector('#chat-log')?.innerText || ''
+    };
+  })()`);
+  assert.match(groupingFixture.collapsed, /3 tool calls · 1 failed · 2 thoughts · 25 ms/);
+  assert.equal(groupingFixture.collapsedRows, 0);
+  assert.equal(groupingFixture.rows, 3);
+  assert.match(groupingFixture.groupText, /read_file ×2 · \+1 thought · 1 failed · 12 ms/);
+  assert.equal(groupingFixture.calls, 2);
+  assert.equal(groupingFixture.details, 2);
+  for (const text of ["ONE COMPLETE", "thin recorded thought", "TWO COMPLETE FAILURE", "long recorded thought", "THREE COMPLETE"]) assert.match(groupingFixture.text, new RegExp(text));
+  record("three-level-chat-fold-adjacent-thin-failure-complete");
+  await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
+  await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('TWO COMPLETE FAILURE')`, "grouping fixture restored");
 
   const geometry = await browser.evaluate(`(() => { const textarea=document.querySelector('#chat-task').getBoundingClientRect(); const row=document.querySelector('.chat-composer-row').getBoundingClientRect(); const expand=document.querySelector('#chat-expand').getBoundingClientRect(); const robot=document.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab-robot').getBoundingClientRect(); const tab=document.querySelector('.agent-tab-wrap[data-agent="agent_b"]').getBoundingClientRect(); const plus=document.querySelector('.agent-tab-new').getBoundingClientRect(); const send=document.querySelector('#chat-send').getBoundingClientRect(); const stop=document.querySelector('#chat-stop').getBoundingClientRect(); return {textarea:textarea.width,row:row.width,rowHeight:row.height,expandTop:expand.top-textarea.top,expandRight:textarea.right-expand.right,robot:robot.width,tab:tab.width,plus:{width:plus.width,height:plus.height},send:{width:send.width,height:send.height},stop:{width:stop.width,height:stop.height}}; })()`);
   assert.ok(geometry.textarea >= geometry.row - 50, JSON.stringify(geometry));
@@ -423,7 +489,7 @@ if (realModel) {
   record("outbox-line-on-pause");
   await browser.wait(`[...document.querySelectorAll('.approval-card')].some(item=>item.innerText.toLowerCase().includes('run as you'))`, "Run as you card");
   assert.equal(await clickText(".approval-card button", "Yes, for this chat"), true);
-  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Acceptance answer rendered after the approved shell call.')`, "answer rendered");
+  await waitProjectedChatText(sessionID, "Acceptance answer rendered after the approved shell call.", "answer rendered");
   events = await sessionEvents(sessionID);
   assert.ok(events.some((event) => event.type === "shell.grant" && event.data.scope === "session"));
   assert.ok(events.some((event) => event.type === "tool.result" && event.data.name === "shell" && event.data.ok === true));
@@ -479,7 +545,7 @@ if (realModel) {
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('queued (1)')`, "queued count");
   await waitEvent(sessionID, (event) => event.type === "message.queued" && event.data.position === 1, "message.queued");
   releaseQueue?.();
-  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Queued follower completed.')`, "queued follower answer");
+  await waitProjectedChatText(sessionID, "Queued follower completed.", "queued follower answer");
   events = await sessionEvents(sessionID);
   const queueUsers = events.filter((event) => event.type === "message.appended" && event.data.message?.role === "user").map((event) => event.data.message.content);
   assert.ok(queueUsers.indexOf("acceptance: queue leader") < queueUsers.indexOf("acceptance: queued follower"));
@@ -491,14 +557,15 @@ if (realModel) {
   assert.equal(await clickText("#chat-exchange-files button", "phone-note.txt · 26 B"), true);
   await browser.wait(`document.querySelector('.chat-pending-file')`, "pending attachment");
   await setTask("acceptance: attachment");
-  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Attachment received and rendered.')`, "attachment answer");
+  await waitProjectedChatText(sessionID, "Attachment received and rendered.", "attachment answer");
   await waitEvent(sessionID, (event) => event.type === "message.appended" && event.data.message?.attachments?.length === 1, "attachment JSONL");
   record("operator-attachments-paperclip-source");
   record("attachment-screen-jsonl");
 
   const beforeReload = (await browserText("#chat-log")).slice(0, 120);
   await page.reload();
-  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Attachment received and rendered.')`, "chat reopen");
+  await waitProjectedChatText(sessionID, "Attachment received and rendered.", "chat reopen");
+  await browser.wait(`document.querySelectorAll('#chat-log .chat-entry').length > 1`, "chat rows restored after reopen");
   assert.equal((await browserText("#chat-log")).slice(0, 120), beforeReload);
   record("chat-reopen-preserves-screen-and-jsonl");
 
@@ -511,7 +578,7 @@ if (realModel) {
   const slowStop = await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > estimatedBudget.seq, "slow-accounting run stopped", 20000);
   assert.equal(slowStop.data.reason, "done");
   events = await sessionEvents(sessionID);
-  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Slow accounting recovered with an estimate.')`, "slow-accounting answer", 20000);
+  await waitProjectedChatText(sessionID, "Slow accounting recovered with an estimate.", "slow-accounting answer", 20000);
   assert.ok(events.some((event) => event.type === "model.busy" && event.seq > beforeSlowAccounting));
   assert.ok(events.some((event) => event.type === "budget" && event.seq > estimatedBudget.seq && event.data?.estimated === false));
   record("long-run-slow-accounting");
@@ -524,7 +591,7 @@ if (realModel) {
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('queued (1)')`, "recovery queued");
   await startFake(modelPort);
   await page.locator("#chat-retry-model").click();
-  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Recovered after Retry.')`, "Retry recovery", 20000);
+  await waitProjectedChatText(sessionID, "Recovered after Retry.", "Retry recovery", 20000);
   await waitEvent(sessionID, (event) => event.type === "model.reachable", "model.reachable");
   record("model-unreachable-retry-release");
 
@@ -535,7 +602,7 @@ if (realModel) {
   assert.ok(busyEvent);
   assert.equal(events.slice(events.indexOf(busyEvent)).some((event) => event.type === "run.stopped"), false);
   releaseBusy?.();
-  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Busy model resumed.')`, "busy resumed");
+  await waitProjectedChatText(sessionID, "Busy model resumed.", "busy resumed");
   await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > busyEvent.seq, "busy run stopped");
   record("model-busy-waits-without-stop");
 

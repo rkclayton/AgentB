@@ -8,9 +8,10 @@ import { createFileChip, fileURL, filesFromResponse, probeFile } from "./deliver
 import { createApprovalCard } from "./approval.js";
 import { callServiceKey, callServiceStatus } from "./call-service-display.js";
 import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, uploadAttachment } from "./attachment-upload.js";
-import { agentAuthor, openSessions } from "./chat-lifecycle.js";
+import { agentAuthor, isRunning, openSessions } from "./chat-lifecycle.js";
 import { renderOperatorStatus } from "./operator-status.js";
 import { renderStopState } from "./stop-state.js";
+import { groupResponseRows, itemFailed, responseSummary } from "./chat-response-groups.js";
 
 const budget = document.getElementById("chat-budget");
 const log = document.getElementById("chat-log");
@@ -295,41 +296,123 @@ function renderResponse(session, entry) {
     row.tabIndex = 0;
     const content = document.createElement("div");
     content.className = "chat-content chat-response-content";
+    const summary = document.createElement("button");
+    summary.type = "button";
+    summary.className = "chat-response-summary";
+    summary.onclick = () => {
+      expanded.has(entry.key) ? expanded.delete(entry.key) : expanded.add(entry.key);
+      render();
+    };
+    const rows = document.createElement("div");
+    rows.className = "chat-response-rows";
+    content.append(summary, rows);
     const author = speaker(agentAuthor(session));
     row.append(author, content);
-    view = { row, author, content, items: new Map() };
+    view = { row, author, content, summary, rows, items: new Map() };
     entryViews.set(entry.key, view);
   }
   usedEntryViews.add(entry.key);
   view.author.lastElementChild.textContent = agentAuthor(session);
-  const nodes = [];
+  const totals = responseSummary(entry.items);
+  const active = isRunning(session) && entry.items.some((item) => item?.run_id && item.run_id === session.run?.run_id);
+  const open = active || expanded.has(entry.key);
+  view.summary.setAttribute("aria-expanded", String(open));
   const usedItems = new Set();
-  for (const [index, item] of entry.items.entries()) {
-    const key = item?.key || `invalid:${index}`;
-    usedItems.add(key);
-    try {
-      nodes.push(renderResponseItem(session, view, item, key));
-    } catch (error) {
-      nodes.push(renderFailure(item, error, index, true));
+  for (const [index, item] of entry.items.entries()) usedItems.add(item?.key || `invalid:${index}`);
+  const nodes = [];
+  let renderFailures = open ? 0 : Number(view.renderFailures || 0);
+  if (open) {
+    const rows = active ? entry.items : groupResponseRows(entry.items);
+    for (const [index, item] of rows.entries()) {
+      try {
+        if (item?.kind === "tool-group") {
+          usedItems.add(item.key);
+          nodes.push(renderResponseToolGroup(session, view, item));
+        } else {
+          const key = item?.key || `invalid:${index}`;
+          nodes.push(renderResponseItem(session, view, item, key));
+        }
+      } catch (error) {
+        if (!itemFailed(item)) renderFailures++;
+        nodes.push(renderFailure(item, error, index, true));
+      }
     }
-  }
-  const files = filesFromResponse(entry.items.filter((item) => item && typeof item === "object"));
-  if (files.length) {
-    let chips = view.chips;
-    if (!chips) {
-      chips = document.createElement("div");
-      chips.className = "file-chips";
-      view.chips = chips;
+    const files = filesFromResponse(entry.items.filter((item) => item && typeof item === "object"));
+    if (files.length) {
+      let chips = view.chips;
+      if (!chips) {
+        chips = document.createElement("div");
+        chips.className = "file-chips";
+        view.chips = chips;
+      }
+      reconcileChildren(chips, files.map((file) => renderFileChip(session, file)));
+      nodes.push(chips);
     }
-    reconcileChildren(chips, files.map((file) => renderFileChip(session, file)));
-    nodes.push(chips);
+    renderFailures += [...view.items.values()].reduce((total, itemView) => total + Number(itemView.renderFailures || 0), 0);
+    view.renderFailures = renderFailures;
   }
-  reconcileChildren(view.content, nodes);
+  const displayedTotals = { ...totals, failed: totals.failed + renderFailures };
+  view.summary.textContent = `${open ? "▾" : "▸"} ${responseSummaryText(displayedTotals, entry.items.length)}`;
+  view.row.classList.toggle("alarm", displayedTotals.failed > 0);
+  reconcileChildren(view.rows, nodes);
   for (const key of view.items.keys()) if (!usedItems.has(key)) view.items.delete(key);
   return view.row;
 }
 
-function renderResponseItem(session, view, item, key) {
+function responseSummaryText(summary, rowCount) {
+  const parts = [];
+  if (summary.tools) parts.push(`${summary.tools} tool ${summary.tools === 1 ? "call" : "calls"}`);
+  if (summary.failed) parts.push(`${summary.failed} failed`);
+  if (summary.thoughts) parts.push(`${summary.thoughts} ${summary.thoughts === 1 ? "thought" : "thoughts"}`);
+  if (!summary.tools && !summary.thoughts && summary.answers) parts.push(`${summary.answers} ${summary.answers === 1 ? "answer" : "answers"}`);
+  if (!parts.length) parts.push(`${rowCount} ${rowCount === 1 ? "row" : "rows"}`);
+  if (summary.duration) parts.push(formatDuration(summary.duration));
+  return parts.join(" · ");
+}
+
+function renderResponseToolGroup(session, view, group) {
+  let groupView = view.items.get(group.key);
+  if (!groupView) {
+    const root = document.createElement("div");
+    root.className = "chat-tool-group";
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "chat-tool-group-head";
+    head.onclick = () => {
+      expanded.has(group.key) ? expanded.delete(group.key) : expanded.add(group.key);
+      render();
+    };
+    const children = document.createElement("div");
+    children.className = "chat-tool-group-calls";
+    root.append(head, children);
+    groupView = { root, head, children, group: true, renderFailures: 0 };
+    view.items.set(group.key, groupView);
+  }
+  const open = expanded.has(group.key);
+  const parts = [`${group.tool} ×${group.calls}`];
+  if (group.thoughts) parts.push(`+${group.thoughts} ${group.thoughts === 1 ? "thought" : "thoughts"}`);
+  if (group.failed) parts.push(`${group.failed} failed`);
+  if (group.duration) parts.push(formatDuration(group.duration));
+  groupView.root.classList.toggle("alarm", group.failed > 0);
+  groupView.head.setAttribute("aria-expanded", String(open));
+  groupView.head.textContent = `${open ? "▾" : "▸"} ${parts.join(" · ")}`;
+  let renderFailures = open ? 0 : groupView.renderFailures;
+  const children = open ? group.items.map((item, index) => {
+    try {
+      if (item?.type === "agent" && item.reasoning) expanded.add(item.key);
+      return renderResponseItem(session, view, item, item?.key || `invalid:group:${index}`, item?.type === "tool");
+    }
+    catch (error) {
+      if (!itemFailed(item)) renderFailures++;
+      return renderFailure(item, error, index, true);
+    }
+  }) : [];
+  if (open) groupView.renderFailures = renderFailures;
+  reconcileChildren(groupView.children, children);
+  return groupView.root;
+}
+
+function renderResponseItem(session, view, item, key, forceToolOpen = false) {
   if (!item || typeof item !== "object") throw new Error("entry is missing or is not an object");
   if (!item.key) throw new Error("entry key is missing");
   if (item.type === "notice") {
@@ -367,7 +450,7 @@ function renderResponseItem(session, view, item, key) {
         stepNodes.push(itemView.caret);
       }
     } else if (item.type === "tool") {
-      stepNodes.push(toolTick(item));
+      stepNodes.push(toolTick(item, forceToolOpen));
     } else {
       throw new Error(`unsupported entry type ${String(item.type || "(missing)")}`);
     }
@@ -470,7 +553,7 @@ function thinking(entry, tokens) {
   return thinkingRenderer.render(entry, tokens);
 }
 
-function toolTick(entry) {
+function toolTick(entry, forceOpen = false) {
   if (!entry.args || typeof entry.args !== "object" || Array.isArray(entry.args)) throw new Error("tool arguments are missing or are not an object");
   usedToolViews.add(entry.key);
   let view = toolViews.get(entry.key);
@@ -496,7 +579,7 @@ function toolTick(entry) {
     view = { root, button, pre, collapse, args: null, result: null, content: null };
     toolViews.set(entry.key, view);
   }
-  const open = expanded.has(entry.key);
+  const open = forceOpen || expanded.has(entry.key);
   view.button.setAttribute("aria-expanded", String(open));
   const state = entry.result && typeof entry.result.ok === "boolean" ? (entry.result.ok ? "ok" : "error") : "";
   setText(view.button.children[0], `${open ? "▾" : "▸"} ${entry.name}`);
@@ -505,7 +588,7 @@ function toolTick(entry) {
   view.button.children[2].className = `tool-state ${state === "error" ? "error" : ""}`;
   setText(view.button.children[3], formatDuration(entry.result?.ms));
   if (open) {
-    if (view.args !== entry.args || view.result !== entry.result || view.content !== entry.content) {
+    if (!view.pre.textContent || view.args !== entry.args || view.result !== entry.result || view.content !== entry.content) {
       view.pre.textContent = `arguments\n${JSON.stringify(entry.args, null, 2)}\n\nresult\n${capResult(entry.content)}`;
     }
     if (!view.collapse.isConnected) view.root.append(view.collapse);

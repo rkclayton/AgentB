@@ -1,39 +1,55 @@
 const rangePriority = ["offset", "path", "url", "pattern", "query", "command", "note", "limit"];
 
 export function groupToolRuns(entries) {
+  return groupAdjacentRuns(
+    entries,
+    (entry) => {
+      const call = singleTool(entry);
+      return call ? { key: call.name, id: call.id } : null;
+    },
+    (entry) => entry?.kind === "compaction",
+  ).map((entry) => entry.kind !== "adjacent-group" ? entry : ({
+    kind: "tool-group",
+    tool: entry.groupKey,
+    firstCallID: entry.members[0].id,
+    items: entry.items,
+    models: entry.members.map((member) => member.entry),
+  }));
+}
+
+export function groupAdjacentRuns(entries, classify, isBridge = () => false) {
   const grouped = [];
   for (let index = 0; index < entries.length;) {
-    const first = singleTool(entries[index]);
+    const first = classify(entries[index]);
     if (!first) {
       grouped.push(entries[index++]);
       continue;
     }
 
-    const items = [entries[index]], models = [entries[index]];
+    const items = [entries[index]], members = [{ ...first, entry: entries[index] }];
     let cursor = index + 1;
     for (;;) {
       const bridgeStart = cursor;
-      while (entries[cursor]?.kind === "compaction") cursor++;
-      const next = singleTool(entries[cursor]);
-      if (!next || next.name !== first.name) {
+      while (isBridge(entries[cursor])) cursor++;
+      const next = classify(entries[cursor]);
+      if (!next || next.key !== first.key) {
         cursor = bridgeStart;
         break;
       }
       items.push(...entries.slice(bridgeStart, cursor), entries[cursor]);
-      models.push(entries[cursor]);
+      members.push({ ...next, entry: entries[cursor] });
       cursor++;
     }
 
-    if (models.length < 2) {
+    if (members.length < 2) {
       grouped.push(entries[index++]);
       continue;
     }
     grouped.push({
-      kind: "tool-group",
-      tool: first.name,
-      firstCallID: first.id,
+      kind: "adjacent-group",
+      groupKey: first.key,
       items,
-      models,
+      members,
     });
     index = cursor;
   }

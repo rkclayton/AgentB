@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { groupToolRuns, toolGroupRange, toolGroupStatus, toolResultText } from "./timeline-groups.js";
+import { groupAdjacentRuns, groupToolRuns, toolGroupRange, toolGroupStatus, toolResultText } from "./timeline-groups.js";
 
 function model(seq, id, name, args) {
   return {
@@ -37,6 +37,14 @@ test("consecutive same-tool turns collapse without crossing another tool", () =>
   assert.equal(grouped[1].event.seq, 4);
   assert.equal(grouped[2].event.seq, 5);
   assert.equal(grouped[3].event.seq, 6);
+});
+
+test("shared adjacent scan retains bridges only when a matching member follows", () => {
+  const entries = [{ kind: "call", name: "read" }, { kind: "bridge" }, { kind: "call", name: "read" }, { kind: "bridge" }, { kind: "call", name: "shell" }];
+  const grouped = groupAdjacentRuns(entries, (entry) => entry?.kind === "call" ? { key: entry.name } : null, (entry) => entry?.kind === "bridge");
+  assert.equal(grouped[0].kind, "adjacent-group");
+  assert.equal(grouped[0].items.length, 3);
+  assert.deepEqual(grouped.slice(1), entries.slice(3));
 });
 
 test("group range uses the varying argument and status exposes failures", () => {
