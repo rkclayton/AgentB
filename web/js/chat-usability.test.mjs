@@ -46,7 +46,7 @@ test("Pending approval is pinned above the composer with zero idle space", () =>
 	assert.match(chat, /session\?\.pending_approval \|\| session\?\.pending_repo_policy \|\| session\?\.pending_bind \? "waiting for you"/);
 	assert.match(chat, /pendingApproval\.hidden = !\(session\?\.pending_approval \|\| session\?\.pending_repo_policy \|\| session\?\.pending_bind\)/);
 	assert.match(css, /\.pending-approval\[hidden\]\s*\{\s*display:\s*none/);
-	assert.match(tokens, /\.shell-state\.waiting\{color:var\(--alarm\)/);
+	assert.match(tokens, /\.agent-tab-robot\.waiting\{color:var\(--alarm\)/);
 });
 
 test("Composer sends during an active run and reports projected queue count", () => {
@@ -121,7 +121,7 @@ test("Chat uses the narrow monospace label gutter and the agent_b tab restores i
 	assert.match(css, /\.chat-entry\s*\{[\s\S]*grid-template-columns:\s*90px minmax\(0, 1fr\)/);
 	assert.match(css, /\.chat-render-failure \.chat-content\s*\{[\s\S]*white-space:\s*nowrap/);
 	assert.match(shell, /agentID === "agent_b"[\s\S]*agent-tab-robot[\s\S]*assets\/agent\.svg/);
-	assert.match(tokens, /\.agent-tab-robot\{width:16px;height:16px/);
+	assert.match(tokens, /\.agent-tab-robot\{[^}]*width:20px;height:20px/);
 });
 
 test("Repository policy is a pinned full-content trust decision", () => {

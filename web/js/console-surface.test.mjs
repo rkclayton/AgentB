@@ -13,7 +13,7 @@ test("Console uses the shared shell without retaining a task composer", () => {
   assert.doesNotMatch(index, /id="(?:composer|task)"/);
   assert.doesNotMatch(script, /getElementById\("(?:composer|task)"\)/);
   assert.doesNotMatch(shell, /\["chat", "Chat", "\/chat"\]|\["console", "Console", "\/"\]/);
-  assert.match(shell, /\["plan", "Plan", "\/plan"\]/);
+  assert.match(shell, /\[\["plan", "\/plan"\]\]/);
   assert.match(shell, /location\.assign\(next === "chat"/);
 });
 
