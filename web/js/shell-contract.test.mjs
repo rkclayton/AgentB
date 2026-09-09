@@ -19,7 +19,8 @@ test("shared shell slot order is identical on Chat Console and Plan", () => {
   assert.match(shell, /root\.append\(left, right\)/);
   assert.match(shell, /right\.append\(pages, settings\)/);
   assert.doesNotMatch(shell, /shell-operator-status|right\.append\(stop/);
-  assert.match(shell, /\[\["chat", "Chat", "\/chat"\], \["console", "Console", "\/"\], \["plan", "Plan", "\/plan"\]\]/);
+  assert.match(shell, /\[\["plan", "Plan", "\/plan"\]\]/);
+  assert.doesNotMatch(shell, /\["chat", "Chat", "\/chat"\]|\["console", "Console", "\/"\]/);
 });
 
 test("agent tabs are ordered and expose idle running waiting glyphs", () => {
@@ -33,6 +34,10 @@ test("agent tabs are ordered and expose idle running waiting glyphs", () => {
   assert.match(tokens, /\.agent-state\.waiting,.shell-state\.waiting\{color:var\(--alarm\)\}/);
   assert.match(shell, /button\("\+", `New chat with \$\{agentID\}`, "agent-tab-new"\)/);
   assert.match(tokens, /\.agent-tab-wrap\{[^}]*flex:0 1 auto/);
+  assert.match(shell, /location\.assign\(next === "chat" \? `\/chat\$\{suffix\}` : `\/\$\{suffix\}`\)/);
+  assert.match(shell, /agentb\.side\.\$\{agentID\}/);
+  assert.match(tokens, /\.agent-tab\.side-chat\{color:var\(--ink\)\}/);
+  assert.match(tokens, /\.agent-tab\.side-console\{color:var\(--trace\)\}/);
 });
 
 test("agent menu is the counted open and closed chat history with glyph controls", () => {

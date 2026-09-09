@@ -316,6 +316,42 @@ if (realModel) {
   await waitProjectedChatText(sessionID, "VISIBLE PARTIAL COMPLETE", "completed prose stream");
   record("mid-stream-prose-visible-without-expansion");
 
+  assert.deepEqual(await page.locator(".shell-page").allTextContents(), ["Plan"]);
+  assert.equal(await page.locator(".shell-settings").count(), 1);
+  const chatSide = await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').evaluate((node) => ({
+    side: node.dataset.side,
+    color: getComputedStyle(node).color,
+    expected: getComputedStyle(document.documentElement).getPropertyValue("--ink").trim()
+  }));
+  assert.equal(chatSide.side, "chat");
+  assert.equal(chatSide.color, "rgb(216, 221, 227)");
+  await Promise.all([
+    page.waitForURL((url) => url.pathname === "/" && url.searchParams.get("session") === sessionID),
+    page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click()
+  ]);
+  await page.locator("#console-lifetime").waitFor({ state: "visible" });
+  assert.deepEqual(await page.locator(".shell-page").allTextContents(), ["Plan"]);
+  const consoleSide = await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').evaluate((node) => ({
+    side: node.dataset.side,
+    color: getComputedStyle(node).color
+  }));
+  assert.equal(consoleSide.side, "console");
+  assert.equal(consoleSide.color, "rgb(242, 178, 51)");
+  await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click({ button: "right" });
+  const toggleMenu = page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-chat-menu');
+  await toggleMenu.waitFor({ state: "visible" });
+  assert.ok(await toggleMenu.locator(".agent-chat-row").count() >= 2);
+  assert.equal(await toggleMenu.locator(".agent-chat-close").count(), await toggleMenu.locator(".agent-chat-row").count());
+  assert.equal(await toggleMenu.locator(".agent-chat-delete").count(), await toggleMenu.locator(".agent-chat-row").count());
+  await page.locator("#console-lifetime").click();
+  await Promise.all([
+    page.waitForURL((url) => url.pathname === "/chat" && url.searchParams.get("session") === sessionID),
+    page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click()
+  ]);
+  await page.locator("#chat-task").waitFor({ state: "visible" });
+  assert.equal(await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').getAttribute("data-side"), "chat");
+  record("agent-tab-left-toggle-preserves-chat-and-right-menu");
+
   const baselineDirectory = join(args.evidence, "baseline-initial");
   await mkdir(baselineDirectory, { recursive: true });
   await page.screenshot({ path: join(baselineDirectory, "chat-idle.png") });

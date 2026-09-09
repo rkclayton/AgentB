@@ -3,7 +3,6 @@ import { operatorStatusView } from "./operator-status.js";
 
 const sheet = document.getElementById("settings-page");
 let gear;
-let consoleLaunch;
 const expanded = new Set();
 const armed = new Set();
 const drafts = new Map();
@@ -46,14 +45,9 @@ const sectionLabels = [
 
 export function initSettings() {
   gear = document.querySelector(".shell-settings");
-  consoleLaunch = document.querySelector('.shell-page[data-page="console"]');
   gear.addEventListener("click", (event) => {
     event.preventDefault();
     open ? closeSettings() : openSettings();
-  });
-  consoleLaunch.addEventListener("click", (event) => {
-    event.preventDefault();
-    if (open) closeSettings();
   });
   document.addEventListener("settings.open", (event) => openSettings(event.detail?.section));
   document.addEventListener("keydown", (event) => {
@@ -111,8 +105,6 @@ function openSettings(section = "") {
   gear.setAttribute("aria-label", "Close settings");
   gear.setAttribute("aria-pressed", "true");
   gear.classList.add("selected");
-  consoleLaunch.classList.remove("selected");
-  consoleLaunch.removeAttribute("aria-current");
   history.replaceState(null, "", `#settings/${activeSection}`);
   render();
   refreshServiceAccountStatus();
@@ -131,8 +123,6 @@ function closeSettings() {
   gear.setAttribute("aria-label", "Settings");
   gear.setAttribute("aria-pressed", "false");
   gear.classList.remove("selected");
-  consoleLaunch.classList.add("selected");
-  consoleLaunch.setAttribute("aria-current", "page");
   history.replaceState(null, "", `${location.pathname}${location.search}`);
   (lastFocus || gear).focus();
 }

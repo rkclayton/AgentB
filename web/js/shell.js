@@ -5,6 +5,20 @@ import { installUIErrorRelay } from "./ui-error-relay.js";
 
 const activeRunStates = new Set(["running", "queued", "stopping"]);
 const agentKey = (agent) => String(agent?.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+const agentSideKey = (agentID) => `agentb.side.${agentID}`;
+
+function rememberedAgentSide(agentID) {
+  try {
+    const value = sessionStorage.getItem(agentSideKey(agentID));
+    if (value === "chat" || value === "console") return value;
+  } catch {}
+  return "chat";
+}
+
+function rememberAgentSide(agentID, side) {
+  if (side !== "chat" && side !== "console") return;
+  try { sessionStorage.setItem(agentSideKey(agentID), side); } catch {}
+}
 
 export function initShell(options = {}) {
 	installUIErrorRelay({ token: () => store.mutation_token, sessionID: () => store.active });
@@ -21,7 +35,7 @@ export function initShell(options = {}) {
   const right = node("div", "shell-right");
   const pages = node("nav", "shell-pages");
   pages.setAttribute("aria-label", "Pages");
-  for (const [id, label, path] of [["chat", "Chat", "/chat"], ["console", "Console", "/"], ["plan", "Plan", "/plan"]]) {
+  for (const [id, label, path] of [["plan", "Plan", "/plan"]]) {
     const link = node("a", `shell-page ${page === id ? "selected" : ""}`);
     link.dataset.page = id;
     link.textContent = label;
@@ -79,6 +93,7 @@ export function initShell(options = {}) {
     tabs.replaceChildren();
     const agents = ["agent_b"];
 	const selected = store.sessions[store.selection.session_id];
+	if ((page === "chat" || page === "console") && store.selection.agent_id) rememberAgentSide(store.selection.agent_id, page);
 	const configured = (store.config.agents || []).find((agent) => agentKey(agent) === selected?.agent_id) || store.config.agents?.[0];
 	if (configured?.c) agents.push("agent_c");
     if (configured?.d) agents.push("agent_d");
@@ -89,12 +104,21 @@ export function initShell(options = {}) {
       if (selected) wrap.classList.add("selected");
       const tab = button("", `${agentID} · ${agentName(agentID)}`, `agent-tab ${selected ? "selected" : ""}`);
       const glyphState = agentState(agentID);
+      const side = selected && (page === "chat" || page === "console") ? page : rememberedAgentSide(agentID);
       tab.dataset.agent = agentID;
+      tab.dataset.side = side;
+      tab.classList.add(`side-${side}`);
+      tab.setAttribute("aria-label", `${agentID} · ${agentName(agentID)} · ${side}`);
       tab.innerHTML = `<span class="agent-state ${glyphState}" aria-hidden="true">${glyphState === "waiting" ? "!" : glyphState === "running" ? "●" : "○"}</span>${agentID === "agent_b" ? '<img class="agent-tab-robot" src="/static/assets/agent.svg" alt="">' : ""}<span>${escapeHTML(agentID)}</span>`;
       tab.onclick = () => {
         const current = store.selection.session_id;
         const owned = sessionsFor(agentID, false);
         setSelection(agentID, owned.some((item) => item.id === current) ? current : owned[0]?.id || "");
+        const next = side === "chat" ? "console" : "chat";
+        rememberAgentSide(agentID, next);
+        const sessionID = store.selection.session_id;
+        const suffix = sessionID ? `?session=${encodeURIComponent(sessionID)}` : "";
+        location.assign(next === "chat" ? `/chat${suffix}` : `/${suffix}`);
       };
       const menu = node("div", "shell-menu agent-chat-menu");
       menu.hidden = true;

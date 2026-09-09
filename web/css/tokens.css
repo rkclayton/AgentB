@@ -38,6 +38,8 @@ button:hover{background:rgba(216,221,227,.12)}button:active{background:rgba(216,
 .agent-tab,.shell-add,.agent-overflow{height:28px;min-height:28px;padding:2px 7px;background:transparent;font:500 13px/20px var(--sans);white-space:nowrap}
 .app-shell .agent-tab,.app-shell .shell-add,.app-shell .agent-overflow{height:28px;min-height:28px}
 .agent-tab{min-width:0;overflow:hidden}
+.agent-tab.side-chat{color:var(--ink)}
+.agent-tab.side-console{color:var(--trace)}
 .agent-overflow{width:36px;padding:2px 4px;font-family:var(--mono)}
 .agent-overflow-menu{right:0;left:auto;width:min(18rem,calc(100vw - 16px))}
 .agent-tab-wrap.selected{background:var(--well)}
