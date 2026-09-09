@@ -4,9 +4,11 @@ param(
     [string]$RealModelUrl,
     [string]$RealModelName,
     [string]$ReplayPath,
+    [string]$ReplayApplicationDirectory,
     [string]$EvidenceDirectory,
     [switch]$SkipBuild,
-    [switch]$ReplayOnly
+    [switch]$ReplayOnly,
+    [switch]$ExpectStableShell
 )
 
 $ErrorActionPreference = 'Stop'
@@ -62,12 +64,15 @@ try {
     }
     if ($ReplayOnly -and [string]::IsNullOrWhiteSpace($ReplayPath)) { throw '-ReplayOnly requires -ReplayPath.' }
     if (-not [string]::IsNullOrWhiteSpace($ReplayPath)) {
-        & (Get-Command node.exe -ErrorAction Stop).Source `
-            (Join-Path $PSScriptRoot 'chat-replay-acceptance.mjs') `
-            '--app' $application `
-            '--data' $data `
-            '--replay' $ReplayPath `
-            '--evidence' $evidence
+        $replayArguments = @(
+            (Join-Path $PSScriptRoot 'chat-replay-acceptance.mjs'),
+            '--app', $(if ([string]::IsNullOrWhiteSpace($ReplayApplicationDirectory)) { $application } else { $ReplayApplicationDirectory }),
+            '--data', $data,
+            '--replay', $ReplayPath,
+            '--evidence', $evidence
+        )
+        if ($ExpectStableShell) { $replayArguments += @('--expect-stable-shell', 'true') }
+        & (Get-Command node.exe -ErrorAction Stop).Source @replayArguments
         if ($LASTEXITCODE -ne 0) { throw "Chat replay acceptance failed with exit code $LASTEXITCODE." }
     }
 } finally {

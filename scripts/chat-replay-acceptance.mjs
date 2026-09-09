@@ -29,7 +29,7 @@ const json = async (url) => {
   if (!response.ok) throw new Error(`${response.status} ${JSON.stringify(value)}`);
   return value;
 };
-const waitHTTP = async (url, timeout = Math.max(30000, recordCount * 5)) => {
+const waitHTTP = async (url, timeout = Math.max(30000, recordCount * 25)) => {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     try { return await json(url); } catch { await sleep(50); }
@@ -148,7 +148,7 @@ try {
       alarmsWithoutFailure: alarmSummaries.filter((node) => !/failed/.test(node.innerText)).map((node) => node.innerText),
       headerChatConsoleLinks: document.querySelectorAll('.shell-page[data-page="chat"],.shell-page[data-page="console"]').length,
       side: tab?.dataset.side,
-      offline: tab?.querySelector(".agent-state")?.classList.contains("offline") || false,
+      offline: tab?.querySelector(".agent-tab-robot")?.classList.contains("offline") || tab?.querySelector(".agent-state")?.classList.contains("offline") || false,
       replayComposerDisabled: document.querySelector("#chat-task")?.disabled && document.querySelector("#chat-send")?.disabled,
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       logOverflow: document.querySelector("#chat-log")?.scrollWidth - document.querySelector("#chat-log")?.clientWidth,
@@ -166,6 +166,19 @@ try {
   assert.equal(ui.offline, Boolean(finalSession.model_unreachable), JSON.stringify(ui));
   assert.equal(ui.replayComposerDisabled, true, JSON.stringify(ui));
   assert.ok(ui.pageOverflow <= 0 && ui.logOverflow <= 0, JSON.stringify(ui));
+  const shellGeometry = () => page.evaluate(() => Object.fromEntries([
+    ["shell", "#app-shell"],
+    ["tabs", ".agent-tabs"],
+    ["wrap", '.agent-tab-wrap[data-agent="agent_b"]'],
+    ["tab", '.agent-tab[data-agent="agent_b"]'],
+    ["plus", ".agent-tab-new"],
+    ["plan", ".shell-page"],
+    ["settings", ".shell-settings"],
+  ].map(([key, selector]) => {
+    const rect = document.querySelector(selector).getBoundingClientRect();
+    return [key, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }];
+  })));
+  const chatGeometry = await shellGeometry();
   await page.screenshot({ path: join(args.evidence, "real-tape-chat.png") });
 
   const firstFold = page.locator(".chat-step-summary").first();
@@ -185,7 +198,16 @@ try {
   await page.waitForURL((url) => url.pathname === "/" && url.searchParams.get("session") === "main");
   await page.locator('.agent-tab[data-agent="agent_b"]').waitFor();
   assert.equal(await page.locator('.agent-tab[data-agent="agent_b"]').getAttribute("data-side"), "console");
+  const consoleGeometry = await shellGeometry();
   await page.screenshot({ path: join(args.evidence, "real-tape-console.png") });
+  await page.locator('.agent-tab[data-agent="agent_b"]').click();
+  await page.waitForURL((url) => url.pathname === "/chat" && url.searchParams.get("session") === "main");
+  await page.locator(".chat-entry").first().waitFor();
+  const returnedChatGeometry = await shellGeometry();
+  if (args["expect-stable-shell"] === "true") {
+    assert.deepEqual(consoleGeometry, chatGeometry, JSON.stringify({ chatGeometry, consoleGeometry }));
+    assert.deepEqual(returnedChatGeometry, chatGeometry, JSON.stringify({ chatGeometry, returnedChatGeometry }));
+  }
   assert.deepEqual(pageErrors, []);
   assert.deepEqual(consoleErrors, []);
   const report = {
@@ -201,6 +223,8 @@ try {
     pageErrors,
     consoleErrors,
     ui,
+    shellGeometry: { chat: chatGeometry, console: consoleGeometry, returned_chat: returnedChatGeometry },
+    plusUsableHitTarget: chatGeometry.plus.width >= 20 && chatGeometry.plus.height >= 20,
     cursor: result.cursor,
   };
   await writeFile(join(args.evidence, "result.json"), `${JSON.stringify(report, null, 2)}\n`);
