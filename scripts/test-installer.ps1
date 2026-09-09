@@ -92,8 +92,11 @@ try {
     if ($chatSource -match 'chat-clear-conversation|chat-attachment-controls') {
         throw 'Installed Chat view still contains removed Clear or attachment-pane chrome.'
     }
-    foreach ($link in @('Chat", "/chat"', 'Console", "/"', 'Plan", "/plan"')) {
+    foreach ($link in @('Plan", "/plan"')) {
         if ($shellSource -notmatch [regex]::Escape($link)) { throw "Installed application is missing page switch $link." }
+    }
+    foreach ($removed in @('Chat", "/chat"', 'Console", "/"')) {
+        if ($shellSource -match [regex]::Escape($removed)) { throw "Installed application retains removed page switch $removed." }
     }
     $chatCSS = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\css\chat.css')
     foreach ($required in @('.chat-budget { grid-row: 3; }', '.chat-log { grid-row: 4; }', '.chat-composer { grid-row: 5; }', '#chat-send {')) {
@@ -102,8 +105,9 @@ try {
     $chatScript = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\chat.js')
     $settingsScript = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\settings.js')
     if ($shellSource -notmatch 'link\.onclick = \(event\) => event\.preventDefault\(\);' -or
-        $settingsScript -notmatch 'consoleLaunch\.addEventListener\("click", \(event\) => \{\s+event\.preventDefault\(\);\s+if \(open\) closeSettings\(\);') {
-        throw 'Installed application allows its selected view control to reload the page.'
+        $settingsScript -notmatch 'gear\.addEventListener\("click", \(event\) => \{\s+event\.preventDefault\(\);' -or
+        $settingsScript -match 'consoleLaunch') {
+        throw 'Installed application does not preserve selected-Plan or Settings in-place navigation.'
     }
     $manifestPath = Join-Path $testApplication 'web\app.webmanifest'
     if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
