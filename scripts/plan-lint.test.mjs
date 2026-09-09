@@ -1,0 +1,137 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import process from "node:process";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+
+const here = path.dirname(fileURLToPath(import.meta.url));
+const linter = path.join(here, "plan-lint.mjs");
+const fixtureRoots = [];
+process.on("exit", () => {
+  for (const root of fixtureRoots) {
+    const relative = path.relative(os.tmpdir(), root);
+    if (!relative.startsWith("..") && path.basename(root).startsWith("agentb-plan-lint-")) fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+function item(id, { state = "live", unknown = false, unresolved = "(none)" } = {}) {
+  const resolved = unknown ? "unknown" : null;
+  return [
+    `state: ${state}`,
+    `milestone: ${resolved ?? "0.2"}`,
+    `kind: ${resolved ?? "feature"}`,
+    `surfaces: ${resolved ?? "chat"}`,
+    `evidence: ${resolved ?? "Operator-authorized fixture scope."}`,
+    `acceptance: ${resolved ?? "Fixture behavior is verified."}`,
+    "",
+    `# ${id} — fixture item`,
+    "",
+    "Fixture body.",
+    "",
+    "## Unresolved",
+    "",
+    unresolved,
+    "",
+  ].join("\n");
+}
+
+function makeFixture(current, entries, { next = true, inFlight = "TEST/W0 started" } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agentb-plan-lint-"));
+  fixtureRoots.push(root);
+  fs.mkdirSync(path.join(root, "plan", "items"), { recursive: true });
+  fs.mkdirSync(path.join(root, "plan", "archive"), { recursive: true });
+  fs.writeFileSync(path.join(root, "plan", "_reference.md"), "# References\n");
+  fs.writeFileSync(path.join(root, "plan", "_history.md"), "# History\n");
+  for (const entry of entries) fs.writeFileSync(path.join(root, "plan", entry.where, `${entry.id}.md`), entry.text);
+  fs.writeFileSync(path.join(root, "PLAN.md"), [
+    "# Plan fixture", "", "## Current work order — TEST", "", "Order ID: `TEST`", current, "",
+    ...(next ? ["## Next work order — later", "", "Nothing queued.", ""] : []),
+    "## In flight", "", `- ${inFlight}`, "", "## Index", "", "placeholder", "",
+  ].join("\n"));
+  return root;
+}
+
+function run(root, ...args) {
+  return spawnSync(process.execPath, [linter, "--root", root, ...args], { encoding: "utf8" });
+}
+
+function prepare(root) {
+  const result = run(root, "--write-index", "--structural");
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}
+
+{
+  const root = makeFixture("\n- W1 **2a closure check.**", [{ id: "2a", where: "archive", text: item("2a", { state: "shipped" }).replace("evidence: Operator-authorized fixture scope.", "shipped: v0.1.0 abcdef0\nevidence: Recorded release evidence.") }]);
+  prepare(root);
+  const result = run(root, "--structural");
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}
+
+{
+  const root = makeFixture("\n- W1 **2a proposed work.**", [{ id: "2a", where: "items", text: item("2a", { state: "proposed", unknown: true }) }]);
+  prepare(root);
+  const result = run(root);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /ORDER GATE: executable item 2a is proposed/);
+  assert.match(result.stderr, /unresolved milestone/);
+}
+
+{
+  const root = makeFixture("\n- W1 **2a observed but unapproved work.**", [{ id: "2a", where: "items", text: item("2a").replace("Operator-authorized fixture scope.", "Observed fixture behavior; approval status is ambiguous.") }]);
+  prepare(root);
+  const result = run(root);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /no recorded authorization/);
+}
+
+{
+  const root = makeFixture("\nRequired reading: archived [[2b]] for context only.\n\n- W1 **2a executable work.**", [
+    { id: "2a", where: "items", text: item("2a") },
+    { id: "2b", where: "archive", text: item("2b", { state: "shipped" }).replace("evidence: Operator-authorized fixture scope.", "shipped: v0.1.0 abcdef0\nevidence: Recorded release evidence.") },
+  ]);
+  prepare(root);
+  const result = run(root);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}
+
+{
+  const root = makeFixture("\n- W1 **2a executable work.**", [{ id: "2a", where: "items", text: item("2a") }], { next: false });
+  prepare(root);
+  const result = run(root);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}
+
+{
+  const root = makeFixture("\n- W1 **2ah root cause — DISCOVERY BEFORE FIX.**\n- W2 **2ai prose.**\n- W3 **2aj grant.** Establish the cause before changing behavior.\n- W4 **2ak tab — DISCOVERY FIRST.**\n- W5 **2am lamp — DISCOVERY FIRST.**", [
+    { id: "2ah", where: "items", text: item("2ah", { unresolved: "Establish the render cause." }) },
+    { id: "2ai", where: "items", text: item("2ai") },
+    { id: "2aj", where: "items", text: item("2aj", { unresolved: "Establish the grant key." }) },
+    { id: "2ak", where: "items", text: item("2ak", { unresolved: "Establish current click behavior." }) },
+    { id: "2am", where: "items", text: item("2am", { unresolved: "Establish the negative reachability signal." }) },
+  ]);
+  prepare(root);
+  const result = run(root);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+}
+
+{
+  const root = makeFixture("\nNo product changes.\n\n- W1 Inspect.", []);
+  prepare(root);
+  fs.writeFileSync(path.join(root, "PLAN.md"), fs.readFileSync(path.join(root, "PLAN.md"), "utf8").replace("- TEST/W0 started", "- OTHER/W0 started"));
+  const result = run(root, "--structural");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /belongs to another order/);
+}
+
+{
+  const root = makeFixture("\nNo product changes.\n\n- W1 Inspect.", []);
+  prepare(root);
+  fs.writeFileSync(path.join(root, "PLAN.md"), fs.readFileSync(path.join(root, "PLAN.md"), "utf8").replace("## Index", "## Completed work order — old\n\nClosed.\n\n## Index"));
+  const result = run(root, "--structural");
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /completed-order heading is not allowed/);
+}
+
+process.stdout.write("plan-lint fixtures passed\n");
