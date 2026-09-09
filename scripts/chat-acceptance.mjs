@@ -282,7 +282,10 @@ if (realModel) {
   await mkdir(baselineDirectory, { recursive: true });
   await page.screenshot({ path: join(baselineDirectory, "chat-idle.png") });
   await page.locator(".agent-tab").first().click({ button: "right" });
-  await page.getByRole("button", { name: "New chat…", exact: true }).waitFor({ state: "visible" });
+  await page.locator(".agent-chat-count").waitFor({ state: "visible" });
+  await page.locator(`.agent-chat-row[data-session="${sessionID}"] .agent-chat-open`).waitFor({ state: "visible" });
+  const initialMenuRows = await page.locator(".agent-chat-row").count();
+  assert.match(await page.locator(".agent-chat-count").innerText(), new RegExp(`^${initialMenuRows} chats? · ${initialMenuRows} open · 0 closed$`));
   await page.screenshot({ path: join(baselineDirectory, "tab-menu-open.png") });
   await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
   await page.locator("#console-lifetime").waitFor({ state: "visible" });
@@ -586,6 +589,27 @@ if (realModel) {
   for (const name of (await readdir(join(args.data, "logs"))).filter((item) => item.endsWith(".jsonl"))) {
     await writeFile(join(evidenceLogs, name), await readFile(join(args.data, "logs", name)));
   }
+  await page.goto(`http://127.0.0.1:${appPort}/chat`);
+  await browser.wait(`document.querySelector('.agent-tab')`, "agent tab after close");
+  await page.locator(".agent-tab").first().click({ button: "right" });
+  const closedRow = page.locator(`.agent-chat-row[data-session="${sessionID}"]`);
+  await closedRow.waitFor({ state: "visible" });
+  const finalMenuRows = await page.locator(".agent-chat-row").count();
+  assert.match(await page.locator(".agent-chat-count").innerText(), new RegExp(`^${finalMenuRows} chats? · ${finalMenuRows - 1} open · 1 closed$`));
+  const remove = closedRow.locator(".agent-chat-delete");
+  await remove.click();
+  await remove.filter({ hasText: "delete" }).waitFor({ state: "visible" });
+  assert.match(await closedRow.locator(".agent-chat-summary").innerText(), /Delete permanently\? \d+ events · \d+ files · \d+ memory kept/);
+  const dropMemory = closedRow.locator('.agent-chat-drop-memory input[type="checkbox"]');
+  if (await dropMemory.count()) assert.equal(await dropMemory.isChecked(), false);
+  await page.screenshot({ path: join(evidenceRun, "chat-delete-confirm.png") });
+  await remove.click();
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if (!(await state()).sessions[sessionID]) break;
+    await sleep(50);
+  }
+  assert.equal((await state()).sessions[sessionID], undefined, "confirmed trash control must remove the session registry entry");
+  record("agent-menu-inline-delete-keeps-memory-default");
 }
 
 record(realModel ? "real-model-script-complete" : "fake-model-script-complete");

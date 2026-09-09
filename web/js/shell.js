@@ -172,10 +172,10 @@ export function initShell(options = {}) {
   function renderAgentMenu(menu, agentID) {
     const sessions = sessionsFor(agentID, true);
     menu.replaceChildren();
-    const create = button("New chat…", `New chat with ${agentID}`, "shell-new-choice");
-    create.disabled = store.replay || agentID !== "agent_b" || !(store.config.agents || []).length;
-    create.onclick = () => void showNewChatMenu(menu, agentID);
-    menu.append(create);
+    const openCount = sessions.filter((session) => !session.closed).length;
+    const count = node("div", "agent-chat-count");
+    count.textContent = `${sessions.length} ${sessions.length === 1 ? "chat" : "chats"} · ${openCount} open · ${sessions.length - openCount} closed`;
+    menu.append(count);
     if (!sessions.length) {
       const empty = node("span", "shell-menu-empty");
       empty.textContent = "No chats";
@@ -184,6 +184,7 @@ export function initShell(options = {}) {
     }
     for (const session of sessions) {
       const row = node("div", `agent-chat-row ${session.closed ? "closed" : "open"}`);
+      row.dataset.session = session.id;
       const summary = node("span", "agent-chat-summary");
       summary.textContent = `${chatRowText(session)}${session.closed ? " · closed" : ""}`;
       summary.title = firstUserLine(session);
@@ -192,12 +193,41 @@ export function initShell(options = {}) {
       open.onclick = () => { setSelection(agentID, session.id); menu.hidden = true; };
       const rename = button("Rename", `Rename ${firstUserLine(session)}`, "agent-chat-rename");
       rename.onclick = () => showRename(row, session, menu, agentID);
-      const close = button("Close", `Close ${firstUserLine(session)}`, "agent-chat-close");
+      const close = button("×", `Close ${firstUserLine(session)}`, "agent-chat-close");
       close.disabled = session.closed || store.replay;
       close.onclick = () => void closeChat(session, menu, agentID);
-      row.append(summary, open, rename, close);
+      const remove = button("🗑", `Delete ${firstUserLine(session)} permanently`, "agent-chat-delete");
+      remove.disabled = !session.closed || store.replay;
+      if (!session.closed) remove.title = "Close this chat before deleting it permanently";
+      remove.onclick = () => void armDelete(row, session, menu, agentID, summary, remove);
+      row.append(summary, open, rename, close, remove);
       menu.append(row);
     }
+  }
+
+  async function armDelete(row, session, menu, agentID, summary, remove) {
+    try {
+      const preview = await api(`/api/sessions/${encodeURIComponent(session.id)}/delete`, { confirm: false });
+      const inventory = preview.inventory || {};
+      const writes = inventory.memory_writes || [];
+      summary.textContent = `Delete permanently? ${inventory.events || 0} events · ${inventory.jsonl_files || 0} files · ${writes.length} memory kept`;
+      const dropLabel = node("label", "agent-chat-drop-memory");
+      const dropMemory = document.createElement("input");
+      dropMemory.type = "checkbox";
+      dropLabel.append(dropMemory, " drop memory");
+      remove.textContent = "delete";
+      remove.classList.add("armed");
+      remove.setAttribute("aria-label", `Confirm permanent delete of ${firstUserLine(session)}`);
+      remove.onclick = async () => {
+        try {
+          await api(`/api/sessions/${encodeURIComponent(session.id)}/delete`, { confirm: true, drop_memory: dropMemory.checked });
+          reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
+          menu.hidden = true;
+        } catch (error) { report(error.message); }
+      };
+      row.classList.add("delete-confirm");
+      row.replaceChildren(summary, ...(writes.length ? [dropLabel] : []), remove);
+    } catch (error) { report(error.message); }
   }
 
   function showRename(row, session, menu, agentID) {

@@ -8,7 +8,7 @@ import { renderTimeline } from "./timeline.js";
 import { initSettings } from "./settings.js";
 import { createMessageDropController } from "./message-drop.js";
 import { createApprovalCard } from "./approval.js";
-import { agentKey, closedChats, closedRow, deletePrompt, lifetimeRows, ratio } from "./console-lifetime.js";
+import { agentKey, lifetimeRows, ratio } from "./console-lifetime.js";
 import { renderStopState } from "./stop-state.js";
 
 const requestedSession = new URLSearchParams(location.search).get("session");
@@ -44,7 +44,6 @@ agentSelect.addEventListener("change", () => {
 document.getElementById("clear-stats").addEventListener("click", () => void clearStats());
 document.getElementById("flush-memory").addEventListener("click", () => void flushMemory());
 document.getElementById("console-tools").addEventListener("change", (event) => void toggleTool(event));
-document.getElementById("console-closed").addEventListener("click", (event) => void deleteChat(event));
 document.getElementById("console-tools-link").addEventListener("click", (event) => { event.preventDefault(); document.getElementById("console-tools-panel").scrollIntoView({block:"start"}); });
 consoleStop.addEventListener("click", () => { const id=store.selection.session_id; if(id&&!store.replay) void api("/api/stop",{session_id:id}); });
 
@@ -90,7 +89,6 @@ function renderConsole() {
   document.getElementById("console-agent-binding").textContent = agent ? `b ${agent.b}${agent.c ? ` · c ${agent.c}` : ""}${agent.d ? ` · d ${agent.d}` : ""}` : "No configured agents";
   renderTools(agent);
   renderLifetime();
-  renderClosed();
   const session = store.sessions[store.active];
   const showLive = !!session && session.agent_id === selectedAgent && ["running", "queued", "paused", "stopping"].includes(session.run?.status);
   lifetime.hidden = showLive;
@@ -125,19 +123,6 @@ function renderLifetime() {
   root.replaceChildren(...sections.flatMap(([name, counters]) => [text(name, "console-profile-head"), ...lifetimeRows(counters, percentile).map(([label, value]) => line(label, value))]));
 }
 
-function renderClosed() {
-  const values = closedChats(store.sessions, selectedAgent);
-  document.getElementById("closed-count").textContent = String(values.length);
-  const root = document.getElementById("console-closed");
-  if (!values.length) { root.innerHTML = '<p class="console-empty">No closed chats.</p>'; return; }
-  root.replaceChildren(...values.map((session) => {
-    const row = node("div", "console-line console-closed-line");
-    const summary = text(closedRow(session)); summary.title = summary.textContent;
-    const remove = button("×", `Delete ${session.label || session.id}`); remove.dataset.deleteSession = session.id; remove.disabled = store.replay;
-    row.append(summary, remove); return row;
-  }));
-}
-
 async function toggleTool(event) {
   const name = event.target?.dataset?.tool;
   if (!name || !selectedAgent) return;
@@ -159,20 +144,6 @@ async function flushMemory() {
     if (!window.confirm(`Flush memory for ${selectedAgent} and ${preview.workspace}?\n\n${preview.agent_entries} agent entries and ${preview.workspace_entries} workspace entries will be removed.`)) return;
     await api(`/api/agents/${encodeURIComponent(selectedAgent)}/memory/flush`, { workspace: session.workspace, confirm: true });
     showFeedback(`Memory flushed for ${selectedAgent} and ${preview.workspace}.`); await refreshState();
-  } catch (error) { showError(error.message); }
-}
-
-async function deleteChat(event) {
-  const id = event.target?.dataset?.deleteSession;
-  const session = store.sessions[id];
-  if (!id || !session || store.replay) return;
-  try {
-    const preview = await api(`/api/sessions/${encodeURIComponent(id)}/delete`, { confirm: false });
-    if (!window.confirm(deletePrompt(session, preview.inventory))) return;
-    const writes = preview.inventory.memory_writes || [];
-    const dropMemory = writes.length > 0 && window.confirm(`Also drop these ${writes.length} memory entries?\n\n${writes.map((item) => `• ${item.note}`).join("\n")}`);
-    await api(`/api/sessions/${encodeURIComponent(id)}/delete`, { confirm: true, drop_memory: dropMemory });
-    showFeedback(`Deleted ${preview.inventory.events} events in ${preview.inventory.jsonl_files} files; workspace and exchange files kept.`); await refreshState();
   } catch (error) { showError(error.message); }
 }
 

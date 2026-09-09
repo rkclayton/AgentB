@@ -1,5 +1,3 @@
-import { chatRowText, firstUserLine } from "./chat-lifecycle.js";
-
 export function agentKey(agent) {
   return String(agent?.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 }
@@ -34,18 +32,4 @@ export function lifetimeRows(counters = {}, percentile = () => 0) {
     ["failure attribution model | harness | brief", `${reliability.model_failures || 0} | ${reliability.harness_failures || 0} | ${reliability.brief_failures || 0}`],
     ["rework rate", ratio(reliability.reworked || 0, briefs)], ["silence rate", ratio(reliability.silent || 0, briefs)],
   ];
-}
-
-export function closedChats(sessions = {}, agentID = "") {
-  return Object.values(sessions).filter((session) => session.closed && session.agent_id === agentID)
-    .sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0));
-}
-
-export function deletePrompt(session, inventory) {
-  const notes = inventory.memory_writes || [];
-  return `Delete “${firstUserLine(session)}” permanently?\n\n${inventory.events || 0} events in ${inventory.jsonl_files || 0} JSONL files will be removed. ${notes.length} memory entries are listed separately and kept unless you opt in. Workspace and exchange files are kept.`;
-}
-
-export function closedRow(session) {
-  return chatRowText(session) + " · ×";
 }
