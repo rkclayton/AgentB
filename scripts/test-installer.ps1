@@ -342,41 +342,5 @@ try {
     }
 }
 
-function Get-FreeTcpPort {
-    $listener = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
-    try {
-        $listener.Start()
-        return ([Net.IPEndPoint]$listener.LocalEndpoint).Port
-    } finally { $listener.Stop() }
-}
-
-function Get-AgentBProcessesAtPath {
-    param([string]$Executable)
-    return @(Get-Process -Name 'Agent_b' -ErrorAction SilentlyContinue | Where-Object {
-        try { [IO.Path]::GetFullPath($_.Path).Equals([IO.Path]::GetFullPath($Executable), [StringComparison]::OrdinalIgnoreCase) } catch { $false }
-    })
-}
-
-function Get-FilePrefixHash {
-    param([string]$Path, [long]$Length)
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::ReadWrite)
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try {
-        $buffer = New-Object byte[] 65536
-        $remaining = $Length
-        while ($remaining -gt 0) {
-            $read = $stream.Read($buffer, 0, [Math]::Min($buffer.Length, $remaining))
-            if ($read -le 0) { throw "File became shorter while hashing its prefix: $Path" }
-            $null = $sha.TransformBlock($buffer, 0, $read, $buffer, 0)
-            $remaining -= $read
-        }
-        $null = $sha.TransformFinalBlock([byte[]]::new(0), 0, 0)
-        return ([BitConverter]::ToString($sha.Hash) -replace '-', '')
-    } finally {
-        $sha.Dispose()
-        $stream.Dispose()
-    }
-}
-
 & powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test-chat-acceptance.ps1')
 if ($LASTEXITCODE -ne 0) { throw "Chat acceptance release gate exited $LASTEXITCODE." }

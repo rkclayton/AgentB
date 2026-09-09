@@ -282,6 +282,16 @@ if (-not $TestMode) {
     }
 }
 
+try { $null = [Security.Principal.SecurityIdentifier]::new($OperatorSid) } catch {
+    throw "OperatorSid is not a valid Windows SID: $OperatorSid"
+}
+$preflightConfigPath = Join-Path $dataRoot 'harness.json'
+if (Test-Path -LiteralPath $preflightConfigPath -PathType Leaf) {
+    try { $null = Get-Content -Raw -LiteralPath $preflightConfigPath | ConvertFrom-Json } catch {
+        throw "Existing operator configuration is not valid JSON: $preflightConfigPath ($($_.Exception.Message))"
+    }
+}
+
 $sourceBinary = Join-Path $sourceRoot 'Agent_b.exe'
 $installedBinary = Join-Path $applicationRoot 'Agent_b.exe'
 $go = Find-Go $sourceRoot
