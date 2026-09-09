@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { approvalChoices, approvalText, createApprovalCard, shellGrantApproval } from "./approval.js";
+import { approvalChoices, approvalDecisionText, approvalText, createApprovalCard, shellGrantApproval } from "./approval.js";
 
 test("both approval kinds expose exactly chat, once, and no in order", () => {
   for (const data of [
@@ -28,17 +28,18 @@ test("approval wording stays direct and identifies the operation", () => {
 	assert.equal(policy.detail, "note.txt");
 });
 
-test("replayed superseded and dismissed cards are recorded but never actionable", () => {
+test("every resolved approval is one decided line and never a pending card", () => {
 	const document = {
 		createTextNode: (text) => ({ text }),
 		createElement: (tag) => ({ tag, children: [], className: "", classList: { add() {} }, append(...children) { this.children.push(...children); } }),
 	};
-	for (const decision of ["superseded", "dismissed"]) {
+	for (const decision of ["session", "once", "deny", "superseded", "dismissed"]) {
 		const card = createApprovalCard(document, {
 			decision,
 			event: { data: { call_id: "call", name: "read_file.operator_override", boundary_escape: true, args: { path: "outside.txt" } } },
 		}, { replay: true, decide: () => assert.fail("replay decision invoked") });
-		assert.equal(card.children.some((child) => child.tag === "div"), false);
-		assert.match(card.children.map((child) => child.text || child.textContent || "").join(""), new RegExp(decision));
+		assert.equal(card.className, "approval-decided");
+		assert.equal(card.children.length, 0);
+		assert.match(card.textContent, new RegExp(approvalDecisionText(decision)));
 	}
 });

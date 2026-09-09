@@ -209,6 +209,89 @@ func TestRunScriptRetainsSplitModeConfirmation(t *testing.T) {
 	}
 }
 
+func TestRunScriptSessionGrantCoversLanguageAndSourceOnlyWithinChat(t *testing.T) {
+	cfg := config.Defaults(t.TempDir())
+	cfg.Approval.Mode = config.ApprovalModeBoundaryOnly
+	cfg.Shell.ServiceAccount.Enabled = true
+	bus := events.NewBus()
+	tool := &runScriptPolicyTool{}
+	runner := &Runner{bus: bus, tools: tools.New(tool), cfg: func() config.Config { return cfg }}
+	runner.gate = NewGate(bus, runner.cfg)
+	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"run_script": true}}
+	eventCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	first := make(chan tools.CallOutcome, 1)
+	go func() {
+		first <- runner.executeTool(context.Background(), s, "run-1", "call-1", "run_script", map[string]any{"language": "powershell", "source": "Write-Output first"})
+	}()
+	nextApprovalEvent(t, eventCh)
+	if err := runner.gate.Decide(s.ID, "call-1", "session"); err != nil {
+		t.Fatal(err)
+	}
+	if outcome := <-first; !outcome.OK || tool.calls != 1 {
+		t.Fatalf("first=%+v calls=%d", outcome, tool.calls)
+	}
+	for len(eventCh) > 0 {
+		<-eventCh
+	}
+	second := runner.executeTool(context.Background(), s, "run-2", "call-2", "run_script", map[string]any{"language": "node", "source": "console.log('different')"})
+	if !second.OK || tool.calls != 2 {
+		t.Fatalf("second=%+v calls=%d", second, tool.calls)
+	}
+	assertNoAdditionalApprovalRequired(t, eventCh)
+
+	other := &session.Session{ID: "other", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"run_script": true}}
+	third := make(chan tools.CallOutcome, 1)
+	go func() {
+		third <- runner.executeTool(context.Background(), other, "run-3", "call-3", "run_script", map[string]any{"language": "node", "source": "console.log('new chat')"})
+	}()
+	required := nextApprovalEvent(t, eventCh)
+	if required.SessionID != other.ID {
+		t.Fatalf("new-chat approval session=%q", required.SessionID)
+	}
+	if err := runner.gate.Decide(other.ID, "call-3", "deny"); err != nil {
+		t.Fatal(err)
+	}
+	if outcome := <-third; outcome.OK || tool.calls != 2 {
+		t.Fatalf("denied new-chat outcome=%+v calls=%d", outcome, tool.calls)
+	}
+}
+
+func TestRunScriptOnceStillPromptsNextCallAndDenyStillRefuses(t *testing.T) {
+	cfg := config.Defaults(t.TempDir())
+	cfg.Approval.Mode = config.ApprovalModeBoundaryOnly
+	cfg.Shell.ServiceAccount.Enabled = true
+	bus := events.NewBus()
+	tool := &runScriptPolicyTool{}
+	runner := &Runner{bus: bus, tools: tools.New(tool), cfg: func() config.Config { return cfg }}
+	runner.gate = NewGate(bus, runner.cfg)
+	s := &session.Session{ID: "session", Workspace: t.TempDir(), Run: session.RunState{Status: "running"}, ToolsEnabled: map[string]bool{"run_script": true}}
+	eventCh, unsubscribe := bus.Subscribe()
+	defer unsubscribe()
+	first := make(chan tools.CallOutcome, 1)
+	go func() {
+		first <- runner.executeTool(context.Background(), s, "run", "call-1", "run_script", map[string]any{"language": "powershell", "source": "first"})
+	}()
+	nextApprovalEvent(t, eventCh)
+	if err := runner.gate.Decide(s.ID, "call-1", "once"); err != nil {
+		t.Fatal(err)
+	}
+	if outcome := <-first; !outcome.OK || tool.calls != 1 {
+		t.Fatalf("once outcome=%+v calls=%d", outcome, tool.calls)
+	}
+	second := make(chan tools.CallOutcome, 1)
+	go func() {
+		second <- runner.executeTool(context.Background(), s, "run", "call-2", "run_script", map[string]any{"language": "node", "source": "second"})
+	}()
+	nextApprovalEvent(t, eventCh)
+	if err := runner.gate.Decide(s.ID, "call-2", "deny"); err != nil {
+		t.Fatal(err)
+	}
+	if outcome := <-second; outcome.OK || tool.calls != 1 {
+		t.Fatalf("deny outcome=%+v calls=%d", outcome, tool.calls)
+	}
+}
+
 func TestShellSessionGrantCrossesRunsAndLapsesOnClose(t *testing.T) {
 	cfg := config.Defaults(t.TempDir())
 	cfg.Approval.Mode = config.ApprovalModeMutating

@@ -118,6 +118,12 @@ const fakeHandler = async (request, response) => {
     }
     return stream(response, { content: "Menu stream completed." });
   }
+  if (user.includes("acceptance: run-script grant")) {
+    const count = toolCountAfterLatestUser(body);
+    if (count === 0) return stream(response, { tool_calls: [{ index: 0, id: "grant-script-powershell", type: "function", function: { name: "run_script", arguments: JSON.stringify({ language: "powershell", source: "Write-Output first-granted-script" }) } }] }, "tool_calls");
+    if (count === 1) return stream(response, { tool_calls: [{ index: 0, id: "grant-script-node", type: "function", function: { name: "run_script", arguments: JSON.stringify({ language: "node", source: "console.log('second-granted-script')" }) } }] }, "tool_calls");
+    return stream(response, { content: "RUN SCRIPT SESSION GRANT COMPLETE" });
+  }
   if (user.includes("acceptance: busy")) {
     await new Promise((resolve) => { releaseBusy = resolve; response.on("close", resolve); });
     return stream(response, { content: "Busy model resumed." });
@@ -752,6 +758,39 @@ if (realModel) {
   assert.equal(prefix(requests[0]), prefix(requests.at(-1)));
   assert.ok((await browserText("#chat-log")).includes("acceptance: compaction"));
   record("compaction-keeps-model-prefix-stable");
+
+  await page.locator(".agent-tab-new").click();
+  await page.locator("button.shell-new-choice").filter({ hasText: /^Default ·/ }).click();
+  await browser.wait(`new URLSearchParams(location.search).get('session') && new URLSearchParams(location.search).get('session') !== ${JSON.stringify(sessionID)}`, "isolated grant chat selected");
+  const scriptSessionID = await browser.evaluate(`new URLSearchParams(location.search).get('session')`);
+  events = await sessionEvents(scriptSessionID);
+  const beforeRunScriptGrant = events.at(-1)?.seq || 0;
+  await setTask("acceptance: run-script grant");
+  const scriptApproval = await waitEvent(scriptSessionID, (event) => event.seq > beforeRunScriptGrant && event.type === "approval.required" && event.data?.name === "run_script", "first run_script approval");
+  await page.locator("#chat-pending-approval button").filter({ hasText: /^Yes, for this chat$/ }).click();
+  const firstScriptOverride = await waitEvent(scriptSessionID, (event) => event.seq > scriptApproval.seq && event.type === "approval.required" && event.data?.name === "run_script.operator_override", "first run_script identity override");
+  await page.locator("#chat-pending-approval button").filter({ hasText: /^Just once$/ }).click();
+  const secondScriptOverride = await waitEvent(scriptSessionID, (event) => event.seq > firstScriptOverride.seq && event.type === "approval.required" && event.data?.name === "run_script.operator_override", "second run_script identity override");
+  await page.locator("#chat-pending-approval button").filter({ hasText: /^Just once$/ }).click();
+  await waitProjectedChatText(scriptSessionID, "RUN SCRIPT SESSION GRANT COMPLETE", "two run_script calls under one chat grant");
+  await waitEvent(scriptSessionID, (event) => event.seq > secondScriptOverride.seq && event.type === "run.stopped" && event.data?.reason === "done", "run_script grant scenario stopped");
+  events = await sessionEvents(scriptSessionID);
+  const scriptApprovals = events.filter((event) => event.seq > beforeRunScriptGrant && event.type === "approval.required" && event.data?.name === "run_script");
+  const scriptResults = events.filter((event) => event.seq > beforeRunScriptGrant && event.type === "tool.result" && event.data?.name === "run_script");
+  assert.equal(scriptApprovals.length, 1, JSON.stringify(scriptApprovals.map((event) => event.data)));
+  assert.equal(scriptResults.length, 2, JSON.stringify(scriptResults.map((event) => event.data)));
+  const grantTurn = page.locator(".chat-response").last();
+  const grantTurnSummary = grantTurn.locator(".chat-response-summary");
+  if (await grantTurnSummary.getAttribute("aria-expanded") !== "true") await grantTurnSummary.click();
+  const decidedApproval = grantTurn.locator(".approval-decided").filter({ hasText: /allowed for this chat/ });
+  await decidedApproval.waitFor({ state: "visible" });
+  assert.equal(await decidedApproval.innerText(), "Allow this: allowed for this chat");
+  assert.equal(await grantTurn.locator(".approval-card").count(), 0);
+  assert.equal(await page.locator("#chat-pending-approval").isHidden(), true);
+  assert.ok((await decidedApproval.boundingBox()).height <= 22);
+  record("run-script-one-chat-grant-and-resolved-one-line");
+  await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
+  await browser.wait(`new URLSearchParams(location.search).get('session') === ${JSON.stringify(sessionID)}`, "main acceptance chat restored after grant scenario");
 
   const screenshot = await page.screenshot();
 	await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);

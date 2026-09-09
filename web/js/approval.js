@@ -37,10 +37,31 @@ export function approvalText(data = {}) {
 	};
 }
 
+export function approvalDecisionText(decision) {
+	return ({
+		session: "allowed for this chat",
+		once: "allowed once",
+		approve: "allowed",
+		run: "allowed for this run",
+		operator_mode: "Run as you enabled",
+		deny: "denied",
+		superseded: "superseded",
+		dismissed: "dismissed",
+		continue: "continued",
+		stop: "stopped",
+	})[decision] || String(decision || "decided").replaceAll("_", " ");
+}
+
 export function createApprovalCard(document, entry = {}, options = {}) {
 	const event = entry.event || entry;
 	const data = event.data || {};
 	const wording = approvalText(data);
+	if (entry.decision) {
+		const decided = document.createElement("div");
+		decided.className = "approval-decided";
+		decided.textContent = `${wording.title}: ${approvalDecisionText(entry.decision)}`;
+		return decided;
+	}
 	const content = document.createElement("section");
 	content.className = "approval-card chat-approval";
 	if (data.boundary_escape) content.classList.add("alarm");
@@ -58,11 +79,7 @@ export function createApprovalCard(document, entry = {}, options = {}) {
 	pre.textContent = wording.detail;
 	technical.append(summary, pre);
 	content.append(technical);
-	if (entry.decision) {
-		const decided = document.createElement("span");
-		decided.textContent = entry.decision;
-		content.append(decided);
-	} else if (!options.replay && options.decide) {
+	if (!options.replay && options.decide) {
 		const actions = document.createElement("div");
 		actions.className = "approval-actions";
 		for (const [decision, label] of approvalChoices(data)) {

@@ -71,10 +71,15 @@ func approvalRequired(mode, name string) bool {
 	}
 }
 func (g *Gate) Wait(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) (bool, error) {
+	decision, err := g.WaitDecision(ctx, s, runID, callID, name, args)
+	return approvalGranted(decision), err
+}
+
+func (g *Gate) WaitDecision(ctx context.Context, s *session.Session, runID, callID, name string, args map[string]any) (string, error) {
 	if !g.requiredFor(s, name) {
-		return true, nil
+		return "approve", nil
 	}
-	return g.WaitPolicyRequired(ctx, s, runID, callID, name, args)
+	return g.WaitPolicyDecision(ctx, s, runID, callID, name, args)
 }
 
 // WaitPolicyRequired always pauses for a policy decision, regardless of approval.mode.

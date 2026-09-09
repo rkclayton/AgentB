@@ -66,6 +66,15 @@
 .approval-actions { display: flex; gap: 6px; }
 .approval-actions button { margin-left: 0 !important; }
 .approval-actions button.default { color: var(--ink); }
+.approval-decided {
+  min-width: 0;
+  min-height: 20px;
+  overflow: hidden;
+  color: var(--mute);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 12px/20px var(--mono);
+}
 #chat-status,
 #chat-build,
 #connection {

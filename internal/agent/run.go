@@ -572,12 +572,8 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	}
 	decision := "approve"
 	var gateErr error
-	if name == "run_script" && cfg.Shell.ServiceAccount.Enabled {
-		var approved bool
-		approved, gateErr = r.gate.WaitPolicyRequired(ctx, s, runID, callID, name, eventArgs)
-		if !approved {
-			decision = "deny"
-		}
+	if name == "run_script" && cfg.Shell.ServiceAccount.Enabled && !r.hasPolicyChatGrant(s.ID, name) {
+		decision, gateErr = r.gate.WaitPolicyDecision(ctx, s, runID, callID, name, eventArgs)
 	} else if name == "shell" && r.hasShellGrant(s.ID, runID, shellGrantPolicy, "") {
 		// An operator-approved repository default grants this displayed command
 		// pattern for the run under the already-configured identity.
@@ -588,11 +584,7 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 	} else if r.hasPolicyChatGrant(s.ID, name) {
 		// The operator already allowed this policy-governed action for the chat.
 	} else {
-		var approved bool
-		approved, gateErr = r.gate.Wait(ctx, s, runID, callID, name, eventArgs)
-		if !approved {
-			decision = "deny"
-		}
+		decision, gateErr = r.gate.WaitDecision(ctx, s, runID, callID, name, eventArgs)
 	}
 	if gateErr != nil {
 		return tools.CallOutcome{Content: "error: call canceled"}
