@@ -78,7 +78,7 @@ export function initShell(options = {}) {
 	const selectedAgentID = selected?.agent_id || agentKey(store.config.agents?.[0]);
 	const configured = (store.config.agents || []).find((agent) => agentKey(agent) === selectedAgentID) || store.config.agents?.[0];
 	const profileID = configured?.[agentID.replace("agent_", "")];
-    const profile = store.servers.find((item) => item.id === profileID);
+	const profile = (store.servers || []).find((item) => item.id === profileID);
     return profile?.label || profileID || agentID;
   }
 

@@ -22,7 +22,7 @@ $evidence = if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
 } elseif (-not [string]::IsNullOrWhiteSpace($env:AGENTB_CHAT_ACCEPTANCE_EVIDENCE)) {
     $env:AGENTB_CHAT_ACCEPTANCE_EVIDENCE
 } else {
-    Join-Path $sourceRoot ('logs\evidence\2026-09-08-v0.17.0-playwright\candidate-' + [Guid]::NewGuid().ToString('N'))
+    Join-Path $sourceRoot ('logs\evidence\2026-09-09-v0.18.0-playwright\candidate-' + [Guid]::NewGuid().ToString('N'))
 }
 
 if (Test-Path -LiteralPath $evidence) {

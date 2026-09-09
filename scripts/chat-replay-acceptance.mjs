@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { chromium } from "@playwright/test";
 
 const args = Object.fromEntries(Array.from({ length: Math.floor(process.argv.slice(2).length / 2) }, (_, index) => {
@@ -10,7 +10,8 @@ const args = Object.fromEntries(Array.from({ length: Math.floor(process.argv.sli
   return [process.argv[offset].replace(/^--/, ""), process.argv[offset + 1]];
 }));
 for (const key of ["app", "data", "replay", "evidence"]) assert.ok(args[key], `missing --${key}`);
-await mkdir(args.evidence, { recursive: true });
+await mkdir(dirname(args.evidence), { recursive: true });
+await mkdir(args.evidence);
 const configPath = join(args.data, "harness.json");
 const config = JSON.parse(await readFile(configPath, "utf8"));
 const portProbe = createServer();
@@ -94,6 +95,10 @@ try {
     }).observe(document, { childList: true, subtree: true });
   });
   const page = await context.newPage();
+  const pageErrors = [];
+  const consoleErrors = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
   const replayTimeout = Math.max(30000, recordCount * 25);
   page.setDefaultTimeout(replayTimeout);
   await page.goto(`http://127.0.0.1:${port}/chat?session=main`, { waitUntil: "domcontentloaded" });
@@ -181,7 +186,9 @@ try {
   await page.locator('.agent-tab[data-agent="agent_b"]').waitFor();
   assert.equal(await page.locator('.agent-tab[data-agent="agent_b"]').getAttribute("data-side"), "console");
   await page.screenshot({ path: join(args.evidence, "real-tape-console.png") });
-  process.stdout.write(`${JSON.stringify({
+  assert.deepEqual(pageErrors, []);
+  assert.deepEqual(consoleErrors, []);
+  const report = {
     result: "PASS streaming replay",
     tape: args.replay,
     records: recordCount,
@@ -191,9 +198,13 @@ try {
     projectionPatchesObserved: result.patchEvents,
     chatRenderFailureErrors: result.renderErrors.length,
     mountedRenderFailures: result.mountedRenderFailures,
+    pageErrors,
+    consoleErrors,
     ui,
     cursor: result.cursor,
-  }, null, 2)}\n`);
+  };
+  await writeFile(join(args.evidence, "result.json"), `${JSON.stringify(report, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
 } finally {
   await browser?.close().catch(() => {});
   for (const child of children.reverse()) { try { child.kill(); } catch {} }

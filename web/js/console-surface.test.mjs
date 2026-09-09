@@ -12,7 +12,9 @@ test("Console uses the shared shell without retaining a task composer", () => {
   assert.match(index, /id="app-shell"[^>]+data-page="console"/);
   assert.doesNotMatch(index, /id="(?:composer|task)"/);
   assert.doesNotMatch(script, /getElementById\("(?:composer|task)"\)/);
-  assert.match(shell, /\["chat", "Chat", "\/chat"\]/);
+  assert.doesNotMatch(shell, /\["chat", "Chat", "\/chat"\]|\["console", "Console", "\/"\]/);
+  assert.match(shell, /\["plan", "Plan", "\/plan"\]/);
+  assert.match(shell, /location\.assign\(next === "chat"/);
 });
 
 test("Activity uses the full panel height after composer removal", () => {

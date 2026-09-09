@@ -863,12 +863,6 @@ if (realModel) {
   const evidenceRun = join(args.evidence, `run-${new Date().toISOString().replaceAll(":", "-")}`);
   await mkdir(evidenceRun, { recursive: true });
   await writeFile(join(evidenceRun, "chat-final.png"), screenshot);
-  await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID }, null, 2));
-  const evidenceLogs = join(evidenceRun, "jsonl");
-  await mkdir(evidenceLogs, { recursive: true });
-  for (const name of (await readdir(join(args.data, "logs"))).filter((item) => item.endsWith(".jsonl"))) {
-    await writeFile(join(evidenceLogs, name), await readFile(join(args.data, "logs", name)));
-  }
   await page.goto(`http://127.0.0.1:${appPort}/chat`);
   await browser.wait(`document.querySelector('.agent-tab')`, "agent tab after close");
   await page.locator(".agent-tab").first().click({ button: "right" });
@@ -890,9 +884,16 @@ if (realModel) {
   }
   assert.equal((await state()).sessions[sessionID], undefined, "confirmed trash control must remove the session registry entry");
   record("agent-menu-inline-delete-keeps-memory-default");
+  record("fake-model-script-complete");
+  await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID }, null, 2));
+  const evidenceLogs = join(evidenceRun, "jsonl");
+  await mkdir(evidenceLogs, { recursive: true });
+  for (const name of (await readdir(join(args.data, "logs"))).filter((item) => item.endsWith(".jsonl"))) {
+    await writeFile(join(evidenceLogs, name), await readFile(join(args.data, "logs", name)));
+  }
 }
 
-record(realModel ? "real-model-script-complete" : "fake-model-script-complete");
+if (realModel) record("real-model-script-complete");
 process.stdout.write(`CHAT ACCEPTANCE PASS ${Date.now() - startedAt} ms\n`);
 
 await edgeContext?.close();
