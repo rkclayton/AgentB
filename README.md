@@ -41,7 +41,7 @@ Copy `serve/local.env.example` to the ignored `serve/local.env`, set `MODEL_PATH
 
 Exact context accounting requires llama.cpp's `/tokenize` and `/apply-template` endpoints. This path exposes both, which is why it can provide the real per-category meter along with cached-token, prefill, and generation-rate instrumentation. Prompt 1 produces the machine-local `SERVING.md`; [SERVING.example.md](SERVING.example.md) shows its public-safe Facts shape.
 
-For either path, Node.js is optional and is used only for `node --check` verification of the dependency-free frontend JavaScript. The four IBM Plex WOFF2 files are committed under `web/assets/fonts/`, so building and serving the UI never contacts npm or another font host.
+For either path, Node.js remains optional for building and running Agent_b. Development verification uses it for `node --check`, the dependency-free frontend unit tests, and Playwright acceptance tests. Run `npm ci` on a build or verification machine with Microsoft Edge installed, then `npm run test:ui`; Playwright is configured for the existing `msedge` channel and does not require a browser in the shipped application. Neither Node, Playwright, `node_modules`, nor a browser is installed or distributed by the Agent_b installer. The four IBM Plex WOFF2 files are committed under `web/assets/fonts/`, so building and serving the UI never contacts npm or another font host.
 
 ## Use Agent_b
 

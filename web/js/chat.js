@@ -56,7 +56,11 @@ const thinkingRenderer = createThinkingRenderer({
 });
 const entryViews = new Map();
 const fileStates = new Map();
+const fileViews = new Map();
+const toolViews = new Map();
 let usedEntryViews = new Set();
+let usedFileViews = new Set();
+let usedToolViews = new Set();
 const earlierButton = document.createElement("button");
 earlierButton.type = "button";
 earlierButton.className = "chat-earlier";
@@ -131,6 +135,8 @@ function renderLog(session) {
   const wasBottom = follow;
   thinkingRenderer.begin();
   usedEntryViews = new Set();
+  usedFileViews = new Set();
+  usedToolViews = new Set();
   if (!session) {
     const empty = document.createElement("div");
     empty.className = "chat-empty";
@@ -186,6 +192,8 @@ function finishLogRender(nodes) {
   reconcileChildren(log, nodes);
   thinkingRenderer.end();
   for (const key of entryViews.keys()) if (!usedEntryViews.has(key)) entryViews.delete(key);
+  for (const key of fileViews.keys()) if (!usedFileViews.has(key)) fileViews.delete(key);
+  for (const key of toolViews.keys()) if (!usedToolViews.has(key)) toolViews.delete(key);
 }
 
 function reconcileChildren(parent, nodes) {
@@ -275,23 +283,7 @@ function renderEntry(session, entry) {
     reconcileChildren(content, nodes);
     view.text = entry.text;
   }
-  else if (entry.type === "tool") content.append(toolTick(entry));
-  else {
-    const nodes = [];
-    const tokens = entry.reasoningTokens || Math.ceil(Array.from(entry.reasoning || "").length / 3.6);
-    if (tokens > 0 || !entry.done) nodes.push(thinking(entry, tokens));
-    if (entry.text) {
-      const answer = document.createElement("div");
-      renderMarkdown(answer, entry.text);
-      nodes.push(answer);
-    }
-    if (!entry.done) {
-      const caret = document.createElement("span");
-      caret.className = "stream-caret";
-      nodes.push(caret);
-    }
-    reconcileChildren(content, nodes);
-  }
+  else throw new Error(`unsupported top-level entry type ${String(entry.type || "(missing)")}`);
   return view.row;
 }
 
@@ -329,7 +321,7 @@ function renderResponse(session, entry) {
       chips.className = "file-chips";
       view.chips = chips;
     }
-    chips.replaceChildren(...files.map((file) => renderFileChip(session, file)));
+    reconcileChildren(chips, files.map((file) => renderFileChip(session, file)));
     nodes.push(chips);
   }
   reconcileChildren(view.content, nodes);
@@ -430,6 +422,7 @@ function safeEntryValue(entry, key) {
 
 function renderFileChip(session, file) {
   const key = `${session.id}:${file.path.toLowerCase()}:${file.callID}`;
+  usedFileViews.add(key);
   let state = fileStates.get(key);
   if (!state) {
     state = { state: "checking", bytes: file.bytes };
@@ -439,7 +432,10 @@ function renderFileChip(session, file) {
       schedule();
     });
   }
-  return createFileChip(document, file, state, {
+  const fingerprint = `${state.state}|${state.bytes}|${file.bytes}|${file.path}|${file.callID}|${file.openPath}|${file.openScope}`;
+  let view = fileViews.get(key);
+  if (view?.fingerprint === fingerprint) return view.node;
+  const node = createFileChip(document, file, state, {
     downloadURL: fileURL(session.id, file.path),
     openFolder: async () => {
       try {
@@ -451,6 +447,8 @@ function renderFileChip(session, file) {
       }
     },
   });
+  fileViews.set(key, { node, fingerprint });
+  return node;
 }
 
 function speaker(name) {
@@ -474,31 +472,56 @@ function thinking(entry, tokens) {
 
 function toolTick(entry) {
   if (!entry.args || typeof entry.args !== "object" || Array.isArray(entry.args)) throw new Error("tool arguments are missing or are not an object");
-  const root = document.createElement("div");
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "tool-tick";
-  const open = expanded.has(entry.key);
-  button.setAttribute("aria-expanded", String(open));
-  const state = entry.result && typeof entry.result.ok === "boolean" ? (entry.result.ok ? "ok" : "error") : "";
-  button.innerHTML = '<span class="tool-name"></span><span class="tool-key"></span><span class="tool-state"></span><span class="tool-ms"></span>';
-  button.children[0].textContent = `${open ? "▾" : "▸"} ${entry.name}`;
-  button.children[1].textContent = keyArgument(entry.args);
-  button.children[2].textContent = callServiceStatus(entry.name, entry.result) || state;
-  button.children[2].className = `tool-state ${state === "error" ? "error" : ""}`;
-  button.children[3].textContent = formatDuration(entry.result?.ms);
-  button.onclick = () => {
-    expanded.has(entry.key) ? expanded.delete(entry.key) : expanded.add(entry.key);
-    render();
-  };
-  root.append(button);
-  if (expanded.has(entry.key)) {
+  usedToolViews.add(entry.key);
+  let view = toolViews.get(entry.key);
+  if (!view) {
+    const root = document.createElement("div");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "tool-tick";
+    button.innerHTML = '<span class="tool-name"></span><span class="tool-key"></span><span class="tool-state"></span><span class="tool-ms"></span>';
     const pre = document.createElement("pre");
     pre.className = "tool-detail";
-    pre.textContent = `arguments\n${JSON.stringify(entry.args, null, 2)}\n\nresult\n${capResult(entry.content)}`;
-    root.append(pre);
+    const collapse = document.createElement("button");
+    collapse.type = "button";
+    collapse.className = "collapse-arrow";
+    collapse.textContent = "↑";
+    collapse.setAttribute("aria-label", `Collapse ${entry.name} tool`);
+    collapse.onclick = () => { expanded.delete(entry.key); render(); };
+    button.onclick = () => {
+      expanded.has(entry.key) ? expanded.delete(entry.key) : expanded.add(entry.key);
+      render();
+    };
+    root.append(button);
+    view = { root, button, pre, collapse, args: null, result: null, content: null };
+    toolViews.set(entry.key, view);
   }
-  return root;
+  const open = expanded.has(entry.key);
+  view.button.setAttribute("aria-expanded", String(open));
+  const state = entry.result && typeof entry.result.ok === "boolean" ? (entry.result.ok ? "ok" : "error") : "";
+  setText(view.button.children[0], `${open ? "▾" : "▸"} ${entry.name}`);
+  setText(view.button.children[1], keyArgument(entry.args));
+  setText(view.button.children[2], callServiceStatus(entry.name, entry.result) || state);
+  view.button.children[2].className = `tool-state ${state === "error" ? "error" : ""}`;
+  setText(view.button.children[3], formatDuration(entry.result?.ms));
+  if (open) {
+    if (view.args !== entry.args || view.result !== entry.result || view.content !== entry.content) {
+      view.pre.textContent = `arguments\n${JSON.stringify(entry.args, null, 2)}\n\nresult\n${capResult(entry.content)}`;
+    }
+    if (!view.collapse.isConnected) view.root.append(view.collapse);
+    if (!view.pre.isConnected) view.root.append(view.pre);
+  } else if (view.pre.isConnected) {
+    view.pre.remove();
+    view.collapse.remove();
+  }
+  view.args = entry.args;
+  view.result = entry.result;
+  view.content = entry.content;
+  return view.root;
+}
+
+function setText(node, value) {
+  if (node.textContent !== value) node.textContent = value;
 }
 
 function formatThoughtSeconds(milliseconds) {

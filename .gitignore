@@ -57,3 +57,8 @@ sandbox/*
 *.exe
 # Windows runtime libraries are local serving artifacts.
 *.dll
+# Playwright is a development-only verification dependency. Neither its install tree nor
+# transient reports are distributed with Agent_b.
+node_modules/
+playwright-report/
+test-results/

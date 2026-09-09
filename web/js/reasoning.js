@@ -44,8 +44,14 @@ function createView(document, key, expanded, rerender) {
   };
   const body = document.createElement("pre");
   body.className = "thinking-body";
-  root.append(button, body);
-  return { root, button, caret, active, dots, summary, body };
+  const collapse = document.createElement("button");
+  collapse.type = "button";
+  collapse.className = "collapse-arrow";
+  collapse.textContent = "↑";
+  collapse.setAttribute("aria-label", "Collapse thought");
+  collapse.onclick = () => { expanded.delete(key); rerender(); };
+  root.append(button, collapse, body);
+  return { root, button, caret, active, dots, summary, body, collapse };
 }
 
 function updateView(view, entry, tokens, options) {
@@ -60,7 +66,9 @@ function updateView(view, entry, tokens, options) {
     view.summary.textContent = `Thought ${entry.thinkingEstimated && duration ? "~" : ""}${duration || "—"} seconds (${entry.reasoningTokensEstimated || entry.thinkingEstimated ? "~" : ""}${options.format(tokens)} tokens)`;
   }
   view.body.hidden = !open;
-  view.body.textContent = entry.reasoning || (entry.done
+  view.collapse.hidden = !open;
+  const body = entry.reasoning || (entry.done
     ? "Reasoning text is unavailable in this recording."
     : "Waiting for reasoning text…");
+  if (view.body.textContent !== body) view.body.textContent = body;
 }

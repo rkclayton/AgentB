@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
+import { chromium } from "playwright";
 
 const args = Object.fromEntries(Array.from({ length: Math.floor(process.argv.slice(2).length / 2) }, (_, index) => {
   const offset = index * 2 + 2;
@@ -15,6 +15,8 @@ const startedAt = Date.now();
 const scenarios = [];
 const children = [];
 let browser;
+let edgeContext;
+let page;
 let app;
 let model;
 let modelPort;
@@ -50,13 +52,18 @@ const hasToolAfterLatestUser = (body) => {
   const index = messages.findLastIndex((message) => message.role === "user");
   return messages.slice(index + 1).some((message) => message.role === "tool");
 };
+const toolCountAfterLatestUser = (body) => {
+  const messages = body.messages || [];
+  const index = messages.findLastIndex((message) => message.role === "user");
+  return messages.slice(index + 1).filter((message) => message.role === "tool").length;
+};
 const fakeHandler = async (request, response) => {
   if (request.url === "/arm-slow-accounting") {
     slowAccountingArmed = true;
     slowAccountingSkips = 1;
     return void response.end(JSON.stringify({ armed: true }));
   }
-  if (request.url === "/props") return void response.end(JSON.stringify({ server: "agentb-fake", n_ctx: 8192 }));
+  if (request.url === "/props") return void response.end(JSON.stringify({ server: "agentb-fake", n_ctx: 32768 }));
   if (request.url === "/v1/models") return void response.end(JSON.stringify({ data: [{ id: "agentb-fake" }] }));
   let raw = "";
   for await (const chunk of request) raw += chunk;
@@ -94,6 +101,15 @@ const fakeHandler = async (request, response) => {
   if (user.includes("acceptance: queue leader")) {
     await new Promise((resolve) => { releaseQueue = resolve; response.on("close", resolve); });
     return stream(response, { content: "Queue leader completed." });
+  }
+  if (user.includes("acceptance: menu stream")) {
+    const count = toolCountAfterLatestUser(body);
+    await sleep(100);
+    if (count < 8) {
+      const path = count < 2 ? "long-tool.txt" : "AGENTS.md";
+      return stream(response, { tool_calls: [{ index: 0, id: `menu-stream-${count}`, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path }) } }] }, "tool_calls");
+    }
+    return stream(response, { content: "Menu stream completed." });
   }
   if (user.includes("acceptance: busy")) {
     await new Promise((resolve) => { releaseBusy = resolve; response.on("close", resolve); });
@@ -149,47 +165,16 @@ const waitFileContains = async (path, text, timeout = 12000) => {
 	throw new Error(`file timeout: ${path} did not contain ${text}`);
 };
 
-class CDP {
-  constructor(url) {
-    this.id = 0;
-    this.pending = new Map();
-    this.ws = new WebSocket(url);
-    this.ready = new Promise((resolve, reject) => { this.ws.onopen = resolve; this.ws.onerror = reject; });
-    this.ws.onmessage = ({ data }) => {
-      const message = JSON.parse(data);
-      if (!message.id) return;
-      const pending = this.pending.get(message.id);
-      if (!pending) return;
-      this.pending.delete(message.id);
-      if (message.error) pending.reject(new Error(JSON.stringify(message.error)));
-      else pending.resolve(message.result);
-    };
-  }
-  async call(method, params = {}) {
-    await this.ready;
-    const id = ++this.id;
-    const result = new Promise((resolve, reject) => this.pending.set(id, { resolve, reject }));
-    this.ws.send(JSON.stringify({ id, method, params }));
-    return result;
-  }
-  async evaluate(expression) {
-    const result = await this.call("Runtime.evaluate", { expression, awaitPromise: true, returnByValue: true });
-    if (result.exceptionDetails) throw new Error(`${result.exceptionDetails.text || "browser evaluation failed"}: ${result.exceptionDetails.exception?.description || expression}`);
-    return result.result.value;
-  }
-  async wait(expression, label, timeout = 12000) {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      if (await this.evaluate(`Boolean(${expression})`)) return;
-      await sleep(50);
-    }
-    throw new Error(`screen timeout: ${label}`);
-  }
-}
-
 const browserText = async (selector) => browser.evaluate(`document.querySelector(${JSON.stringify(selector)})?.innerText || ""`);
-const setTask = async (text) => browser.evaluate(`(() => { const input=document.querySelector('#chat-task'); input.value=${JSON.stringify(text)}; input.dispatchEvent(new Event('input',{bubbles:true})); document.querySelector('#chat-send').click(); return true; })()`);
-const clickText = async (selector, text) => browser.evaluate(`(() => { const button=[...document.querySelectorAll(${JSON.stringify(selector)})].find(node => node.textContent.trim()===${JSON.stringify(text)}); if(!button)return false; button.click(); return true; })()`);
+const setTask = async (text) => {
+  await page.locator("#chat-task").fill(text);
+  await page.locator("#chat-send").click();
+};
+const clickText = async (selector, text) => {
+  const exact = new RegExp(`^${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+  await page.locator(selector).filter({ hasText: exact }).click();
+  return true;
+};
 const state = () => json(`http://127.0.0.1:${appPort}/api/state`);
 const sessionEvents = async (sessionID) => {
   const files = (await readdir(join(args.data, "logs"))).filter((name) => name.endsWith(".jsonl"));
@@ -214,7 +199,6 @@ const waitEvent = async (sessionID, predicate, label, timeout = 12000) => {
 };
 
 const appPort = await freePort();
-const browserPort = await freePort();
 const gitPath = spawnSync("where.exe", ["git.exe"], { encoding: "utf8" }).stdout.split(/\r?\n/).find(Boolean);
 assert.ok(gitPath, "Git is required for the Run as you acceptance scenario");
 const bound = join(args.workspace, "..", "acceptance-bound");
@@ -225,6 +209,7 @@ await writeFile(attachment, "attachment acceptance bytes\n");
 await mkdir(join(args.data, "attachments"), { recursive: true });
 await writeFile(join(args.data, "attachments", "phone-note.txt"), "operator attachment bytes\n");
 await writeFile(join(bound, "AGENTS.md"), "Use the acceptance rules.\n");
+await writeFile(join(bound, "long-tool.txt"), Array.from({ length: 100 }, (_, index) => `tool detail line ${index + 1}`).join("\n"));
 if (!realModel) await startFake();
 const profileURL = realModel ? args["real-model-url"] : `http://127.0.0.1:${modelPort}`;
 const profileName = realModel ? args["real-model-name"] : "agentb-fake";
@@ -233,8 +218,8 @@ const config = {
   config_version: 6, listen: `127.0.0.1:${appPort}`, workspace: args.workspace, log_dir: join(args.data, "logs"),
   servers: [{ id: "acceptance", label: "Acceptance", base_url: profileURL, model: profileName, credential: "", request_timeout_s: 3, probe_mode: "off",
     sampling: { thinking: { temperature: .6, top_p: .95, top_k: 20, min_p: 0, presence_penalty: 0, repeat_penalty: 1 }, nonthinking: { temperature: .7, top_p: .8, top_k: 20, min_p: 0, presence_penalty: 0, repeat_penalty: 1 } },
-    reasoning: { control: "auto", enabled: false, effort: "medium", valid_efforts: [], preserve: false }, context: { n_ctx: 8192, reserve_output: 1024 }, system_prompt_override: "",
-    capabilities: { server: "agentb-fake", props: true, n_ctx: 8192, tokenize: true, apply_template: true, apply_template_tools: true, streaming: true, tool_calls: true, grammar_constrained: false, cached_tokens: true, timings: false, prompt_progress: false, document_input: false, image_input: false, reasoning_control: "", valid_efforts: [], overflow_behavior: "error", probed_at: new Date().toISOString(), findings: ["acceptance fake"] } }],
+    reasoning: { control: "auto", enabled: false, effort: "medium", valid_efforts: [], preserve: false }, context: { n_ctx: 32768, reserve_output: 10240 }, system_prompt_override: "",
+    capabilities: { server: "agentb-fake", props: true, n_ctx: 32768, tokenize: true, apply_template: true, apply_template_tools: true, streaming: true, tool_calls: true, grammar_constrained: false, cached_tokens: true, timings: false, prompt_progress: false, document_input: false, image_input: false, reasoning_control: "", valid_efforts: [], overflow_behavior: "error", probed_at: new Date().toISOString(), findings: ["acceptance fake"] } }],
   services: {}, agents: [{ name: "Acceptance", b: "acceptance", toolset }], chat: { auto_rename: false },
   run: { max_turns: 12, cycle_window: 8, max_consecutive_tool_errors: 3, max_concurrent: 2, queue_depth: 0 }, approval: { mode: "boundary-only" },
   deliver: { mode: "chips", exchange_folder: join(args.workspace, "exchange") }, context: { soft_pct: .75, summary_pct: .85, accounting: "auto" }, memory: { enabled: false, dir: join(args.data, "memory"), max_tokens: 1500 },
@@ -254,19 +239,25 @@ assert.equal(loadedConfig.shell?.service_account?.enabled, true, "disposable ins
 assert.equal(loadedConfig.servers?.[0]?.request_timeout_s, 3, "slow-accounting fixture needs a three-second request timeout");
 assert.equal(loadedConfig.servers?.[0]?.capabilities?.tokenize, true, "slow-accounting fixture needs exact tokenization");
 assert.equal(loadedConfig.context?.accounting, "auto", "slow-accounting fixture needs automatic exact accounting");
-const edge = process.env["ProgramFiles(x86)"] ? join(process.env["ProgramFiles(x86)"], "Microsoft", "Edge", "Application", "msedge.exe") : "msedge.exe";
-const browserData = await mkdtemp(join(tmpdir(), "agentb-edge-"));
-const edgeProcess = spawn(edge, ["--headless=new", `--remote-debugging-port=${browserPort}`, `--user-data-dir=${browserData}`, "--no-first-run", "--disable-extensions", `--app=http://127.0.0.1:${appPort}/chat`], { windowsHide: true, stdio: "ignore" });
-children.push(edgeProcess);
-let target;
-for (let attempt = 0; attempt < 200; attempt++) {
-  try { target = (await json(`http://127.0.0.1:${browserPort}/json/list`)).find((item) => item.type === "page"); if (target) break; } catch {}
-  await sleep(50);
-}
-assert.ok(target?.webSocketDebuggerUrl, "Edge DevTools target did not appear");
-browser = new CDP(target.webSocketDebuggerUrl);
-await browser.call("Runtime.enable");
-await browser.call("Page.enable");
+edgeContext = await chromium.launchPersistentContext("", {
+  channel: "msedge",
+  headless: false,
+  viewport: { width: 1250, height: 975 },
+  args: [`--app=http://127.0.0.1:${appPort}/chat`, "--window-size=1250,975"],
+});
+page = edgeContext.pages()[0] || await edgeContext.newPage();
+browser = {
+  evaluate: (expression) => page.evaluate(expression),
+  wait: async (expression, label, timeout = 12000) => {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline) {
+      if (await page.evaluate(`Boolean(${expression})`)) return;
+      await sleep(50);
+    }
+    throw new Error(`screen timeout: ${label}`);
+  },
+};
+await page.goto(`http://127.0.0.1:${appPort}/chat`);
 await browser.wait(`document.querySelector('#chat-task')`, "Chat opened");
 await browser.wait(`document.querySelector('.agent-tab')`, "Agent tab rendered");
 record("open-chat");
@@ -276,23 +267,91 @@ if (realModel) {
   await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('REAL MODEL ACCEPTANCE OK')`, "real model answer", 120000);
   record("real-model-answer");
 } else {
-  let selectedWorkspace = false;
-  for (let attempt = 0; attempt < 20 && !selectedWorkspace; attempt++) {
-    await browser.evaluate(`(() => { const tab=document.querySelector('.agent-tab'); if(!tab)return false; tab.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true})); const button=[...document.querySelectorAll('button.shell-new-choice')].find(item=>item.textContent.trim()==='New chat…'&&!item.disabled); if(!button)return false; button.click(); return true; })()`);
-    for (let poll = 0; poll < 10 && !selectedWorkspace; poll++) {
-      await sleep(50);
-      selectedWorkspace = await browser.evaluate(`(() => { const button=[...document.querySelectorAll('button.shell-new-choice')].find(item=>item.textContent.startsWith('Default ·')&&!item.disabled); if(!button)return false; button.click(); return true; })()`);
-    }
-  }
-  assert.equal(selectedWorkspace, true, "new-chat workspace choice did not remain mounted");
-  record("agent-tab-context-menu");
+  await page.locator(".agent-tab").first().click({ button: "right" });
+  await page.getByRole("button", { name: "New chat…", exact: true }).click();
+  await page.locator("button.shell-new-choice").filter({ hasText: /^Default ·/ }).click();
   let snapshot;
   await browser.wait(`new URLSearchParams(location.search).get('session')?.startsWith('s')`, "new session selected");
+  record("agent-tab-context-menu-idle");
   snapshot = await state();
   const sessionID = await browser.evaluate(`new URLSearchParams(location.search).get('session')`);
   const session = snapshot.sessions[sessionID];
   assert.equal(session?.id, sessionID, "selected new chat must exist in the server snapshot");
   record("new-chat");
+
+  const baselineDirectory = join(args.evidence, "baseline-initial");
+  await mkdir(baselineDirectory, { recursive: true });
+  await page.screenshot({ path: join(baselineDirectory, "chat-idle.png") });
+  await page.locator(".agent-tab").first().click({ button: "right" });
+  await page.getByRole("button", { name: "New chat…", exact: true }).waitFor({ state: "visible" });
+  await page.screenshot({ path: join(baselineDirectory, "tab-menu-open.png") });
+  await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
+  await page.locator("#console-lifetime").waitFor({ state: "visible" });
+  await page.screenshot({ path: join(baselineDirectory, "console.png") });
+  await page.locator(".shell-settings").click();
+  await page.locator("#settings-page").waitFor({ state: "visible" });
+  await page.screenshot({ path: join(baselineDirectory, "settings.png") });
+  await page.goto(`http://127.0.0.1:${appPort}/plan?session=${sessionID}`);
+  await page.locator('#app-shell[data-page="plan"]').waitFor({ state: "visible" });
+  await page.screenshot({ path: join(baselineDirectory, "plan.png") });
+  await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
+  await page.locator("#chat-task").waitFor({ state: "visible" });
+
+  await page.locator("#chat-task").fill("acceptance: menu stream");
+  await page.locator("#chat-send").click();
+  const lifecycleRunStarted = await waitEvent(sessionID, (event) => event.type === "run.started", "tool-tick lifecycle run started");
+  await page.locator("button.tool-tick").first().waitFor({ state: "visible" });
+  const toolButton = page.locator("button.tool-tick").first();
+  await toolButton.waitFor({ state: "visible" });
+  await toolButton.hover();
+  const toolButtonHandle = await toolButton.elementHandle();
+  assert.ok(toolButtonHandle, "tool-tick must have an actionable node");
+  assert.equal(await toolButtonHandle.evaluate((node) => node.matches(":hover")), true, "tool-tick must be hovered before the event stream advances");
+  await page.waitForTimeout(250);
+  const toolButtonAfterBeat = await toolButtonHandle.evaluate((node) => ({ attached: node.isConnected, hovered: node.matches(":hover") }));
+  assert.equal(toolButtonAfterBeat.attached, true, "tool-tick node changed during the active event stream");
+  assert.equal(toolButtonAfterBeat.hovered, true, "tool-tick lost :hover during the active event stream");
+  await toolButtonHandle.click();
+  assert.equal(await toolButtonHandle.getAttribute("aria-expanded"), "true", "tool-tick did not expand from a trusted mid-stream click");
+  const toolRoot = page.locator("button.tool-tick").first().locator("..");
+  const collapseArrow = toolRoot.locator("button.collapse-arrow");
+  await collapseArrow.waitFor({ state: "visible" });
+  await page.screenshot({ path: join(baselineDirectory, "chat-mid-run.png") });
+  await toolRoot.evaluate((root) => { root.style.minHeight = "1200px"; });
+  await page.evaluate(() => {
+    const spacer = document.createElement("div");
+    spacer.dataset.acceptanceSpacer = "collapse-arrow";
+    spacer.style.height = "1200px";
+    document.querySelector("#chat-log")?.append(spacer);
+  });
+  const arrowBeforeScroll = await collapseArrow.boundingBox();
+  assert.ok(arrowBeforeScroll, "collapse arrow must have a visible box after expansion");
+  await page.mouse.wheel(0, 400);
+  await page.waitForTimeout(50);
+  const arrowPinned = await collapseArrow.boundingBox();
+  await page.mouse.wheel(0, 200);
+  await page.waitForTimeout(50);
+  const arrowDuringScroll = await collapseArrow.boundingBox();
+  const arrowTrackingState = await collapseArrow.evaluate((node) => {
+    const log = document.querySelector("#chat-log");
+    const section = node.parentElement;
+    const style = getComputedStyle(node);
+    return { scrollTop: log?.scrollTop, log: log?.getBoundingClientRect().toJSON(), section: section?.getBoundingClientRect().toJSON(), position: style.position, top: style.top, float: style.cssFloat };
+  });
+  assert.ok(arrowPinned && arrowDuringScroll && Math.abs(arrowDuringScroll.y - arrowPinned.y) < 8, `collapse arrow must track while its section remains on screen: ${JSON.stringify({ arrowBeforeScroll, arrowPinned, arrowDuringScroll, arrowTrackingState })}`);
+  await page.mouse.wheel(0, 5000);
+  await page.waitForTimeout(50);
+  const arrowAfterSection = await collapseArrow.boundingBox();
+  assert.ok(!arrowAfterSection || arrowAfterSection.y < 0 || arrowAfterSection.y > 975, "collapse arrow must leave the viewport with its section");
+  await page.evaluate(() => document.querySelector('[data-acceptance-spacer="collapse-arrow"]')?.remove());
+  await toolRoot.evaluate((root) => { root.style.minHeight = ""; });
+  await toolButton.scrollIntoViewIfNeeded();
+  await collapseArrow.click();
+  assert.equal(await toolButtonHandle.getAttribute("aria-expanded"), "false", "collapse arrow must collapse its own tool section");
+  await collapseArrow.waitFor({ state: "hidden" });
+  record("tool-tick-node-lifecycle-active-run");
+  await page.locator("#chat-stop").click();
+  await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > lifecycleRunStarted.seq, "tool-tick lifecycle run stopped");
 
   const missingArgsFixture = await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
@@ -353,7 +412,7 @@ if (realModel) {
   assert.equal(await clickText(".workspace-bind-card button", "Yes"), true);
   await waitEvent(sessionID, (event) => event.type === "workspace.bound", "workspace.bound");
   await waitEvent(sessionID, (event) => event.type === "approval.required", "approval.required");
-  await browser.call("Page.reload", { ignoreCache: true });
+  await page.reload();
   await browser.wait(`performance.getEntriesByType('navigation')[0]?.type==='reload' && document.querySelector('#chat-task')`, "pending approval refresh");
   await waitFileContains(join(args.data, "OUTBOX.md"), "needs you: approval is waiting");
   record("outbox-line-on-pause");
@@ -367,9 +426,9 @@ if (realModel) {
   assert.match(gutter, /^90px$/);
   record("bind-run-as-you-tool-answer-gutter");
 
-  await browser.call("Page.navigate", { url: `http://127.0.0.1:${appPort}/?session=${sessionID}` });
+  await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
   await browser.wait(`location.pathname==='/' && document.querySelector('#settings-page') && document.querySelector('.shell-settings')?.getAttribute('href')`, "Console settings control");
-  await browser.evaluate(`(() => { document.querySelector('.shell-settings').click(); return true; })()`);
+  await page.locator(".shell-settings").click();
   await browser.wait(`!document.querySelector('#settings-page').hidden`, "Settings open");
   assert.equal(await clickText(".settings-nav button", "Workspace"), true);
   await browser.wait(`!document.querySelector('#settings-page').hidden && document.querySelector('.settings-content')?.innerText.includes('Adopt repository instructions')`, "operator-file Workspace settings");
@@ -381,7 +440,7 @@ if (realModel) {
   await waitFileContains(join(bound, "AGENT_B.md"), "Use the acceptance rules.");
   assert.equal(await readFile(join(bound, "AGENTS.md"), "utf8"), "Use the acceptance rules.\n");
   record("workspace-operator-files-and-adopt");
-	await browser.call("Page.navigate", { url: `http://127.0.0.1:${appPort}/chat?session=${sessionID}` });
+	await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
 	await browser.wait(`document.querySelector('#chat-task')`, "chat restored after settings");
 	events = await sessionEvents(sessionID);
 	const beforeUIError = events.at(-1)?.seq || 0;
@@ -392,10 +451,10 @@ if (realModel) {
   await setTask("acceptance: stop");
   await browser.wait(`!document.querySelector('#chat-stop').disabled`, "stop enabled");
   const stopStart = Date.now();
-  await browser.evaluate(`(() => { document.querySelector('#chat-stop').click(); return true; })()`);
+  await page.locator("#chat-stop").click();
   await browser.wait(`document.querySelector('#chat-stop').disabled`, "stop completed", 1000);
   assert.ok(Date.now() - stopStart < 1000, `Stop took ${Date.now() - stopStart} ms`);
-  await waitEvent(sessionID, (event) => event.type === "run.stopped" && ["safe", "emergency", "user_stop"].includes(event.data.reason), "stopped run");
+  await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.data.reason === "aborted_mid_model", "stopped run");
   record("stop-under-one-second");
 
 	events = await sessionEvents(sessionID);
@@ -421,7 +480,8 @@ if (realModel) {
   assert.ok(queueUsers.indexOf("acceptance: queue leader") < queueUsers.indexOf("acceptance: queued follower"));
   record("active-run-queue-fifo");
 
-  await browser.evaluate(`(() => { document.querySelector('#chat-attach').click(); document.querySelector('#chat-attach-exchange').click(); return true; })()`);
+  await page.locator("#chat-attach").click();
+  await page.locator("#chat-attach-exchange").click();
   await browser.wait(`[...document.querySelectorAll('#chat-exchange-files button')].some(item=>item.innerText.includes('phone-note.txt'))`, "operator attachment listed");
   assert.equal(await clickText("#chat-exchange-files button", "phone-note.txt · 26 B"), true);
   await browser.wait(`document.querySelector('.chat-pending-file')`, "pending attachment");
@@ -432,7 +492,7 @@ if (realModel) {
   record("attachment-screen-jsonl");
 
   const beforeReload = (await browserText("#chat-log")).slice(0, 120);
-  await browser.call("Page.reload", { ignoreCache: true });
+  await page.reload();
   await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Attachment received and rendered.')`, "chat reopen");
   assert.equal((await browserText("#chat-log")).slice(0, 120), beforeReload);
   record("chat-reopen-preserves-screen-and-jsonl");
@@ -458,7 +518,7 @@ if (realModel) {
   await setTask("acceptance: recovered");
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('queued (1)')`, "recovery queued");
   await startFake(modelPort);
-  await browser.evaluate(`(() => { document.querySelector('#chat-retry-model').click(); return true; })()`);
+  await page.locator("#chat-retry-model").click();
   await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('Recovered after Retry.')`, "Retry recovery", 20000);
   await waitEvent(sessionID, (event) => event.type === "model.reachable", "model.reachable");
   record("model-unreachable-retry-release");
@@ -474,25 +534,26 @@ if (realModel) {
   await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > busyEvent.seq, "busy run stopped");
   record("model-busy-waits-without-stop");
 
+  const beforeCompactionSequence = (await sessionEvents(sessionID)).at(-1)?.seq || 0;
   for (let index = 0; index < 12; index++) {
     events = await sessionEvents(sessionID);
     const beforeSequence = events.at(-1)?.seq || 0;
-    await setTask(`acceptance: compaction ${index} ${"payload ".repeat(300)}`);
+    await setTask(`acceptance: compaction ${index} ${"payload ".repeat(1200)}`);
     await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > beforeSequence, `compaction run ${index}`, 20000);
   }
   const compaction = await waitEvent(sessionID, (event) => event.type === "compaction", "compaction", 20000);
   assert.ok(compaction.data.before > compaction.data.after);
   events = await sessionEvents(sessionID);
-  const requests = events.filter((event) => event.type === "model.request" && event.body);
+  const requests = events.filter((event) => event.type === "model.request" && event.body && event.seq > beforeCompactionSequence);
   const prefix = (event) => JSON.stringify({ system: event.body.messages?.[0], tools: event.body.tools });
   assert.equal(prefix(requests[0]), prefix(requests.at(-1)));
   assert.ok((await browserText("#chat-log")).includes("acceptance: compaction"));
   record("compaction-keeps-model-prefix-stable");
 
-  const screenshot = await browser.call("Page.captureScreenshot", { format: "png", captureBeyondViewport: false });
-	await browser.call("Page.navigate", { url: `http://127.0.0.1:${appPort}/?session=${sessionID}` });
+  const screenshot = await page.screenshot();
+	await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
 	await browser.wait(`location.pathname==='/' && document.querySelector('#settings-page') && document.querySelector('.shell-settings')?.getAttribute('href')`, "Console settings control before Empty");
-	await browser.evaluate(`(() => { document.querySelector('.shell-settings').click(); return true; })()`);
+	await page.locator(".shell-settings").click();
 	await browser.wait(`document.querySelector('#settings-page') && !document.querySelector('#settings-page').hidden`, "Settings open before Empty");
 	assert.equal(await clickText(".settings-nav button", "Workspace"), true);
 	await browser.wait(`!document.querySelector('#settings-page').hidden && [...document.querySelectorAll('.settings-content button')].some(item=>item.textContent.trim()==='Empty')`, "attachments Empty action");
@@ -504,7 +565,7 @@ if (realModel) {
 	}
 	assert.deepEqual(await readdir(join(args.data, "attachments")), []);
 	record("settings-confirmed-empty-attachments");
-	await browser.call("Page.navigate", { url: `http://127.0.0.1:${appPort}/chat?session=${sessionID}` });
+	await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
 	await browser.wait(`document.querySelector('#chat-task')`, "chat restored after empty attachments");
 	const finalState = await state();
 	await json(`http://127.0.0.1:${appPort}/api/sessions/${sessionID}`, { method: "DELETE", headers: { "X-AgentB-Mutation-Token": finalState.mutation_token } });
@@ -516,7 +577,7 @@ if (realModel) {
 	record("chat-close-markdown-export");
   const evidenceRun = join(args.evidence, `run-${new Date().toISOString().replaceAll(":", "-")}`);
   await mkdir(evidenceRun, { recursive: true });
-  await writeFile(join(evidenceRun, "chat-final.png"), Buffer.from(screenshot.data, "base64"));
+  await writeFile(join(evidenceRun, "chat-final.png"), screenshot);
   await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID }, null, 2));
   const evidenceLogs = join(evidenceRun, "jsonl");
   await mkdir(evidenceLogs, { recursive: true });
@@ -528,7 +589,7 @@ if (realModel) {
 record(realModel ? "real-model-script-complete" : "fake-model-script-complete");
 process.stdout.write(`CHAT ACCEPTANCE PASS ${Date.now() - startedAt} ms\n`);
 
-try { browser?.ws?.close(); } catch {}
+await edgeContext?.close();
 terminateChildren();
 await Promise.all(children.map((child) => waitForChildExit(child)));
 await stopFake();

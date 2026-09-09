@@ -39,14 +39,17 @@ test("thinking renderer preserves its DOM and never opens to an empty body", () 
   const first = renderer.render(active, 0);
   renderer.end();
   const firstDots = first.children[0].children[1].children[0];
-  assert.equal(first.children[1].textContent, "Waiting for reasoning text…");
+  const body = first.children.find((child) => child.className === "thinking-body");
+  const collapse = first.children.find((child) => child.className === "collapse-arrow");
+  assert.equal(body.textContent, "Waiting for reasoning text…");
+  assert.equal(collapse.hidden, false);
 
   renderer.begin();
   const second = renderer.render({ ...active, reasoning: "streamed thought" }, 4);
   renderer.end();
   assert.equal(second, first);
   assert.equal(second.children[0].children[1].children[0], firstDots);
-  assert.equal(second.children[1].textContent, "streamed thought");
+  assert.equal(body.textContent, "streamed thought");
 
   renderer.begin();
   const completed = renderer.render({ ...active, reasoning: "streamed thought", done: true, thinkingMS: 1200 }, 4);
@@ -57,5 +60,11 @@ test("thinking renderer preserves its DOM and never opens to an empty body", () 
   renderer.begin();
   const unavailable = renderer.render({ ...active, done: true, thinkingMS: 1200 }, 4);
   renderer.end();
-  assert.equal(unavailable.children[1].textContent, "Reasoning text is unavailable in this recording.");
+  assert.equal(body.textContent, "Reasoning text is unavailable in this recording.");
+  collapse.onclick();
+  renderer.begin();
+  renderer.render({ ...active, done: true, thinkingMS: 1200 }, 4);
+  renderer.end();
+  assert.equal(body.hidden, true);
+  assert.equal(collapse.hidden, true);
 });

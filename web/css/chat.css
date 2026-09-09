@@ -273,6 +273,23 @@
 }
 .chat-page .code-copy:hover,
 .chat-page .code-copy:focus-visible { color: var(--ink); opacity: 1; }
+.collapse-arrow {
+  position: sticky;
+  z-index: 2;
+  top: calc(var(--app-header-height, 36px) + 4px);
+  float: right;
+  width: 20px;
+  min-height: 20px;
+  margin-left: -20px;
+  padding: 0;
+  color: var(--mute);
+  background: transparent !important;
+  border: 0;
+  opacity: .35;
+  font-size: 12px;
+}
+.collapse-arrow:hover,
+.collapse-arrow:focus-visible { color: var(--ink); opacity: 1; }
 .chat-response-content {
   display: grid;
   align-content: start;
