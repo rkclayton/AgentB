@@ -131,7 +131,7 @@ if (!fs.existsSync(planPath)) {
   }
 
   const currentMatch = plan.match(
-    /^## Current work order[^\n]*\n([\s\S]*?)(?=^## Next work order)/m,
+    /^## Current work order[^\n]*\n([\s\S]*?)(?=^## (?:Next work order|In flight))/m,
   );
   if (!currentMatch) {
     errors.push("PLAN.md: cannot find Current/Next work-order boundary");
