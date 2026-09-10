@@ -35,9 +35,10 @@ test("Whole Chat is the only attachment drop target and is invisible at rest", (
   assert.match(css, /\.chat-page\.drop-target::after/);
 });
 
-test("Composer uses one paperclip and pending files occupy no row when empty", () => {
+test("Composer clusters one paperclip above stop and send and pending files occupy no row when empty", () => {
   assert.match(html, /id="chat-attach"[^>]*>📎<\/button>/);
   assert.match(html, /class="chat-composer-row"/);
+  assert.match(html, /class="chat-input-actions"[\s\S]*class="chat-attach-wrap"[\s\S]*class="chat-submit-actions"[\s\S]*id="chat-stop"[\s\S]*id="chat-send"/);
   assert.match(css, /\.chat-pending-attachments:empty\s*\{\s*display:\s*none/);
 });
 
@@ -60,7 +61,8 @@ test("Degraded accounting is labeled estimated in the Chat occupancy bar", () =>
 });
 
 test("State strip owns queue operator pending and unreachable state without chat rows", () => {
-  assert.match(html, /id="chat-status-strip"[\s\S]*id="chat-run-as-you"[\s\S]*id="chat-notice"[\s\S]*id="chat-retry-model"/);
+  assert.match(html, /id="chat-status-strip"[\s\S]*id="chat-notice"[\s\S]*id="chat-retry-model"/);
+  assert.doesNotMatch(html + chat, /chat-run-as-you/);
   assert.match(chat, /model unreachable · \$\{unreachable\.host/);
 	assert.match(chat, /model busy · \$\{busy\.host/);
 	assert.match(chat, /session\.server_id \|\| session\.b_profile/);
@@ -74,6 +76,8 @@ test("Operator mode lives only in Settings Security and states the defeated boun
   assert.match(settings, /Run everything as me for 20 minutes/);
   assert.match(settings, /defeats the service-account OS boundary for every tool in every chat/);
   assert.match(settings, /data-action="operator-context"/);
+  assert.match(settings, /api\("\/api\/config", \{shell:\{operator_context:!store\.shell_identity\?\.operator_context\}\}\)/);
+  assert.match(settings, /const serverProfiles = \(\) => Array\.isArray\(store\.servers\) \? store\.servers : \[\]/);
   assert.doesNotMatch(shell, /shell-operator-status/);
 });
 
@@ -108,8 +112,11 @@ test("Composer is five lines with no placeholder and expands upward", () => {
   assert.doesNotMatch(html, /placeholder=/);
   assert.match(css, /height:\s*112px/);
 	assert.match(css, /\.chat-composer\.expanded textarea[\s\S]*height:\s*min\(50vh, 520px\)/);
-	assert.match(css, /grid-template-columns:\s*24px auto minmax\(0, 1fr\)/);
-	assert.match(css, /\.chat-input-wrap\s*\{\s*grid-column:\s*3/);
+	assert.match(css, /grid-template-columns:\s*minmax\(0, 1fr\)/);
+	assert.match(css, /\.chat-pending-attachments,[\s\S]*\.chat-input-wrap\s*\{\s*grid-column:\s*1/);
+	assert.match(css, /\.chat-input-wrap \{[^}]*border-radius:8px;[^}]*box-shadow:inset/);
+	assert.match(css, /\.chat-composer textarea \{[\s\S]*?padding:\s*7px 64px 7px 9px;[\s\S]*?border:\s*0;[\s\S]*?border-radius:\s*8px;/);
+	assert.match(css, /\.chat-input-actions \{[^}]*right:6px;[^}]*bottom:6px;[^}]*flex-direction:column/);
 	assert.match(css, /#chat-expand\s*\{[\s\S]*position:\s*absolute;[\s\S]*top:\s*4px;[\s\S]*right:\s*4px/);
   assert.match(html, /id="chat-send"[^>]+aria-label="Send"[^>]*>↵<\/button>/);
   assert.match(css, /#chat-send \{[\s\S]*?height: 24px;[\s\S]*?min-height: 24px;/);
@@ -118,10 +125,19 @@ test("Composer is five lines with no placeholder and expands upward", () => {
 });
 
 test("Chat uses the narrow monospace label gutter and the agent_b tab restores its robot", () => {
-	assert.match(css, /\.chat-entry\s*\{[\s\S]*grid-template-columns:\s*90px minmax\(0, 1fr\)/);
+	assert.match(css, /\.chat-entry\s*\{[\s\S]*grid-template-columns:\s*72px minmax\(0, 1fr\)/);
+	assert.match(chat, /speaker\(agentAuthor\(session\), true\)/);
+	assert.match(chat, /function speaker\(name, agent = false\)[\s\S]*if \(agent\)[\s\S]*assets\/agent\.svg/);
 	assert.match(css, /\.chat-render-failure \.chat-content\s*\{[\s\S]*white-space:\s*nowrap/);
 	assert.match(shell, /agentID === "agent_b"[\s\S]*agent-tab-robot[\s\S]*assets\/agent\.svg/);
 	assert.match(tokens, /\.agent-tab-robot\{[^}]*width:20px;height:20px/);
+});
+
+test("Model-unreachable transcript notices are flat and stay outside response counts", () => {
+	assert.match(chat, /entry\.event\?\.type === "run\.stopped" && entry\.event\?\.data\?\.reason === "model_unreachable"[\s\S]*grouped\.push\(entry\);[\s\S]*response = null/);
+	assert.match(chat, /entry\.text \|\| session\.model_unreachable\?\.host/);
+	assert.doesNotMatch(chat, /data\.reason === "model_unreachable"[\s\S]{0,500}createElement\("details"\)/);
+	assert.match(chat, /retryModel\.onclick/);
 });
 
 test("Repository policy is a pinned full-content trust decision", () => {

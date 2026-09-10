@@ -32,6 +32,7 @@ let activeSection = "servers";
 let hardeningServerID = "";
 let workspaceState = [];
 let operatorFileState = { attachment_files: 0, attachment_bytes: 0, instruction_found: [] };
+const serverProfiles = () => Array.isArray(store.servers) ? store.servers : [];
 
 const sectionLabels = [
   ["servers", "Connections"],
@@ -196,7 +197,7 @@ function group(name, content) {
 }
 
 function servers() {
-  const rows = store.servers
+  const rows = serverProfiles()
     .map((profile) => {
       const isOpen = expanded.has(profile.id);
       const hasPendingChanges = [...drafts.keys()].some((path) => path.startsWith(`servers.${profile.id}.`));
@@ -281,12 +282,12 @@ function profileFields(profile, reason) {
 }
 
 function sessions() {
-  const profiles = store.servers.filter((profile) => !profileReason(profile));
+  const profiles = serverProfiles().filter((profile) => !profileReason(profile));
   const items = Object.values(store.sessions)
     .map((item) => {
       const running = item.run.status !== "idle";
       const key = `session:${item.id}`;
-      const profileOptions = store.servers
+      const profileOptions = serverProfiles()
         .map((candidate) => {
           const problem = profileReason(candidate);
           return `<option value="${attr(candidate.id)}" ${candidate.id === item.server_id ? "selected" : ""} ${problem ? "disabled" : ""}>${html(candidate.label)}</option>`;
@@ -364,7 +365,7 @@ function memory(active) {
 }
 
 function context(active) {
-  const profile = store.servers.find((x) => x.id === active?.server_id);
+  const profile = serverProfiles().find((x) => x.id === active?.server_id);
   const choice = store.config.context?.accounting || "auto";
   let actual = "estimated — no active profile";
   if (profile) {
@@ -476,7 +477,7 @@ function shell(active) {
 			? "Reset password"
 			: "Create account";
 	const setupDisabled = serviceAccountBusy || !serviceAccountStatus.loaded || !serviceAccountStatus.supported || serviceAccountStatus.administrator;
-	const profile = store.servers.find((item) => item.id === selectedHardeningServerID());
+	const profile = serverProfiles().find((item) => item.id === selectedHardeningServerID());
 	const protectionReady = hardeningStatus.acl?.applied && hardeningStatus.firewall?.applied;
 	const elevationState = !hardeningStatus.loaded
 		? "checking process elevation…"
@@ -581,7 +582,7 @@ function feedback(message, alarm, fallback) {
 
 function hardeningProfiles() {
 	const selected = selectedHardeningServerID();
-	const options = store.servers
+	const options = serverProfiles()
 		.filter((profile) => !profileReason(profile))
 		.map((profile) => `<option value="${attr(profile.id)}" ${profile.id === selected ? "selected" : ""}>${html(profile.label)} · ${html(profile.base_url)}</option>`)
 		.join("");
@@ -709,7 +710,7 @@ async function click(event) {
     return render();
   }
   if (action === "probe") {
-    const profile = store.servers.find((x) => x.id === id);
+    const profile = serverProfiles().find((x) => x.id === id);
     if (profile) profile._probing = true;
     render();
     try {
@@ -802,7 +803,7 @@ async function refreshServiceAccountStatus(preserveMessage = false) {
 }
 
 function selectedHardeningServerID() {
-	const ready = store.servers.filter((profile) => !profileReason(profile));
+	const ready = serverProfiles().filter((profile) => !profileReason(profile));
 	if (ready.some((profile) => profile.id === hardeningServerID)) return hardeningServerID;
 	const activeID = store.sessions[store.active]?.server_id;
 	hardeningServerID = ready.some((profile) => profile.id === activeID) ? activeID : ready[0]?.id || "";
@@ -1134,7 +1135,7 @@ async function addServer() {
 }
 
 async function duplicateServer(id) {
-  const source = store.servers.find((x) => x.id === id);
+  const source = serverProfiles().find((x) => x.id === id);
   if (!source) return;
   const copy = structuredClone(source);
   delete copy._probing;
@@ -1152,7 +1153,7 @@ async function duplicateServer(id) {
 function uniqueID(base) {
   let id = base;
   let suffix = 2;
-  while (store.servers.some((profile) => profile.id === id)) id = `${base}-${suffix++}`;
+  while (serverProfiles().some((profile) => profile.id === id)) id = `${base}-${suffix++}`;
   return id;
 }
 

@@ -231,6 +231,47 @@ func TestModelAvailabilityAndRunAsYouReconstructFromEvents(t *testing.T) {
 	}
 }
 
+func TestModelUnreachableChatNoticeIsOneRowPerCondition(t *testing.T) {
+	state := Empty("main")
+	records := []events.Event{
+		events.New(events.ModelUnreachable, "main", "r1", map[string]any{"host": "model.example:8000", "detail": "dial timeout"}),
+		events.New(events.RunStopped, "main", "r1", map[string]any{"reason": "model_unreachable", "detail": "dial timeout"}),
+		events.New(events.ModelUnreachable, "main", "r2", map[string]any{"host": "model.example:8000", "detail": "still offline"}),
+		events.New(events.RunStopped, "main", "r2", map[string]any{"reason": "model_unreachable", "detail": "still offline"}),
+		events.New(events.ModelReachable, "main", "", map[string]any{"server_id": "main"}),
+		events.New(events.ModelUnreachable, "main", "r3", map[string]any{"host": "model.example:8000", "detail": "offline again"}),
+		events.New(events.RunStopped, "main", "r3", map[string]any{"reason": "model_unreachable", "detail": "offline again"}),
+		events.New(events.ModelUnreachable, "main", "r4", map[string]any{"host": "other.example:9000", "detail": "refused"}),
+		events.New(events.RunStopped, "main", "r4", map[string]any{"reason": "model_unreachable", "detail": "refused"}),
+	}
+	for index, event := range records {
+		event.Seq = int64(index + 1)
+		var err error
+		state, _, err = Next(state, Record{Cursor: Cursor{Generation: "unreachable.events", Offset: int64(index + 1)}, Event: event})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var notices []ChatEntry
+	for _, entry := range state.Chat {
+		if entry.Event != nil && entry.Event.Type == events.RunStopped && stringValue(eventMap(entry.Event.Data)["reason"]) == "model_unreachable" {
+			notices = append(notices, entry)
+		}
+	}
+	if len(notices) != 3 {
+		t.Fatalf("unreachable notices=%+v", notices)
+	}
+	if notices[0].RunID != "r2" || notices[0].Text != "model.example:8000" || notices[0].Decision != "resolved" {
+		t.Fatalf("updated and resolved first condition=%+v", notices[0])
+	}
+	if notices[1].RunID != "r3" || notices[1].Text != "model.example:8000" || notices[1].Decision != "" {
+		t.Fatalf("new condition after recovery=%+v", notices[1])
+	}
+	if notices[2].RunID != "r4" || notices[2].Text != "other.example:9000" {
+		t.Fatalf("different host condition=%+v", notices[2])
+	}
+}
+
 func TestSessionRenameReplaysAuthorAndUserPin(t *testing.T) {
 	state := seeded(t)
 	aux, _, err := Next(state, Record{Cursor: Cursor{Generation: "main-a.jsonl", Offset: 30}, Event: events.Event{

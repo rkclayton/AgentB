@@ -339,6 +339,9 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 	case events.ModelBusy:
 		next.ModelBusy = &ModelAvailability{Host: stringValue(data["host"]), Detail: stringValue(data["detail"])}
 	case events.ModelReachable:
+		if next.ModelUnreachable != nil {
+			next.Chat = resolveModelUnreachableNotice(next.Chat, next.ModelUnreachable.Host)
+		}
 		next.ModelUnreachable = nil
 		next.ModelBusy = nil
 	case events.ShellGrant, events.FileGrant:
@@ -607,7 +610,13 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		if value := stringValue(data["role"]); value == "c" || value == "aux" {
 			role = "c"
 		}
-		next.Chat = appendChat(next.Chat, ChatEntry{Type: "notice", Key: "event:" + strconv.FormatInt(record.Event.Seq, 10), RunID: record.Event.RunID, Event: &event, AgentRole: role})
+		entry := ChatEntry{Type: "notice", Key: "event:" + strconv.FormatInt(record.Event.Seq, 10), RunID: record.Event.RunID, Event: &event, AgentRole: role}
+		if record.Event.Type == events.RunStopped && stringValue(data["reason"]) == "model_unreachable" && next.ModelUnreachable != nil {
+			entry.Text = next.ModelUnreachable.Host
+			next.Chat = upsertModelUnreachableNotice(next.Chat, entry)
+		} else {
+			next.Chat = appendChat(next.Chat, entry)
+		}
 	}
 	if record.Event.Type == events.RunStopped {
 		next.Chat = cloneChat(next.Chat)
@@ -861,6 +870,31 @@ func discardRunStream(values []events.Event, runID string) []events.Event {
 func appendChat(values []ChatEntry, entry ChatEntry) []ChatEntry {
 	result := cloneChat(values)
 	return append(result, entry)
+}
+func upsertModelUnreachableNotice(values []ChatEntry, entry ChatEntry) []ChatEntry {
+	result := cloneChat(values)
+	for index := len(result) - 1; index >= 0; index-- {
+		current := result[index]
+		if current.Type == "notice" && current.Event != nil && current.Event.Type == events.RunStopped &&
+			stringValue(eventMap(current.Event.Data)["reason"]) == "model_unreachable" && current.Text == entry.Text && current.Decision != "resolved" {
+			entry.Key = current.Key
+			result[index] = entry
+			return result
+		}
+	}
+	return append(result, entry)
+}
+func resolveModelUnreachableNotice(values []ChatEntry, host string) []ChatEntry {
+	result := cloneChat(values)
+	for index := len(result) - 1; index >= 0; index-- {
+		entry := &result[index]
+		if entry.Type == "notice" && entry.Event != nil && entry.Event.Type == events.RunStopped &&
+			stringValue(eventMap(entry.Event.Data)["reason"]) == "model_unreachable" && entry.Text == host && entry.Decision != "resolved" {
+			entry.Decision = "resolved"
+			break
+		}
+	}
+	return result
 }
 func removeChatKey(values []ChatEntry, key string) []ChatEntry {
 	result := make([]ChatEntry, 0, len(values))

@@ -9,7 +9,6 @@ import { createApprovalCard } from "./approval.js";
 import { callServiceKey, callServiceStatus } from "./call-service-display.js";
 import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, uploadAttachment } from "./attachment-upload.js";
 import { agentAuthor, isRunning, openSessions } from "./chat-lifecycle.js";
-import { renderOperatorStatus } from "./operator-status.js";
 import { renderStopState } from "./stop-state.js";
 import { groupResponseRows, itemFailed, responseBlocks, responseSummary } from "./chat-response-groups.js";
 
@@ -29,7 +28,6 @@ const exchangeFileList = document.getElementById("chat-exchange-files");
 const filePicker = document.getElementById("chat-file-picker");
 const pendingFiles = document.getElementById("chat-attachments");
 const stop = document.getElementById("chat-stop");
-const runAsYou = document.getElementById("chat-run-as-you");
 const retryModel = document.getElementById("chat-retry-model");
 let requested = new URLSearchParams(location.search).get("session");
 const selectedID = () => store.selection.session_id;
@@ -230,6 +228,11 @@ function groupResponses(entries) {
       response = null;
       continue;
     }
+    if (entry.type === "notice" && entry.event?.type === "run.stopped" && entry.event?.data?.reason === "model_unreachable") {
+      grouped.push(entry);
+      response = null;
+      continue;
+    }
     if (!response) {
       response = { type: "response", key: `response:${boundary}`, items: [] };
       grouped.push(response);
@@ -258,7 +261,7 @@ function renderEntry(session, entry) {
     row.tabIndex = 0;
     const content = document.createElement("div");
     content.className = "chat-content";
-    const author = speaker(entry.type === "user" ? "you" : agentAuthor(session, entry.agentRole));
+    const author = speaker(entry.type === "user" ? "you" : agentAuthor(session, entry.agentRole), entry.type !== "user");
     row.append(author, content);
     view = { row, author, content, text: "" };
     entryViews.set(entry.key, view);
@@ -304,7 +307,7 @@ function renderResponse(session, entry) {
     const rows = document.createElement("div");
     rows.className = "chat-response-rows";
     content.append(summary, rows);
-    const author = speaker(agentAuthor(session));
+    const author = speaker(agentAuthor(session), true);
     row.append(author, content);
     view = { row, author, content, summary, rows, blocks: new Map(), stepKeys: [] };
     entryViews.set(entry.key, view);
@@ -586,10 +589,10 @@ function renderFileChip(session, file) {
   return node;
 }
 
-function speaker(name) {
+function speaker(name, agent = false) {
   const node = document.createElement("div");
   node.className = "chat-speaker";
-  if (name === "agent") {
+  if (agent) {
     const image = document.createElement("img");
     image.src = "/static/assets/agent.svg";
     image.alt = "";
@@ -683,8 +686,7 @@ function noticeContent(session, entry, actionable) {
   if (event.type === "run.stopped") {
     const reason = (data.reason || "").replaceAll("_", " ");
 		if (data.reason === "model_unreachable") {
-			const line=document.createElement("span"); line.textContent=`model unreachable · ${session.model_unreachable?.host || "model"}`; content.append(line);
-			if(data.detail){const details=document.createElement("details");const summary=document.createElement("summary");summary.textContent="Connection detail";const pre=document.createElement("pre");pre.textContent=data.detail;details.append(summary,pre);content.append(details)}
+			const line=document.createElement("span"); line.textContent=`model unreachable · ${entry.text || session.model_unreachable?.host || "model"}`; if(data.detail) line.title=data.detail; content.append(line);
 		} else content.textContent = `stopped: ${reason}${data.reason === "turn_ceiling" ? ` (${data.turns || session?.run?.max_turns || 0})` : data.detail ? `, ${data.detail}` : ""}`;
     if (data.reason !== "done") content.classList.add("alarm");
   } else if (event.type === "files.delivered") {
@@ -775,9 +777,6 @@ function renderComposer(session) {
 		decide: (callID, decision) => api("/api/approve", { session_id: session.id, call_id: callID, decision }),
 	})] : policyCard ? [policyCard] : bindCard ? [bindCard] : []));
   renderStopState(stop, session, store.replay);
-  renderOperatorStatus(runAsYou, { operator_context: hasChatGrant(session) });
-  runAsYou.disabled = !session || store.replay || !hasChatGrant(session);
-  runAsYou.title = hasChatGrant(session) ? "Run as you active for this chat · click to revoke" : "No Run as you grant for this chat";
   retryModel.hidden = !unreachable;
   retryModel.disabled = !session || store.replay;
 }
@@ -913,12 +912,6 @@ stop.onclick = () => {
   const session = store.sessions[selectedID()];
   if (session && !store.replay) api("/api/stop", { session_id: session.id }).catch((error) => { localNotice = error.message; localAlarm = true; renderComposer(session); });
 };
-runAsYou.onclick = async () => {
-  const session = store.sessions[selectedID()];
-  if (!session || store.replay || !hasChatGrant(session)) return;
-  try { await api(`/api/sessions/${encodeURIComponent(session.id)}/grants/revoke`, {}); reduce({type:"snapshot", data:await api("/api/state", undefined, "GET")}); }
-  catch (error) { localNotice = error.message; localAlarm = true; renderComposer(session); }
-};
 retryModel.onclick = async () => {
   const session = store.sessions[selectedID()];
   if (!session || store.replay) return;
@@ -1013,17 +1006,6 @@ function signed(value) {
 }
 function format(value) {
   return Number(value || 0).toLocaleString("en-US");
-}
-function hasChatGrant(session) {
-  if (!session) return false;
-  if (typeof session.run_as_you === "boolean") return session.run_as_you;
-  let active = false;
-  for (const event of session.timeline || []) {
-    const data = event.data || {};
-    if (["shell.grant", "file.grant"].includes(event.type) && data.scope === "session" && data.identity === "operator") active = true;
-    if (["shell.grant_lapsed", "file.grant_lapsed", "session.closed"].includes(event.type) && data.scope !== "run") active = false;
-  }
-  return active;
 }
 function shortTime(value) {
   const date = new Date(value || "");

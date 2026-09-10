@@ -22,6 +22,7 @@ config.listen = `127.0.0.1:${port}`;
 await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`);
 const tape = await readFile(args.replay, "utf8");
 const recordCount = tape.split(/\r?\n/).filter(Boolean).length;
+const sessionID = args.session || "main";
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const json = async (url) => {
   const response = await fetch(url);
@@ -45,8 +46,8 @@ try {
   app.stdout.on("data", (chunk) => process.stdout.write(chunk));
   app.stderr.on("data", (chunk) => process.stderr.write(chunk));
   const finalState = await waitHTTP(`http://127.0.0.1:${port}/api/state`);
-  const finalSession = finalState.sessions?.main;
-  assert.ok(finalSession, "operator main session missing from replay");
+  const finalSession = finalState.sessions?.[sessionID];
+  assert.ok(finalSession, `session ${sessionID} missing from replay`);
 
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const context = await browser.newContext({ viewport: { width: 1250, height: 975 } });
@@ -97,29 +98,31 @@ try {
   const page = await context.newPage();
   const pageErrors = [];
   const consoleErrors = [];
+  const failedResponses = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("response", (response) => { if (response.status() >= 400) failedResponses.push({ status: response.status(), url: response.url() }); });
   const replayTimeout = Math.max(30000, recordCount * 25);
   page.setDefaultTimeout(replayTimeout);
-  await page.goto(`http://127.0.0.1:${port}/chat?session=main`, { waitUntil: "domcontentloaded" });
+  await page.goto(`http://127.0.0.1:${port}/chat?session=${encodeURIComponent(sessionID)}`, { waitUntil: "domcontentloaded" });
   const finalCursor = finalSession.cursor;
   const replayDeadline = Date.now() + replayTimeout;
   let streamedCursor;
   while (Date.now() < replayDeadline) {
-    streamedCursor = await page.evaluate(async () => (await import("/static/js/bus.js")).store.sessions?.main?.cursor);
+    streamedCursor = await page.evaluate(async (id) => (await import("/static/js/bus.js")).store.sessions?.[id]?.cursor, sessionID);
     if (streamedCursor?.generation === finalCursor.generation && Number(streamedCursor?.offset || 0) === Number(finalCursor.offset || 0)) break;
     await sleep(100);
   }
   assert.deepEqual(streamedCursor, finalCursor, `streaming replay did not reach the final cursor in ${replayTimeout} ms`);
   await page.waitForTimeout(150);
-  const result = await page.evaluate(async () => {
+  const result = await page.evaluate(async (id) => {
     const { store } = await import("/static/js/bus.js");
     return {
-      cursor: store.sessions?.main?.cursor,
+      cursor: store.sessions?.[id]?.cursor,
       mountedRenderFailures: document.querySelectorAll(".chat-render-failure").length,
       ...window.__agentbStreamingReplay,
     };
-  });
+  }, sessionID);
   assert.deepEqual(result.cursor, finalCursor, JSON.stringify(result));
   assert.equal(result.patchEvents, recordCount, `streaming replay frame count differs from tape records: ${JSON.stringify(result)}`);
   assert.deepEqual(result.stateFetches.filter((stack) => stack.includes("at resync")), [], JSON.stringify(result.stateFetches));
@@ -137,6 +140,12 @@ try {
       ...document.querySelectorAll(".chat-tool-group.alarm > .chat-tool-group-head"),
     ];
     const tab = document.querySelector('.agent-tab[data-agent="agent_b"]');
+    const composer = document.querySelector(".chat-composer");
+    const inputWrap = document.querySelector(".chat-input-wrap");
+    const attach = document.querySelector("#chat-attach")?.getBoundingClientRect();
+    const stop = document.querySelector("#chat-stop")?.getBoundingClientRect();
+    const send = document.querySelector("#chat-send")?.getBoundingClientRect();
+    const connectionRows = [...document.querySelectorAll(".chat-notice-row")].filter((node) => node.innerText.startsWith("model unreachable ·"));
     return {
       prose: prose.length,
       visibleProse: prose.filter((node) => node.getClientRects().length > 0).length,
@@ -152,6 +161,16 @@ try {
       replayComposerDisabled: document.querySelector("#chat-task")?.disabled && document.querySelector("#chat-send")?.disabled,
       pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       logOverflow: document.querySelector("#chat-log")?.scrollWidth - document.querySelector("#chat-log")?.clientWidth,
+      agentSpeakerImages: document.querySelectorAll(".chat-agent .chat-speaker img").length,
+      userSpeakerImages: document.querySelectorAll(".chat-user .chat-speaker img").length,
+      connectionRows: connectionRows.length,
+      nestedConnectionRows: [...document.querySelectorAll(".chat-response-notice")].filter((node) => node.innerText.startsWith("model unreachable ·")).length,
+      composerLeftInset: Math.round(inputWrap.getBoundingClientRect().left - composer.getBoundingClientRect().left),
+      composerRightInset: Math.round(composer.getBoundingClientRect().right - inputWrap.getBoundingClientRect().right),
+      actionSizes: [attach, stop, send].map((rect) => ({ width: Math.round(rect.width), height: Math.round(rect.height) })),
+      attachmentAboveSubmit: attach.bottom <= Math.min(stop.top, send.top),
+      textareaRightPadding: getComputedStyle(document.querySelector("#chat-task")).paddingRight,
+      composerOperatorControl: Boolean(document.querySelector("#chat-run-as-you")),
     };
   });
   assert.ok(ui.prose > 0, JSON.stringify(ui));
@@ -166,6 +185,16 @@ try {
   assert.equal(ui.offline, Boolean(finalSession.model_unreachable), JSON.stringify(ui));
   assert.equal(ui.replayComposerDisabled, true, JSON.stringify(ui));
   assert.ok(ui.pageOverflow <= 0 && ui.logOverflow <= 0, JSON.stringify(ui));
+  assert.ok(ui.agentSpeakerImages > 0, JSON.stringify(ui));
+  assert.equal(ui.userSpeakerImages, 0, JSON.stringify(ui));
+  assert.ok(ui.connectionRows > 0, JSON.stringify(ui));
+  assert.equal(ui.nestedConnectionRows, 0, JSON.stringify(ui));
+  assert.deepEqual(ui.actionSizes, [{ width: 24, height: 24 }, { width: 24, height: 24 }, { width: 24, height: 24 }], JSON.stringify(ui));
+  assert.equal(ui.attachmentAboveSubmit, true, JSON.stringify(ui));
+  assert.equal(ui.textareaRightPadding, "64px", JSON.stringify(ui));
+  assert.equal(ui.composerOperatorControl, false, JSON.stringify(ui));
+  assert.equal(ui.composerLeftInset, 8, JSON.stringify(ui));
+  assert.equal(ui.composerRightInset, 8, JSON.stringify(ui));
   const shellGeometry = () => page.evaluate(() => Object.fromEntries([
     ["shell", "#app-shell"],
     ["tabs", ".agent-tabs"],
@@ -179,6 +208,7 @@ try {
     return [key, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }];
   })));
   const chatGeometry = await shellGeometry();
+  await page.locator(".chat-notice-row").filter({ hasText: "model unreachable ·" }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: join(args.evidence, "real-tape-chat.png") });
 
   const firstFold = page.locator(".chat-step-summary").first();
@@ -195,13 +225,13 @@ try {
   await page.screenshot({ path: join(args.evidence, "real-tape-menu.png") });
   await page.keyboard.press("Escape");
   await tab.click();
-  await page.waitForURL((url) => url.pathname === "/" && url.searchParams.get("session") === "main");
+  await page.waitForURL((url) => url.pathname === "/" && url.searchParams.get("session") === sessionID);
   await page.locator('.agent-tab[data-agent="agent_b"]').waitFor();
   assert.equal(await page.locator('.agent-tab[data-agent="agent_b"]').getAttribute("data-side"), "console");
   const consoleGeometry = await shellGeometry();
   await page.screenshot({ path: join(args.evidence, "real-tape-console.png") });
   await page.locator('.agent-tab[data-agent="agent_b"]').click();
-  await page.waitForURL((url) => url.pathname === "/chat" && url.searchParams.get("session") === "main");
+  await page.waitForURL((url) => url.pathname === "/chat" && url.searchParams.get("session") === sessionID);
   await page.locator(".chat-entry").first().waitFor();
   const returnedChatGeometry = await shellGeometry();
   if (args["expect-stable-shell"] === "true") {
@@ -209,7 +239,20 @@ try {
     assert.deepEqual(returnedChatGeometry, chatGeometry, JSON.stringify({ chatGeometry, returnedChatGeometry }));
   }
   assert.deepEqual(pageErrors, []);
-  assert.deepEqual(consoleErrors, []);
+  const chatFailedResponses = [...failedResponses];
+  assert.ok(chatFailedResponses.every((response) => response.status === 404 && response.url.includes("/api/files/")), JSON.stringify(chatFailedResponses));
+  const chatConsoleErrors = [...consoleErrors];
+  assert.equal(chatConsoleErrors.length, chatFailedResponses.length, JSON.stringify({ chatConsoleErrors, chatFailedResponses }));
+  consoleErrors.length = 0;
+  await page.goto(`http://127.0.0.1:${port}/?session=${encodeURIComponent(sessionID)}#settings/shell`, { waitUntil: "domcontentloaded" });
+  const operatorToggle = page.locator('.settings-operator-status[data-action="operator-context"]');
+  await operatorToggle.waitFor();
+  assert.match(await operatorToggle.innerText(), /Run everything as me|Stop running everything as me/);
+  await page.screenshot({ path: join(args.evidence, "real-tape-settings.png") });
+  assert.deepEqual(pageErrors, []);
+  const settingsConsoleErrors = [...consoleErrors];
+  const settingsFailedResponses = failedResponses.slice(chatFailedResponses.length);
+  assert.ok(settingsConsoleErrors.every((message) => message.startsWith("Failed to load resource: the server responded with a status of ")), JSON.stringify(settingsConsoleErrors));
   const report = {
     result: "PASS streaming replay",
     tape: args.replay,
@@ -221,7 +264,10 @@ try {
     chatRenderFailureErrors: result.renderErrors.length,
     mountedRenderFailures: result.mountedRenderFailures,
     pageErrors,
-    consoleErrors,
+    consoleErrors: chatConsoleErrors,
+    settingsConsoleErrors,
+    settingsFailedResponses,
+    chatFailedResponses,
     ui,
     shellGeometry: { chat: chatGeometry, console: consoleGeometry, returned_chat: returnedChatGeometry },
     plusUsableHitTarget: chatGeometry.plus.width >= 20 && chatGeometry.plus.height >= 20,
