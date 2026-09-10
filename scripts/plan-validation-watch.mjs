@@ -26,11 +26,11 @@ function bindingFor(requestBytes) {
   };
 }
 
-function failure(binding, message, field = "request", expected = "valid JSON", operation = null) {
+function failure(binding, message, field = "request", expected = "valid JSON") {
   return {
     version: 1,
     status: "fail",
-    operation,
+    operation: null,
     request: binding,
     errors: [{ message, field, expected }],
   };
@@ -191,7 +191,7 @@ export function validateDroppedRequest(requestBytes, { publishedRoot = scriptRoo
       validation,
     };
   } catch (error) {
-    return failure(binding, `validator rejected the request shape: ${error.message}`, payloadKey, "the existing validator input object", operation);
+    return failure(binding, `validator rejected the request shape: ${error.message}`, payloadKey, "the existing validator input object");
   }
 }
 
@@ -219,7 +219,10 @@ export function readValidationResult(requestPath, { publishedRoot = scriptRoot }
   }
   let request;
   try { request = JSON.parse(current.text); }
-  catch (error) { return { state: "stale", result, error: `bound request JSON is invalid: ${error.message}` }; }
+  catch (error) {
+    if (result?.published?.mode === "published") return { state: "stale", result, error: `bound request JSON is invalid: ${error.message}` };
+    return { state: result.status, result };
+  }
   const usesPublishedBase = request?.operation === "validateProposal"
     && request?.proposal && Object.hasOwn(request.proposal, "base");
   if (usesPublishedBase && result?.published?.mode !== "published") return { state: "stale", result };

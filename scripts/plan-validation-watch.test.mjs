@@ -177,6 +177,14 @@ const invalid = await waitForResult(invalidPath);
 assert.equal(invalid.state, "fail");
 assert.ok(invalid.result.validation.errorDetails.some(({ field, expected }) => field === "kind" && expected.includes("defect")));
 
+// A validator failure bound to malformed JSON remains a current failure, not
+// a stale result merely because the reader cannot parse it a second time.
+const malformedPath = path.join(drop, "malformed.request.json");
+fs.writeFileSync(malformedPath, "{");
+const malformed = await waitForResult(malformedPath);
+assert.equal(malformed.state, "fail");
+assert.equal(malformed.result.errors[0].field, "request");
+
 // The second existing validator is reachable through the same file-only path.
 const published = loadPublishedProposal(root);
 const resumePath = path.join(drop, "resume.request.json");
