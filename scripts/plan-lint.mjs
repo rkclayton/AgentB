@@ -99,10 +99,26 @@ function escapeCell(value) {
   return String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
 }
 
+function unresolvedEntries(value) {
+  if (value === null || value === "(none)") return [];
+  const lines = value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const entries = [];
+  for (const line of lines) {
+    const explicit = line.match(/^(?:-\s*)?\[(discovery|blocker)\]\s+(.+)$/i);
+    entries.push(explicit
+      ? { category: explicit[1].toLowerCase(), text: explicit[2] }
+      : { category: "legacy", text: line });
+  }
+  return entries;
+}
+
 /** Validate an exact plan proposal without writing it to the repository. */
 export function validateProposal({ planText, orderBody = null, itemContents, structuralOnly = false }) {
   const errors = [];
   const warnings = [];
+  const admission = { errors: [], warnings: [] };
+  const blockers = [];
+  const completion = [];
   const items = new Map();
   const sourceTexts = [];
   const normalizedItems = normalizeItemContents(itemContents);
@@ -155,7 +171,8 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
     if (state === "shipped" && !/\bv\d+\.\d+\.\d+\b|\b[0-9a-f]{7,40}\b/i.test(text)) warnings.push(`${relative}: shipped item names no tag or commit`);
     const lines = lineCount(text);
     if (lines > 100) warnings.push(`${relative}: long item (${lines} lines)`);
-    items.set(id, { id, state, milestone, kind: kind ?? "", surfaces, rawSurfaces: rawSurfaces ?? "", relative, title: heading[2], lines, unresolved: unresolved ? unresolved[1].trim() : null, metadata });
+    const unresolvedText = unresolved ? unresolved[1].trim() : null;
+    items.set(id, { id, state, milestone, kind: kind ?? "", surfaces, rawSurfaces: rawSurfaces ?? "", relative, title: heading[2], lines, unresolved: unresolvedText, unresolvedEntries: unresolvedEntries(unresolvedText), metadata });
   }
 
   for (const { relative, text } of sourceTexts) {
@@ -182,41 +199,87 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
     const orderId = currentText.match(/^Order ID:\s*`([^`]+)`/m)?.[1] ?? currentMatch[1].match(/\b(v\d+\.\d+\.\d+|[A-Z][A-Z0-9-]+)\b/)?.[1];
     const inFlight = effectivePlan.match(/^## In flight\s*$\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? "";
     if (orderId) for (const marker of inFlight.matchAll(/^-\s+`?([^\s`/]+)\/(W\d+)/gm)) if (marker[1] !== orderId) errors.push(`PLAN.md: In flight marker ${marker[1]}/${marker[2]} belongs to another order (current ${orderId})`);
-    if (!structuralOnly && !/No product changes/i.test(currentText)) {
-      const workItems = [...currentText.matchAll(/^- W\d+\s+\*\*(?:item\s+)?([0-9]+[a-z]*)\b([^\n]*)/gmi)];
+    const workItems = [...currentText.matchAll(/^- (W\d+)\s+\*\*(?:item\s+)?([0-9]+[a-z]*)\b([^\n]*)/gmi)];
+    if (!/No product changes/i.test(currentText)) {
       const executable = new Map();
       for (const match of workItems) {
         const clauseStart = match.index;
         const after = currentText.slice(clauseStart + 1);
         const next = after.search(/\n- W\d+\s+/);
-        const id = match[1].toLowerCase();
+        const workId = match[1].toUpperCase();
+        const id = match[2].toLowerCase();
         const clause = next < 0 ? currentText.slice(clauseStart) : currentText.slice(clauseStart, clauseStart + 1 + next);
-        executable.set(id, `${executable.get(id) ?? ""}\n${clause}`);
+        const entry = executable.get(id) ?? { clause: "", workIds: [] };
+        entry.clause += `\n${clause}`;
+        entry.workIds.push(workId);
+        executable.set(id, entry);
       }
-      if (!executable.size) errors.push("ORDER GATE: no executable item IDs found in W headings");
-      for (const [id, clause] of executable) {
+      if (!structuralOnly && !executable.size) {
+        const message = "ORDER GATE: no executable item IDs found in W headings";
+        errors.push(message);
+        admission.errors.push(message);
+      }
+      for (const [id, execution] of executable) {
         const item = items.get(id);
         if (!item) {
-          errors.push(`ORDER GATE: executable item ${id} does not exist`);
+          if (!structuralOnly) {
+            const message = `ORDER GATE: executable item ${id} does not exist`;
+            errors.push(message);
+            admission.errors.push(message);
+          }
           continue;
         }
-        if (item.state !== "live") errors.push(`ORDER GATE: executable item ${id} is ${item.state}, expected live`);
+        const completedWork = execution.workIds.filter((workId) => new RegExp(`^-\\s+${orderId?.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/${workId} completed\\b`, "mi").test(inFlight));
+        const acceptanceEvidence = item.state === "shipped"
+          && item.relative.startsWith("plan/archive/")
+          && Boolean(item.metadata.get("shipped"))
+          && !["", "unknown"].includes(item.metadata.get("evidence") ?? "")
+          && !["", "unknown"].includes(item.metadata.get("acceptance") ?? "");
+        completion.push({ itemId: id, workIds: execution.workIds, completedWork, acceptanceEvidence, status: acceptanceEvidence ? "complete" : completedWork.length ? "partial" : "pending" });
+        if (structuralOnly) continue;
+        if (item.state !== "live") {
+          const message = `ORDER GATE: executable item ${id} is ${item.state}, expected live`;
+          errors.push(message);
+          admission.errors.push(message);
+        }
         for (const field of ["milestone", "kind", "surfaces", "evidence", "acceptance"]) {
           const value = item.metadata.get(field);
-          if (!value || value === "unknown" || (field === "milestone" && value === "-")) errors.push(`ORDER GATE: executable item ${id} has unresolved ${field}`);
+          if (!value || value === "unknown" || (field === "milestone" && value === "-")) {
+            const message = `ORDER GATE: executable item ${id} has unresolved ${field}`;
+            errors.push(message);
+            admission.errors.push(message);
+          }
         }
-        const authorizationRecord = `${clause}\n${item.metadata.get("evidence") ?? ""}`;
-        if (!/\boperator\b|\bauthori[sz](?:e|ed|ation)\b/i.test(authorizationRecord)) errors.push(`ORDER GATE: executable item ${id} has no recorded authorization for this scope`);
-        if (item.unresolved !== "(none)") {
-          if (/DISCOVERY BEFORE FIX|DISCOVERY FIRST|\bEstablish\b[\s\S]*?before/i.test(clause)) warnings.push(`ORDER GATE: item ${id} unresolved entry is explicitly covered by discovery-first work`);
-          else errors.push(`ORDER GATE: executable item ${id} has non-empty ## Unresolved not covered by its W clause`);
+        const authorizationRecord = `${execution.clause}\n${item.metadata.get("evidence") ?? ""}`;
+        if (!/\boperator\b|\bauthori[sz](?:e|ed|ation)\b/i.test(authorizationRecord)) {
+          const message = `ORDER GATE: executable item ${id} has no recorded authorization for this scope`;
+          errors.push(message);
+          admission.errors.push(message);
+        }
+        const discoveries = item.unresolvedEntries.filter(({ category }) => category === "discovery");
+        const itemBlockers = item.unresolvedEntries.filter(({ category }) => category === "blocker");
+        const legacy = item.unresolvedEntries.filter(({ category }) => category === "legacy");
+        if (discoveries.length) {
+          const message = `ORDER GATE: item ${id} unresolved entry is explicitly covered by discovery-first work`;
+          warnings.push(message);
+          admission.warnings.push(message);
+        }
+        for (const entry of itemBlockers) {
+          const blocker = { itemId: id, reason: entry.text, message: `ORDER BLOCKER: item ${id}: ${entry.text}` };
+          blockers.push(blocker);
+          errors.push(blocker.message);
+        }
+        if (legacy.length) {
+          const message = `ORDER GATE: executable item ${id} has non-empty ## Unresolved not covered by its W clause`;
+          errors.push(message);
+          admission.errors.push(message);
         }
       }
     }
   }
   return {
     proposalId: proposalIdentity(String(planText ?? ""), orderBody, normalizedItems),
-    errors, warnings,
+    errors, warnings, admission, blockers, completion,
     errorDetails: errors.map(issueDetail),
     warningDetails: warnings.map(issueDetail),
     itemCount: items.size,

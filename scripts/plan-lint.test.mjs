@@ -105,16 +105,43 @@ function prepare(root) {
 }
 
 {
-  const root = makeFixture("\n- W1 **2ah root cause — DISCOVERY BEFORE FIX.**\n- W2 **2ai prose.**\n- W3 **2aj grant.** Establish the cause before changing behavior.\n- W4 **2ak tab — DISCOVERY FIRST.**\n- W5 **2am lamp — DISCOVERY FIRST.**", [
-    { id: "2ah", where: "items", text: item("2ah", { unresolved: "Establish the render cause." }) },
+  const root = makeFixture("\n- W1 **2ah root cause.**\n- W2 **2ai prose.**\n- W3 **2aj grant.**\n- W4 **2ak tab.**\n- W5 **2am lamp.**", [
+    { id: "2ah", where: "items", text: item("2ah", { unresolved: "[discovery] Establish the render cause." }) },
     { id: "2ai", where: "items", text: item("2ai") },
-    { id: "2aj", where: "items", text: item("2aj", { unresolved: "Establish the grant key." }) },
-    { id: "2ak", where: "items", text: item("2ak", { unresolved: "Establish current click behavior." }) },
-    { id: "2am", where: "items", text: item("2am", { unresolved: "Establish the negative reachability signal." }) },
+    { id: "2aj", where: "items", text: item("2aj", { unresolved: "[discovery] Establish the grant key." }) },
+    { id: "2ak", where: "items", text: item("2ak", { unresolved: "[discovery] Establish current click behavior." }) },
+    { id: "2am", where: "items", text: item("2am", { unresolved: "[discovery] Establish the negative reachability signal." }) },
   ]);
   prepare(root);
   const result = run(root);
   assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stderr, /explicitly covered by discovery-first work/);
+}
+
+{
+  const root = makeFixture("\n- W1 **2a executable work.**", [{ id: "2a", where: "items", text: item("2a", { unresolved: "[blocker] Required fixture service is unavailable." }) }]);
+  prepare(root);
+  const validation = validateProposal(loadPublishedProposal(root));
+  assert.equal(validation.admission.errors.length, 0, "a runtime blocker must not be mislabeled as an admission failure");
+  assert.equal(validation.blockers.length, 1);
+  assert.match(validation.blockers[0].message, /ORDER BLOCKER: item 2a/);
+  const result = run(root);
+  assert.notEqual(result.status, 0, "a genuine blocker must pause execution");
+}
+
+{
+  const root = makeFixture("\n- W1 **2a executable work.**", [{ id: "2a", where: "items", text: item("2a") }], { inFlight: "TEST/W1 completed 12:00" });
+  prepare(root);
+  const validation = validateProposal({ ...loadPublishedProposal(root), structuralOnly: true });
+  assert.equal(validation.completion[0].status, "partial", "a completion marker alone must not close a live item");
+}
+
+{
+  const shipped = item("2a", { state: "shipped" }).replace("evidence: Operator-authorized fixture scope.", "shipped: v0.1.0 abcdef0\nevidence: Recorded acceptance evidence.");
+  const root = makeFixture("\n- W1 **2a executable work.**", [{ id: "2a", where: "archive", text: shipped }], { inFlight: "TEST/W1 completed 12:00" });
+  prepare(root);
+  const validation = validateProposal({ ...loadPublishedProposal(root), structuralOnly: true });
+  assert.equal(validation.completion[0].status, "complete", "an archived shipped item with acceptance evidence should close");
 }
 
 {
