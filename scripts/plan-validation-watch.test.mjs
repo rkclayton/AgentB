@@ -94,10 +94,43 @@ function proposalRequest(root, { newItem = false, invalid = false, commandText =
   };
 }
 
-async function waitForResult(requestPath, timeoutMs = 2000) {
+function baseProposalRequest({ invalid = false, commandText = "" } = {}) {
+  const text = item("2b", commandText || "New proposed work.");
+  return {
+    version: 1,
+    operation: "validateProposal",
+    proposal: {
+      base: "published",
+      orderBody: ["**Revision: r1.**", "", "Order ID: `TEST`", "", "- W1 **2b executable work.**"].join("\n"),
+      itemContents: { "plan/items/2b.md": invalid ? text.replace("## Unresolved\n\n(none)", "## Unresolved\n\nUnclassified question.") : text },
+    },
+  };
+}
+
+function publishBaseRequest(root, request) {
+  const planPath = path.join(root, "PLAN.md");
+  const planText = fs.readFileSync(planPath, "utf8");
+  const current = planText.match(/^## Current work order[^\n]*\n[\s\S]*?(?=^## (?:Next work order|In flight|Index)|(?![\s\S]))/m);
+  assert.ok(current, "fixture must have a Current work order");
+  const heading = current[0].match(/^## Current work order[^\n]*/)[0];
+  fs.writeFileSync(planPath, `${planText.slice(0, current.index)}${heading}\n\n${request.proposal.orderBody}\n\n${planText.slice(current.index + current[0].length)}`);
+  for (const [relative, text] of Object.entries(request.proposal.itemContents)) {
+    const target = path.join(root, ...relative.split("/"));
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, text);
+  }
+  const prepared = spawnSync(process.execPath, [linter, "--root", root, "--write-index", "--structural"], { encoding: "utf8" });
+  assert.equal(prepared.status, 0, prepared.stdout + prepared.stderr);
+}
+
+function cliErrors(run) {
+  return run.stderr.split(/\r?\n/).filter((line) => line.startsWith("ERROR ")).map((line) => line.slice(6));
+}
+
+async function waitForResult(requestPath, timeoutMs = 2000, publishedRoot = undefined) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const state = readValidationResult(requestPath);
+    const state = readValidationResult(requestPath, publishedRoot ? { publishedRoot } : undefined);
     if (state.state !== "absent" && state.state !== "stale") return state;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -109,7 +142,7 @@ const drop = path.join(root, "plan", "validation");
 const originalPlan = fs.readFileSync(path.join(root, "PLAN.md"), "utf8");
 const originalItem = fs.readFileSync(path.join(root, "plan", "items", "2a.md"), "utf8");
 assert.equal(readWatcherStatus(drop).state, "absent");
-const watcher = startValidationWatcher({ dropDirectory: drop });
+const watcher = startValidationWatcher({ dropDirectory: drop, publishedRoot: root });
 assert.equal(readWatcherStatus(drop).state, "ready");
 
 // A proposal that adds an item validates against its generated in-memory index.
@@ -123,6 +156,19 @@ assert.equal(valid.result.request.text, validText, "result must echo the exact c
 assert.doesNotMatch(valid.result.validation.errors.join("\n"), /index: stale or malformed/);
 assert.equal(fs.readFileSync(path.join(root, "PLAN.md"), "utf8"), originalPlan, "in-memory index regeneration must not publish PLAN.md");
 assert.equal(fs.existsSync(path.join(root, "plan", "items", "2b.md")), false, "proposal item must not be published");
+
+// Base mode carries one changed item and an order body, then inherits all
+// other validator inputs from the published tree without writing through.
+const basePath = path.join(drop, "base.request.json");
+const baseText = JSON.stringify(baseProposalRequest(), null, 2);
+fs.writeFileSync(basePath, baseText);
+const base = await waitForResult(basePath, 2000, root);
+assert.equal(base.state, "pass", JSON.stringify(base.result?.validation?.errors));
+assert.ok(Buffer.byteLength(baseText) < Buffer.byteLength(validText), "published base must make the request smaller than an inline proposal");
+assert.deepEqual(base.result.published.inputs.map(({ relative }) => relative), ["PLAN.md", "plan/items/2a.md"]);
+assert.equal(fs.readFileSync(path.join(root, "PLAN.md"), "utf8"), originalPlan, "base merge must not publish its order body");
+assert.equal(fs.readFileSync(path.join(root, "plan", "items", "2a.md"), "utf8"), originalItem, "base merge must not modify published items");
+assert.equal(fs.existsSync(path.join(root, "plan", "items", "2b.md")), false, "base merge must not publish an added item");
 
 // Invalid proposals retain actionable field-level diagnostics.
 const invalidPath = path.join(drop, "invalid.request.json");
@@ -147,6 +193,22 @@ assert.equal(resume.state, "pass", JSON.stringify(resume.result?.validation?.err
 
 watcher.close();
 assert.equal(readWatcherStatus(drop).state, "stopped");
+
+// A changed published input invalidates a base-mode result even when the
+// exact request bytes have not changed.
+fs.writeFileSync(path.join(root, "plan", "items", "2a.md"), `${originalItem}\n`);
+assert.equal(readValidationResult(basePath, { publishedRoot: root }).state, "stale");
+fs.writeFileSync(path.join(root, "plan", "items", "2a.md"), originalItem);
+assert.equal(readValidationResult(basePath, { publishedRoot: root }).state, "pass");
+
+// A pre-base-mode result has no published-input manifest and cannot be read
+// as covering a request that names the published tree.
+const currentBaseResult = JSON.parse(fs.readFileSync(resultPathFor(basePath), "utf8"));
+delete currentBaseResult.published;
+fs.writeFileSync(resultPathFor(basePath), `${JSON.stringify(currentBaseResult, null, 2)}\n`);
+assert.equal(readValidationResult(basePath, { publishedRoot: root }).state, "stale");
+processRequestFile(basePath, { publishedRoot: root });
+assert.equal(readValidationResult(basePath, { publishedRoot: root }).state, "pass");
 
 // A changed request cannot inherit a result produced for earlier bytes.
 fs.writeFileSync(validPath, `${validText}\n`);
@@ -191,5 +253,22 @@ assert.equal(fs.existsSync(sentinel), false, "proposal contents must never execu
 
 assert.equal(fs.readFileSync(path.join(root, "PLAN.md"), "utf8"), originalPlan, "watcher must never publish or start an order");
 assert.equal(fs.readFileSync(path.join(root, "plan", "items", "2a.md"), "utf8"), originalItem, "watcher must never modify an item");
+
+// Base mode and CLI admission call the same validator over the same effective
+// plan on both sides of the admission boundary.
+for (const invalid of [false, true]) {
+  const baseRoot = fixture();
+  const request = baseProposalRequest({ invalid });
+  const requestPath = path.join(baseRoot, "plan", "validation", `parity-${invalid ? "fail" : "pass"}.request.json`);
+  fs.mkdirSync(path.dirname(requestPath), { recursive: true });
+  fs.writeFileSync(requestPath, JSON.stringify(request, null, 2));
+  const baseResult = processRequestFile(requestPath, { publishedRoot: baseRoot }).result;
+
+  const cliRoot = fixture();
+  publishBaseRequest(cliRoot, request);
+  const cli = spawnSync(process.execPath, [linter, "--root", cliRoot], { encoding: "utf8" });
+  assert.equal(baseResult.status === "pass", cli.status === 0, `base and CLI status must agree for invalid=${invalid}`);
+  assert.deepEqual(baseResult.validation.errors, cliErrors(cli), `base and CLI diagnostics must agree for invalid=${invalid}`);
+}
 
 process.stdout.write("plan validation watcher fixtures passed\n");
