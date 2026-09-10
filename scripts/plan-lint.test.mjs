@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { loadPublishedProposal, validateProposal } from "./plan-lint.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const linter = path.join(here, "plan-lint.mjs");
@@ -132,6 +133,29 @@ function prepare(root) {
   const result = run(root, "--structural");
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /completed-order heading is not allowed/);
+}
+
+{
+  const root = makeFixture("\n- W1 **2a executable work.**", [{ id: "2a", where: "items", text: item("2a") }]);
+  prepare(root);
+  const published = loadPublishedProposal(root);
+  const orderBody = published.planText.match(/^## Current work order[^\n]*\n([\s\S]*?)(?=^## (?:Next work order|In flight|Index))/m)[1].trim();
+  const proposedItems = published.itemContents.map((entry) => entry.relative === "plan/items/2a.md"
+    ? { ...entry, text: item("2a", { state: "proposed", unknown: true }) }
+    : entry);
+  const proposed = validateProposal({ ...published, orderBody, itemContents: proposedItems });
+  assert.match(proposed.errors.join("\n"), /ORDER GATE: executable item 2a is proposed/);
+  assert.match(proposed.errors.join("\n"), /unresolved milestone/);
+  assert.ok(proposed.errorDetails.every(({ field, expected }) => field && expected), "proposal errors must carry an offending field and expected form");
+  assert.match(proposed.proposalId, /^sha256:[0-9a-f]{64}$/);
+  const changed = validateProposal({ ...published, orderBody: `${orderBody}\n\nChanged proposal.`, itemContents: proposedItems });
+  assert.notEqual(changed.proposalId, proposed.proposalId, "a changed proposal must not reuse a stale validation identity");
+  assert.equal(fs.readFileSync(path.join(root, "plan", "items", "2a.md"), "utf8"), item("2a"), "proposal validation must not publish item changes");
+  assert.equal(fs.readFileSync(path.join(root, "PLAN.md"), "utf8").includes("Changed proposal."), false, "proposal validation must not publish the order body");
+
+  fs.writeFileSync(path.join(root, "plan", "items", "2a.md"), proposedItems.find((entry) => entry.relative === "plan/items/2a.md").text);
+  const publishedResult = validateProposal(loadPublishedProposal(root));
+  assert.deepEqual(proposed.errors, publishedResult.errors, "proposed and published inputs must report the same validation errors");
 }
 
 process.stdout.write("plan-lint fixtures passed\n");

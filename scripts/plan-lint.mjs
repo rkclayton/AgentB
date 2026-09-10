@@ -1,44 +1,22 @@
 #!/usr/bin/env node
 
+import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-let root = scriptRoot;
-let structuralOnly = false;
-let writeIndex = false;
-for (let i = 2; i < process.argv.length; i += 1) {
-  const arg = process.argv[i];
-  if (arg === "--structural") structuralOnly = true;
-  else if (arg === "--write-index") writeIndex = true;
-  else if (arg === "--root" && process.argv[i + 1]) root = path.resolve(process.argv[++i]);
-  else {
-    console.error(`unknown argument: ${arg}`);
-    process.exit(2);
-  }
-}
-
-const planPath = path.join(root, "PLAN.md");
-const itemRoots = [
-  { directory: path.join(root, "plan", "items"), label: "items" },
-  { directory: path.join(root, "plan", "archive"), label: "archive" },
-];
 const validStates = new Set(["proposed", "live", "shipped", "superseded", "dead"]);
 const validKinds = new Set(["defect", "feature", "decision", "discovery"]);
 const validSurfaces = new Set(["chat", "chat-list", "composer", "tab-strip", "console", "settings", "run-loop", "accounting", "tools", "install", "plan", "tests"]);
 const validMetadata = new Set(["state", "milestone", "shipped", "kind", "surfaces", "evidence", "acceptance", "depends-on", "agent"]);
-const errors = [];
-const warnings = [];
-const items = new Map();
-const sourceTexts = [];
 
 function lineCount(text) {
   return text === "" ? 0 : text.split(/\r?\n/).length - (text.endsWith("\n") ? 1 : 0);
 }
 
-function parseMetadata(text, relative) {
+function parseMetadata(text, relative, errors) {
   const lines = text.split(/\r?\n/);
   const fenced = lines[0] === "---";
   const end = fenced ? lines.indexOf("---", 1) : lines.indexOf("");
@@ -66,18 +44,83 @@ function parseMetadata(text, relative) {
   return { metadata, body: lines.slice(bodyStartLine).join("\n") };
 }
 
-for (const rootInfo of itemRoots) {
-  if (!fs.existsSync(rootInfo.directory)) {
-    errors.push(`missing directory: ${path.relative(root, rootInfo.directory)}`);
-    continue;
-  }
-  for (const name of fs.readdirSync(rootInfo.directory).sort()) {
-    if (!name.endsWith(".md")) continue;
-    const id = name.slice(0, -3);
-    const relative = path.posix.join("plan", rootInfo.label, name);
-    const text = fs.readFileSync(path.join(rootInfo.directory, name), "utf8");
+function normalizeItemContents(itemContents) {
+  const entries = Array.isArray(itemContents)
+    ? itemContents
+    : Object.entries(itemContents ?? {}).map(([relative, text]) => ({ relative, text }));
+  return entries.map(({ relative, text }) => ({
+    relative: String(relative).replaceAll("\\", "/"),
+    text: String(text),
+  })).sort((a, b) => a.relative.localeCompare(b.relative));
+}
+
+function replaceCurrentOrderBody(planText, orderBody) {
+  if (orderBody === undefined || orderBody === null) return planText;
+  const current = planText.match(/^## Current work order[^\n]*\n[\s\S]*?(?=^## (?:Next work order|In flight|Index)|(?![\s\S]))/m);
+  if (!current) return planText;
+  const heading = current[0].match(/^## Current work order[^\n]*/)?.[0] ?? "## Current work order";
+  const replacement = `${heading}\n\n${String(orderBody).replace(/^\s+|\s+$/g, "")}\n\n`;
+  return `${planText.slice(0, current.index)}${replacement}${planText.slice(current.index + current[0].length)}`;
+}
+
+function proposalIdentity(planText, orderBody, itemContents) {
+  const exact = JSON.stringify({ planText, orderBody: orderBody ?? null, itemContents: normalizeItemContents(itemContents) });
+  return `sha256:${crypto.createHash("sha256").update(exact, "utf8").digest("hex")}`;
+}
+
+function issueDetail(message) {
+  const metadata = message.match(/(?:metadata field |metadata |unresolved )([a-z][a-z-]*)/i)?.[1];
+  const reference = message.match(/(?:reference |item )((?:\[\[)?[0-9]+[a-z]*(?:\]\])?)/i)?.[1];
+  const field = metadata ?? (message.includes("frontmatter") ? "frontmatter"
+    : message.includes("heading") ? "heading"
+      : message.includes("item id") || message.includes("item IDs") ? "item-id"
+        : message.includes("In flight marker") ? "in-flight-marker"
+          : message.includes("Current work order") ? "current-work-order"
+            : message.includes("Index") || message.includes("index") ? "index"
+              : reference ? "reference" : "plan");
+  const expected = message.includes("no recorded authorization") ? "an operator authorization record in the W clause or item evidence"
+    : message.includes("non-empty ## Unresolved") ? "(none), or an explicit discovery/blocker representation"
+      : message.includes("does not exist") || message.includes("unresolved item reference") ? "a resolvable item file in plan/items or plan/archive"
+        : message.includes("expected live") ? "state: live"
+          : message.includes("invalid milestone") ? "unknown, -, or 0.<number>"
+            : message.includes("invalid state") ? "proposed, live, shipped, superseded, or dead"
+              : message.includes("invalid kind") ? "defect, feature, decision, or discovery"
+                : message.includes("invalid surfaces") ? "one or more registered surface names"
+                  : message.includes("missing required metadata") ? "a non-empty required frontmatter field"
+                    : message.includes("missing top-level item heading") ? "# <item-id> — <title>"
+                      : message.includes("missing ## Unresolved") ? "a terminal ## Unresolved section"
+                        : message.includes("belongs to another order") ? "the current Order ID before /W<n>"
+                          : message.includes("stale or malformed") ? "the generated index from --write-index --structural"
+                            : "the form named by the validation message";
+  return { message, field: reference ?? field, expected };
+}
+
+function escapeCell(value) {
+  return String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
+}
+
+/** Validate an exact plan proposal without writing it to the repository. */
+export function validateProposal({ planText, orderBody = null, itemContents, structuralOnly = false }) {
+  const errors = [];
+  const warnings = [];
+  const items = new Map();
+  const sourceTexts = [];
+  const normalizedItems = normalizeItemContents(itemContents);
+
+  for (const { relative, text } of normalizedItems) {
+    if (relative === "plan/_reference.md" || relative === "plan/_history.md") {
+      sourceTexts.push({ relative, text });
+      continue;
+    }
+    const location = relative.startsWith("plan/archive/") ? "archive"
+      : relative.startsWith("plan/items/") ? "items" : null;
+    if (!location || !relative.endsWith(".md")) {
+      errors.push(`${relative}: expected an item path under plan/items or plan/archive ending in .md`);
+      continue;
+    }
+    const id = path.posix.basename(relative, ".md");
     sourceTexts.push({ relative, text });
-    const parsed = parseMetadata(text, relative);
+    const parsed = parseMetadata(text, relative, errors);
     if (!parsed) continue;
     const { metadata, body } = parsed;
     const state = metadata.get("state");
@@ -86,9 +129,8 @@ for (const rootInfo of itemRoots) {
     if (firstKeys[0] !== "state" || firstKeys[1] !== "milestone") errors.push(`${relative}: state and milestone must be the first two metadata fields`);
     if (!validStates.has(state)) errors.push(`${relative}: invalid state ${JSON.stringify(state)}`);
     if (!/^(?:unknown|-|0\.\d+)$/.test(milestone ?? "")) errors.push(`${relative}: invalid milestone ${JSON.stringify(milestone)}`);
-    if (rootInfo.label === "items" && !["proposed", "live"].includes(state)) errors.push(`${relative}: state ${state} must not live in plan/items`);
-    if (rootInfo.label === "archive" && ["proposed", "live"].includes(state)) errors.push(`${relative}: state ${state} must not live in plan/archive`);
-
+    if (location === "items" && !["proposed", "live"].includes(state)) errors.push(`${relative}: state ${state} must not live in plan/items`);
+    if (location === "archive" && ["proposed", "live"].includes(state)) errors.push(`${relative}: state ${state} must not live in plan/archive`);
     const required = state === "live" ? ["state", "milestone", "kind", "surfaces", "evidence", "acceptance"]
       : state === "proposed" ? ["state", "milestone", "kind", "surfaces", "evidence"] : ["state", "milestone"];
     for (const field of required) if (!metadata.has(field) || metadata.get(field) === "") errors.push(`${relative}: missing required metadata ${field}`);
@@ -97,10 +139,7 @@ for (const rootInfo of itemRoots) {
     const rawSurfaces = metadata.get("surfaces");
     const surfaces = rawSurfaces?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
     if (rawSurfaces && rawSurfaces !== "unknown" && (!surfaces.length || surfaces.some((surface) => !validSurfaces.has(surface)))) errors.push(`${relative}: invalid surfaces ${JSON.stringify(rawSurfaces)}`);
-    for (const field of ["milestone", "kind", "surfaces", "evidence", "acceptance"]) {
-      if (metadata.get(field) === "unknown") warnings.push(`${relative}: unresolved metadata ${field}`);
-    }
-
+    for (const field of ["milestone", "kind", "surfaces", "evidence", "acceptance"]) if (metadata.get(field) === "unknown") warnings.push(`${relative}: unresolved metadata ${field}`);
     const heading = body.match(/^# ([0-9]+[a-z]*) — ([^\n]+)$/m);
     if (!heading) {
       errors.push(`${relative}: missing top-level item heading`);
@@ -118,62 +157,31 @@ for (const rootInfo of itemRoots) {
     if (lines > 100) warnings.push(`${relative}: long item (${lines} lines)`);
     items.set(id, { id, state, milestone, kind: kind ?? "", surfaces, rawSurfaces: rawSurfaces ?? "", relative, title: heading[2], lines, unresolved: unresolved ? unresolved[1].trim() : null, metadata });
   }
-}
 
-for (const extra of ["plan/_reference.md", "plan/_history.md"]) {
-  const full = path.join(root, ...extra.split("/"));
-  if (fs.existsSync(full)) sourceTexts.push({ relative: extra, text: fs.readFileSync(full, "utf8") });
-}
-for (const { relative, text } of sourceTexts) {
-  for (const match of text.matchAll(/\[\[([0-9]+[a-z]*)\]\]/g)) if (!items.has(match[1])) errors.push(`${relative}: unresolved item reference [[${match[1]}]]`);
-}
-
-function sortedItems() {
-  return [...items.values()].sort((a, b) => a.state.localeCompare(b.state) || a.milestone.localeCompare(b.milestone, "en", { numeric: true }) || a.id.localeCompare(b.id, "en", { numeric: true }));
-}
-
-function escapeCell(value) {
-  return String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
-}
-
-function indexSection() {
-  const rows = sortedItems().map((item) => `| ${item.state} | ${item.kind || "-"} | ${item.milestone} | [${item.id}](${item.relative}) | ${escapeCell(item.title)} | ${escapeCell(item.rawSurfaces || "-")} | ${item.lines} |`);
-  return [
+  for (const { relative, text } of sourceTexts) {
+    for (const match of text.matchAll(/\[\[([0-9]+[a-z]*)\]\]/g)) if (!items.has(match[1])) errors.push(`${relative}: unresolved item reference [[${match[1]}]]`);
+  }
+  const sortedItems = [...items.values()].sort((a, b) => a.state.localeCompare(b.state) || a.milestone.localeCompare(b.milestone, "en", { numeric: true }) || a.id.localeCompare(b.id, "en", { numeric: true }));
+  const indexSection = [
     "## Index", "", "Generated from item files. This is navigation, not an execution priority queue.", "",
     "| State | Kind | Milestone | Item | Title | Surfaces | Lines |",
-    "| --- | --- | --- | --- | --- | --- | ---: |", ...rows, "",
+    "| --- | --- | --- | --- | --- | --- | ---: |",
+    ...sortedItems.map((item) => `| ${item.state} | ${item.kind || "-"} | ${item.milestone} | [${item.id}](${item.relative}) | ${escapeCell(item.title)} | ${escapeCell(item.rawSurfaces || "-")} | ${item.lines} |`), "",
   ].join("\n");
-}
 
-if (!fs.existsSync(planPath)) {
-  errors.push("missing PLAN.md");
-} else {
-  let plan = fs.readFileSync(planPath, "utf8");
-  if (writeIndex && !errors.length) {
-    if (!/^## Index\s*$/m.test(plan)) errors.push("PLAN.md: missing ## Index");
-    else {
-      const newline = plan.includes("\r\n") ? "\r\n" : "\n";
-      plan = plan.replace(/^## Index\s*$[\s\S]*$/m, indexSection()).replaceAll("\n", newline);
-      fs.writeFileSync(planPath, plan, "utf8");
-    }
-  }
-
-  for (const match of plan.matchAll(/\[\[([0-9]+[a-z]*)\]\]/g)) if (!items.has(match[1])) errors.push(`PLAN.md: unresolved item reference [[${match[1]}]]`);
-  const indexMatch = plan.match(/^## Index\s*$[\s\S]*$/m);
+  const effectivePlan = replaceCurrentOrderBody(String(planText ?? ""), orderBody);
+  for (const match of effectivePlan.matchAll(/\[\[([0-9]+[a-z]*)\]\]/g)) if (!items.has(match[1])) errors.push(`PLAN.md: unresolved item reference [[${match[1]}]]`);
+  const indexMatch = effectivePlan.match(/^## Index\s*$[\s\S]*$/m);
   if (!indexMatch) errors.push("PLAN.md: missing ## Index");
-  else if (indexMatch[0].replaceAll("\r\n", "\n").replace(/\s+$/, "") !== indexSection().replace(/\s+$/, "")) errors.push("PLAN.md index: stale or malformed; run node scripts/plan-lint.mjs --write-index --structural");
-
-  if (/^## (?:Completed|Closed|Previous) work order\b/im.test(plan)) errors.push("PLAN.md: completed-order heading is not allowed");
-  const currentMatch = plan.match(/^## Current work order([^\n]*)\n([\s\S]*?)(?=^## (?:Next work order|In flight|Index)|(?![\s\S]))/m);
+  else if (indexMatch[0].replaceAll("\r\n", "\n").replace(/\s+$/, "") !== indexSection.replace(/\s+$/, "")) errors.push("PLAN.md index: stale or malformed; run node scripts/plan-lint.mjs --write-index --structural");
+  if (/^## (?:Completed|Closed|Previous) work order\b/im.test(effectivePlan)) errors.push("PLAN.md: completed-order heading is not allowed");
+  const currentMatch = effectivePlan.match(/^## Current work order([^\n]*)\n([\s\S]*?)(?=^## (?:Next work order|In flight|Index)|(?![\s\S]))/m);
   if (!currentMatch) errors.push("PLAN.md: cannot find Current work order");
   else {
     const currentText = currentMatch[2];
     const orderId = currentText.match(/^Order ID:\s*`([^`]+)`/m)?.[1] ?? currentMatch[1].match(/\b(v\d+\.\d+\.\d+|[A-Z][A-Z0-9-]+)\b/)?.[1];
-    const inFlight = plan.match(/^## In flight\s*$\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? "";
-    if (orderId) {
-      for (const marker of inFlight.matchAll(/^-\s+`?([^\s`/]+)\/(W\d+)/gm)) if (marker[1] !== orderId) errors.push(`PLAN.md: In flight marker ${marker[1]}/${marker[2]} belongs to another order (current ${orderId})`);
-    }
-
+    const inFlight = effectivePlan.match(/^## In flight\s*$\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? "";
+    if (orderId) for (const marker of inFlight.matchAll(/^-\s+`?([^\s`/]+)\/(W\d+)/gm)) if (marker[1] !== orderId) errors.push(`PLAN.md: In flight marker ${marker[1]}/${marker[2]} belongs to another order (current ${orderId})`);
     if (!structuralOnly && !/No product changes/i.test(currentText)) {
       const workItems = [...currentText.matchAll(/^- W\d+\s+\*\*(?:item\s+)?([0-9]+[a-z]*)\b([^\n]*)/gmi)];
       const executable = new Map();
@@ -206,13 +214,65 @@ if (!fs.existsSync(planPath)) {
       }
     }
   }
+  return {
+    proposalId: proposalIdentity(String(planText ?? ""), orderBody, normalizedItems),
+    errors, warnings,
+    errorDetails: errors.map(issueDetail),
+    warningDetails: warnings.map(issueDetail),
+    itemCount: items.size,
+    indexSection,
+    effectivePlan,
+  };
 }
 
-console.log(`plan lint mode: ${structuralOnly ? "structural" : "admission"}${writeIndex ? " + write-index" : ""}`);
-for (const warning of warnings) console.warn(`WARN ${warning}`);
-for (const error of errors) console.error(`ERROR ${error}`);
-if (errors.length) {
-  console.error(`plan lint failed: ${errors.length} error(s), ${warnings.length} warning(s)`);
-  process.exit(1);
+export function loadPublishedProposal(root = scriptRoot) {
+  const planPath = path.join(root, "PLAN.md");
+  const itemContents = [];
+  for (const label of ["items", "archive"]) {
+    const directory = path.join(root, "plan", label);
+    if (!fs.existsSync(directory)) continue;
+    for (const name of fs.readdirSync(directory).sort()) if (name.endsWith(".md")) itemContents.push({ relative: path.posix.join("plan", label, name), text: fs.readFileSync(path.join(directory, name), "utf8") });
+  }
+  for (const extra of ["plan/_reference.md", "plan/_history.md"]) {
+    const full = path.join(root, ...extra.split("/"));
+    if (fs.existsSync(full)) itemContents.push({ relative: extra, text: fs.readFileSync(full, "utf8") });
+  }
+  return { planText: fs.existsSync(planPath) ? fs.readFileSync(planPath, "utf8") : "", itemContents };
 }
-console.log(`plan lint passed: ${items.size} item(s), ${warnings.length} warning(s)`);
+
+function runCLI() {
+  let root = scriptRoot;
+  let structuralOnly = false;
+  let writeIndex = false;
+  for (let i = 2; i < process.argv.length; i += 1) {
+    const arg = process.argv[i];
+    if (arg === "--structural") structuralOnly = true;
+    else if (arg === "--write-index") writeIndex = true;
+    else if (arg === "--root" && process.argv[i + 1]) root = path.resolve(process.argv[++i]);
+    else {
+      console.error(`unknown argument: ${arg}`);
+      process.exit(2);
+    }
+  }
+  const loaded = loadPublishedProposal(root);
+  let result = validateProposal({ ...loaded, structuralOnly });
+  if (writeIndex) {
+    const stale = "PLAN.md index: stale or malformed; run node scripts/plan-lint.mjs --write-index --structural";
+    if (!result.errors.filter((message) => message !== stale).length) {
+      const newline = loaded.planText.includes("\r\n") ? "\r\n" : "\n";
+      fs.writeFileSync(path.join(root, "PLAN.md"), loaded.planText.replace(/^## Index\s*$[\s\S]*$/m, result.indexSection).replaceAll("\n", newline), "utf8");
+      result = validateProposal({ ...loadPublishedProposal(root), structuralOnly });
+    }
+  }
+  console.log(`plan lint mode: ${structuralOnly ? "structural" : "admission"}${writeIndex ? " + write-index" : ""}`);
+  for (const warning of result.warnings) console.warn(`WARN ${warning}`);
+  for (const error of result.errors) console.error(`ERROR ${error}`);
+  if (result.errors.length) {
+    console.error(`plan lint failed: ${result.errors.length} error(s), ${result.warnings.length} warning(s)`);
+    process.exitCode = 1;
+    return;
+  }
+  console.log(`plan lint passed: ${result.itemCount} item(s), ${result.warnings.length} warning(s)`);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) runCLI();
