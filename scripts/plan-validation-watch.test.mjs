@@ -9,6 +9,7 @@ import { loadPublishedProposal } from "./plan-lint.mjs";
 import {
   processRequestFile,
   readValidationResult,
+  readWatcherStatus,
   resultPathFor,
   startValidationWatcher,
 } from "./plan-validation-watch.mjs";
@@ -107,7 +108,9 @@ const root = fixture();
 const drop = path.join(root, "plan", "validation");
 const originalPlan = fs.readFileSync(path.join(root, "PLAN.md"), "utf8");
 const originalItem = fs.readFileSync(path.join(root, "plan", "items", "2a.md"), "utf8");
+assert.equal(readWatcherStatus(drop).state, "absent");
 const watcher = startValidationWatcher({ dropDirectory: drop });
+assert.equal(readWatcherStatus(drop).state, "ready");
 
 // A proposal that adds an item validates against its generated in-memory index.
 const validPath = path.join(drop, "valid.request.json");
@@ -143,6 +146,7 @@ const resume = await waitForResult(resumePath);
 assert.equal(resume.state, "pass", JSON.stringify(resume.result?.validation?.errors));
 
 watcher.close();
+assert.equal(readWatcherStatus(drop).state, "stopped");
 
 // A changed request cannot inherit a result produced for earlier bytes.
 fs.writeFileSync(validPath, `${validText}\n`);
@@ -166,6 +170,15 @@ for (const [field, value] of [
   assert.equal(result.status, "refused", `${field} must be refused`);
   assert.match(result.errors[0].message, new RegExp(field));
 }
+
+// Replacing a result path unlinks it first, so even a hard link cannot turn a
+// verdict write into a PLAN.md write.
+const linkedPath = path.join(drop, "linked-result.request.json");
+fs.writeFileSync(linkedPath, JSON.stringify(proposalRequest(root), null, 2));
+fs.linkSync(path.join(root, "PLAN.md"), resultPathFor(linkedPath));
+processRequestFile(linkedPath);
+assert.equal(fs.readFileSync(path.join(root, "PLAN.md"), "utf8"), originalPlan, "an existing result link must not redirect a write into PLAN.md");
+assert.equal(readValidationResult(linkedPath).state, "pass");
 
 // Command-like proposal contents remain inert data while validation runs.
 const sentinel = path.join(root, "boundary-executed");

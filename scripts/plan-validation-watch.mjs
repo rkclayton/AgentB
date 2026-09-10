@@ -13,6 +13,8 @@ import {
 const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const requestSuffix = ".request.json";
 const resultSuffix = ".result.json";
+const watcherStatusName = "watcher.status.json";
+let temporarySerial = 0;
 
 function bindingFor(requestBytes) {
   const bytes = Buffer.isBuffer(requestBytes) ? requestBytes : Buffer.from(String(requestBytes), "utf8");
@@ -49,6 +51,19 @@ function refusal(binding, operation, messages) {
 
 function ownKeys(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? Object.keys(value) : [];
+}
+
+function writeJSON(targetPath, value) {
+  const temporary = `${targetPath}.${process.pid}.${Date.now()}.${temporarySerial++}.tmp`;
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  try {
+    try { fs.unlinkSync(targetPath); }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    fs.renameSync(temporary, targetPath);
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch {}
+    throw error;
+  }
 }
 
 function validateUnpublishedProposal(payload) {
@@ -141,8 +156,21 @@ export function processRequestFile(requestPath) {
   const requestBytes = fs.readFileSync(requestPath);
   const result = validateDroppedRequest(requestBytes);
   const resultPath = resultPathFor(requestPath);
-  fs.writeFileSync(resultPath, `${JSON.stringify(result, null, 2)}\n`, { encoding: "utf8", flag: "w" });
+  writeJSON(resultPath, result);
   return { resultPath, result };
+}
+
+/** Report watcher availability from files alone. */
+export function readWatcherStatus(dropDirectory, { now = Date.now(), staleAfterMs = 3000 } = {}) {
+  const statusPath = path.join(path.resolve(dropDirectory), watcherStatusName);
+  if (!fs.existsSync(statusPath)) return { state: "absent", status: null };
+  let status;
+  try { status = JSON.parse(fs.readFileSync(statusPath, "utf8")); }
+  catch (error) { return { state: "stale", status: null, error: `watcher status JSON is invalid: ${error.message}` }; }
+  if (status?.state === "stopped") return { state: "stopped", status };
+  const updated = Date.parse(status?.updated_at ?? "");
+  if (status?.state !== "ready" || Number.isNaN(updated) || now - updated > staleAfterMs) return { state: "stale", status };
+  return { state: "ready", status };
 }
 
 function requestFiles(dropDirectory) {
@@ -157,6 +185,14 @@ export function startValidationWatcher({ dropDirectory = path.join(scriptRoot, "
   fs.mkdirSync(absoluteDrop, { recursive: true });
   const seen = new Map();
   const pending = new Map();
+  const startedAt = new Date().toISOString();
+  const writeStatus = (state) => writeJSON(path.join(absoluteDrop, watcherStatusName), {
+    version: 1,
+    state,
+    pid: process.pid,
+    started_at: startedAt,
+    updated_at: new Date().toISOString(),
+  });
 
   const processPath = (requestPath) => {
     let bytes;
@@ -183,12 +219,16 @@ export function startValidationWatcher({ dropDirectory = path.join(scriptRoot, "
     if (name && String(name).endsWith(requestSuffix)) schedule(path.join(absoluteDrop, String(name)));
     else if (!name) for (const requestPath of requestFiles(absoluteDrop)) schedule(requestPath);
   });
+  writeStatus("ready");
+  const heartbeat = setInterval(() => writeStatus("ready"), 1000);
   return {
     dropDirectory: absoluteDrop,
     close() {
+      clearInterval(heartbeat);
       watcher.close();
       for (const timer of pending.values()) clearTimeout(timer);
       pending.clear();
+      writeStatus("stopped");
     },
   };
 }
