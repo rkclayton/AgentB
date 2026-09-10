@@ -7,16 +7,17 @@
   color: var(--ink);
   font: 400 13px/20px var(--sans);
 }
-.chat-page * {
+.chat-page > :where(:not(.app-shell)),
+.chat-page > :where(:not(.app-shell)) * {
   box-sizing: border-box;
 }
-.chat-page button,
-.chat-page textarea,
-.chat-page select {
+.chat-page > :where(:not(.app-shell)) button,
+.chat-page > :where(:not(.app-shell)) textarea,
+.chat-page > :where(:not(.app-shell)) select {
   color: inherit;
   font: inherit;
 }
-.chat-page button {
+.chat-page > :where(:not(.app-shell)) button {
   min-height: 32px;
   padding: 4px 10px;
   background: rgba(216, 221, 227, 0.08);
@@ -24,15 +25,15 @@
   border-radius: 2px;
   cursor: pointer;
 }
-.chat-page button:hover {
+.chat-page > :where(:not(.app-shell)) button:hover {
   background: rgba(216, 221, 227, 0.12);
 }
-.chat-page button:active {
+.chat-page > :where(:not(.app-shell)) button:active {
   background: rgba(216, 221, 227, 0.16);
 }
-.chat-page button:focus-visible,
-.chat-page textarea:focus-visible,
-.chat-page select:focus-visible,
+.chat-page > :where(:not(.app-shell)) button:focus-visible,
+.chat-page > :where(:not(.app-shell)) textarea:focus-visible,
+.chat-page > :where(:not(.app-shell)) select:focus-visible,
 .chat-log:focus-visible,
 .chat-entry[tabindex]:focus-visible {
   outline: 1px solid var(--trace);
@@ -554,9 +555,14 @@
 .chat-status-strip .operator-status[data-active="false"] { opacity:.45; }
 .chat-retry { min-height:22px!important; padding:1px 6px!important; background:transparent!important; }
 @media (prefers-reduced-motion: reduce) {
-  .chat-page *,
-  .chat-page *::before,
-  .chat-page *::after {
+  :where(
+    .chat-page > :not(.app-shell),
+    .chat-page > :not(.app-shell) *,
+    .chat-page > :not(.app-shell)::before,
+    .chat-page > :not(.app-shell)::after,
+    .chat-page > :not(.app-shell) *::before,
+    .chat-page > :not(.app-shell) *::after
+  ) {
     transition-duration: 0ms !important;
     animation-duration: 0ms !important;
   }

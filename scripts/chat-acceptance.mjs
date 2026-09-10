@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { chromium } from "playwright";
+import { agentStates, assertPageStyleBoundary, provePageStyleBoundaryControl } from "./page-style-boundary.mjs";
 
 const args = Object.fromEntries(Array.from({ length: Math.floor(process.argv.slice(2).length / 2) }, (_, index) => {
   const offset = index * 2 + 2;
@@ -18,6 +19,7 @@ let browser;
 let edgeContext;
 let page;
 let shellFlipEvidence;
+let shellStyleBoundaryEvidence;
 let app;
 let model;
 let modelPort;
@@ -422,6 +424,62 @@ if (realModel) {
   assert.deepEqual(returnedChatGeometry, chatGeometry, JSON.stringify({ chatGeometry, returnedChatGeometry }));
   shellFlipEvidence = { chat: chatGeometry, console: consoleGeometry, returned_chat: returnedChatGeometry, chat_to_console_ms: chatToConsoleMS, console_to_chat_ms: consoleToChatMS, console_load: consoleLoadTiming, chat_load: chatLoadTiming };
   record("agent-tab-left-toggle-preserves-chat-and-right-menu");
+
+  const shellStateDirectory = join(args.evidence, "shell-states");
+  await mkdir(shellStateDirectory, { recursive: true });
+  const captureRobotStates = async (pageName, stylesheet) => {
+    const boundary = await assertPageStyleBoundary(page, stylesheet);
+    const robots = {};
+    for (const state of agentStates) {
+      robots[state] = await page.locator(".agent-tab-robot").first().evaluate((robot, nextState) => {
+        robot.classList.remove("idle", "waiting", "running", "offline");
+        robot.classList.add(nextState);
+        const image = robot.querySelector("img");
+        const eyes = robot.querySelector(".agent-tab-eyes");
+        const robotStyle = getComputedStyle(robot);
+        const imageStyle = getComputedStyle(image);
+        const eyeStyle = getComputedStyle(eyes);
+        const robotRect = robot.getBoundingClientRect();
+        const imageRect = image.getBoundingClientRect();
+        return {
+          robot: { width: robotRect.width, height: robotRect.height, display: robotStyle.display, position: robotStyle.position, color: robotStyle.color },
+          image: { width: imageRect.width, height: imageRect.height, display: imageStyle.display, opacity: imageStyle.opacity, transform: imageStyle.transform },
+          eyes: { top: eyeStyle.top, width: eyeStyle.width, height: eyeStyle.height, opacity: eyeStyle.opacity, background: eyeStyle.backgroundColor },
+        };
+      }, state);
+      await page.locator(".app-shell").screenshot({ path: join(shellStateDirectory, `${pageName}-${state}.png`) });
+    }
+    return { boundary, robots };
+  };
+  const negativeControl = await provePageStyleBoundaryControl(page, "chat.css");
+  const chatStyles = await captureRobotStates("chat", "chat.css");
+  await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
+  await page.locator("#console-lifetime").waitFor({ state: "visible" });
+  const consoleStyles = await captureRobotStates("console", "app.css");
+  const emptyStateIllustration = await page.evaluate(() => {
+    const flow = document.querySelector(".flow");
+    const fixture = document.createElement("div");
+    fixture.className = "idle";
+    fixture.innerHTML = '<img src="/static/assets/idle.svg" alt=""><p>fixture</p>';
+    flow.append(fixture);
+    const fixtureStyle = getComputedStyle(fixture);
+    const imageStyle = getComputedStyle(fixture.querySelector("img"));
+    const result = {
+      position: fixtureStyle.position,
+      inset: fixtureStyle.inset,
+      display: fixtureStyle.display,
+      image_width: imageStyle.width,
+      image_height: imageStyle.height,
+      image_margin: imageStyle.margin,
+    };
+    fixture.remove();
+    return result;
+  });
+  assert.deepEqual(emptyStateIllustration, { position: "absolute", inset: "0px", display: "grid", image_width: "96px", image_height: "96px", image_margin: "auto" });
+  for (const state of agentStates) assert.deepEqual(consoleStyles.robots[state], chatStyles.robots[state], `Console and Chat robot differ in ${state}`);
+  shellStyleBoundaryEvidence = { negative_control: negativeControl, chat: chatStyles, console: consoleStyles, empty_state_illustration: emptyStateIllustration };
+  await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
+  await page.locator("#chat-task").waitFor({ state: "visible" });
 
   const baselineDirectory = join(args.evidence, "baseline-initial");
   await mkdir(baselineDirectory, { recursive: true });
@@ -956,7 +1014,7 @@ if (realModel) {
   assert.equal((await state()).sessions[sessionID], undefined, "confirmed trash control must remove the session registry entry");
   record("agent-menu-inline-delete-keeps-memory-default");
   record("fake-model-script-complete");
-  await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID, shell_flip: shellFlipEvidence }, null, 2));
+  await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID, shell_flip: shellFlipEvidence, shell_style_boundary: shellStyleBoundaryEvidence }, null, 2));
   const evidenceLogs = join(evidenceRun, "jsonl");
   await mkdir(evidenceLogs, { recursive: true });
   for (const name of (await readdir(join(args.data, "logs"))).filter((item) => item.endsWith(".jsonl"))) {

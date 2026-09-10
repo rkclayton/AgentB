@@ -737,7 +737,7 @@
   fill: var(--trace);
   transition: transform 260ms ease-in-out;
 }
-.idle {
+.flow > .idle {
   position: absolute;
   inset: 0;
   display: grid;
@@ -745,7 +745,7 @@
   text-align: center;
   color: var(--mute);
 }
-.idle img {
+.flow > .idle img {
   width: 96px;
   height: 96px;
   margin: auto;
@@ -1061,9 +1061,14 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-	*,
-	*::before,
-	*::after {
+	:where(
+		body > :not(.app-shell),
+		body > :not(.app-shell) *,
+		body > :not(.app-shell)::before,
+		body > :not(.app-shell)::after,
+		body > :not(.app-shell) *::before,
+		body > :not(.app-shell) *::after
+	) {
 	  animation-duration: 0ms !important;
 	  transition-duration: 0ms !important;
 	}
