@@ -796,8 +796,10 @@ if (realModel) {
   assert.ok(events.some((event) => event.type === "shell.grant" && event.data.scope === "session"));
   assert.ok(events.some((event) => event.type === "tool.result" && event.data.name === "shell" && event.data.ok === true));
   const gutter = await browser.evaluate(`getComputedStyle(document.querySelector('.chat-entry')).gridTemplateColumns.split(' ')[0]`);
-  assert.match(gutter, /^90px$/);
-  record("bind-run-as-you-tool-answer-gutter");
+  assert.match(gutter, /^72px$/);
+  const speakerHeads = await browser.evaluate(`({agent:document.querySelectorAll('.chat-agent .chat-speaker img').length,user:document.querySelectorAll('.chat-user .chat-speaker img').length})`);
+  assert.ok(speakerHeads.agent > 0 && speakerHeads.user === 0, JSON.stringify(speakerHeads));
+  record("bind-run-as-you-tool-answer-72px-robot-rail");
 
   await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
   await browser.wait(`location.pathname==='/' && document.querySelector('#settings-page') && document.querySelector('.shell-settings')?.getAttribute('href')`, "Console settings control");
@@ -813,6 +815,14 @@ if (realModel) {
   await waitFileContains(join(bound, "AGENT_B.md"), "Use the acceptance rules.");
   assert.equal(await readFile(join(bound, "AGENTS.md"), "utf8"), "Use the acceptance rules.\n");
   record("workspace-operator-files-and-adopt");
+  assert.equal(await clickText(".settings-nav button", "Security"), true);
+  await browser.wait(`document.querySelector('.settings-operator-status[data-action="operator-context"]')`, "Settings operator toggle");
+  const operatorBefore = await browser.evaluate(`document.querySelector('.settings-operator-status').getAttribute('aria-pressed')`);
+  await page.locator(".settings-operator-status").click();
+  await browser.wait(`document.querySelector('.settings-operator-status').getAttribute('aria-pressed')!==${JSON.stringify(operatorBefore)}`, "Settings operator toggled");
+  await page.locator(".settings-operator-status").click();
+  await browser.wait(`document.querySelector('.settings-operator-status').getAttribute('aria-pressed')===${JSON.stringify(operatorBefore)}`, "Settings operator restored");
+  record("settings-operator-mode-live-toggle");
 	await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
 	await browser.wait(`document.querySelector('#chat-task')`, "chat restored after settings");
 	events = await sessionEvents(sessionID);
