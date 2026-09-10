@@ -184,9 +184,26 @@ source.onopen = () => {
   void operatorReconciler.reconcile().catch(() => {});
 };
 source.onerror = () => { const connection = document.getElementById("connection"); if (connection) { connection.textContent = "connection lost — retrying"; connection.className = "alarm"; } };
-source.onmessage = (event) => reduce(JSON.parse(event.data));
-for (const type of ["snapshot", "projection.patch", "server.probed", "config.changed", "shell.identity", "shell.credential", "operator.context", "error"])
-  source.addEventListener(type, (event) => reduce(JSON.parse(event.data)));
+export function applyServerEvent(event) {
+  try {
+    reduce(JSON.parse(event.data));
+    return true;
+  } catch (error) {
+    const eventType = event?.type || "message";
+    const message = `invalid ${eventType} event payload; refreshing state`;
+    reduce({ type: "error", data: { where: "event_stream", event_type: eventType, message, detail: error?.message || String(error) } });
+    console.error(`${message}: ${error?.message || error}`);
+    void resync().catch((recoveryError) => {
+      const recoveryMessage = `event stream recovery failed after invalid ${eventType} payload`;
+      reduce({ type: "error", data: { where: "event_stream", event_type: eventType, message: recoveryMessage, detail: recoveryError?.message || String(recoveryError) } });
+      console.error(`${recoveryMessage}: ${recoveryError?.message || recoveryError}`);
+    });
+    return false;
+  }
+}
+source.onmessage = applyServerEvent;
+for (const type of ["snapshot", "projection.patch", "server.probed", "config.changed", "shell.identity", "shell.credential", "operator.context"])
+  source.addEventListener(type, applyServerEvent);
 function reconcileVisibleClient() { if (!document.hidden) void operatorReconciler.reconcile().catch(() => {}); }
 document.addEventListener("visibilitychange", reconcileVisibleClient);
 window.addEventListener("focus", reconcileVisibleClient);
