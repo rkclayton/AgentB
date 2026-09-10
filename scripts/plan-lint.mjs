@@ -65,11 +65,17 @@ function replaceCurrentOrderBody(planText, orderBody) {
 
 function proposalIdentity(planText, orderBody, itemContents) {
   const exact = JSON.stringify({ planText, orderBody: orderBody ?? null, itemContents: normalizeItemContents(itemContents) });
-  return `sha256:${crypto.createHash("sha256").update(exact, "utf8").digest("hex")}`;
+  return exactInputIdentity(exact);
+}
+
+/** Bind a result to exact UTF-8 input bytes. */
+export function exactInputIdentity(text) {
+  const bytes = Buffer.isBuffer(text) ? text : Buffer.from(String(text), "utf8");
+  return `sha256:${crypto.createHash("sha256").update(bytes).digest("hex")}`;
 }
 
 function issueDetail(message) {
-  const metadata = message.match(/(?:metadata field |metadata |unresolved )([a-z][a-z-]*)/i)?.[1];
+  const metadata = message.match(/(?:metadata field |metadata |unresolved |invalid )([a-z][a-z-]*)/i)?.[1];
   const reference = message.match(/(?:reference |item )((?:\[\[)?[0-9]+[a-z]*(?:\]\])?)/i)?.[1];
   const field = metadata ?? (message.includes("frontmatter") ? "frontmatter"
     : message.includes("heading") ? "heading"
