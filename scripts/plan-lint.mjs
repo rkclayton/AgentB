@@ -113,8 +113,8 @@ function unresolvedEntries(value) {
 }
 
 /** Validate an exact plan proposal without writing it to the repository. */
-export function validateProposal({ planText, orderBody = null, itemContents, structuralOnly = false }) {
-  const errors = [];
+export function validateProposal({ planText, orderBody = null, itemContents, structuralOnly = false, inputErrors = [] }) {
+  const errors = [...inputErrors];
   const warnings = [];
   const admission = { errors: [], warnings: [] };
   const blockers = [];
@@ -187,6 +187,7 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
   ].join("\n");
 
   const effectivePlan = replaceCurrentOrderBody(String(planText ?? ""), orderBody);
+  if (!inputErrors.includes("missing PLAN.md")) {
   for (const match of effectivePlan.matchAll(/\[\[([0-9]+[a-z]*)\]\]/g)) if (!items.has(match[1])) errors.push(`PLAN.md: unresolved item reference [[${match[1]}]]`);
   const indexMatch = effectivePlan.match(/^## Index\s*$[\s\S]*$/m);
   if (!indexMatch) errors.push("PLAN.md: missing ## Index");
@@ -276,6 +277,7 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
         }
       }
     }
+  }
   }
   return {
     proposalId: proposalIdentity(String(planText ?? ""), orderBody, normalizedItems),
@@ -407,16 +409,21 @@ export function validateResume({ acceptedParts, published, revision = null, deli
 export function loadPublishedProposal(root = scriptRoot) {
   const planPath = path.join(root, "PLAN.md");
   const itemContents = [];
+  const inputErrors = [];
   for (const label of ["items", "archive"]) {
     const directory = path.join(root, "plan", label);
-    if (!fs.existsSync(directory)) continue;
+    if (!fs.existsSync(directory)) {
+      inputErrors.push(`missing directory: plan${path.sep}${label}`);
+      continue;
+    }
     for (const name of fs.readdirSync(directory).sort()) if (name.endsWith(".md")) itemContents.push({ relative: path.posix.join("plan", label, name), text: fs.readFileSync(path.join(directory, name), "utf8") });
   }
   for (const extra of ["plan/_reference.md", "plan/_history.md"]) {
     const full = path.join(root, ...extra.split("/"));
     if (fs.existsSync(full)) itemContents.push({ relative: extra, text: fs.readFileSync(full, "utf8") });
   }
-  return { planText: fs.existsSync(planPath) ? fs.readFileSync(planPath, "utf8") : "", itemContents };
+  if (!fs.existsSync(planPath)) inputErrors.push("missing PLAN.md");
+  return { planText: fs.existsSync(planPath) ? fs.readFileSync(planPath, "utf8") : "", itemContents, inputErrors };
 }
 
 function runCLI() {

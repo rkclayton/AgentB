@@ -64,6 +64,17 @@ function prepare(root) {
 }
 
 {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "agentb-plan-lint-"));
+  fixtureRoots.push(root);
+  const result = run(root);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /ERROR missing directory: plan[\\/]items/);
+  assert.match(result.stderr, /ERROR missing directory: plan[\\/]archive/);
+  assert.match(result.stderr, /ERROR missing PLAN\.md/);
+  assert.doesNotMatch(result.stderr, /missing ## Index|cannot find Current work order/, "missing PLAN must retain the original focused CLI errors");
+}
+
+{
   const root = makeFixture("\n- W1 **2a closure check.**", [{ id: "2a", where: "archive", text: item("2a", { state: "shipped" }).replace("evidence: Operator-authorized fixture scope.", "shipped: v0.1.0 abcdef0\nevidence: Recorded release evidence.") }]);
   prepare(root);
   const result = run(root, "--structural");
