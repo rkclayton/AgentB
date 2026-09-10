@@ -288,6 +288,122 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
   };
 }
 
+function currentOrderRecord(planText) {
+  const match = String(planText ?? "").match(/^## Current work order([^\n]*)\n([\s\S]*?)(?=^## (?:Next work order|In flight|Index)|(?![\s\S]))/m);
+  if (!match) return null;
+  const text = match[2];
+  const orderId = text.match(/^Order ID:\s*`([^`]+)`/m)?.[1] ?? match[1].match(/\b(v\d+\.\d+\.\d+|[A-Z][A-Z0-9-]+)\b/)?.[1] ?? null;
+  const revision = text.match(/^\*\*Revision(?::)?\s+(r[0-9]+)\b/im)?.[1].toLowerCase() ?? null;
+  const inFlight = String(planText ?? "").match(/^## In flight\s*$\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? "";
+  const work = [...text.matchAll(/^- (W\d+)\s+\*\*(?:item\s+)?([0-9]+[a-z]*)\b/gmi)].map((entry) => ({ workId: entry[1].toUpperCase(), itemId: entry[2].toLowerCase() }));
+  const completedWork = orderId ? [...inFlight.matchAll(new RegExp(`^-\\s+${orderId.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/(W\\d+) completed\\b`, "gmi"))].map((entry) => entry[1].toUpperCase()) : [];
+  return { orderId, revision, text, work, completedWork };
+}
+
+function hashText(text) {
+  return crypto.createHash("sha256").update(String(text), "utf8").digest("hex");
+}
+
+/** Merge immutable snapshot parts. Later parts add or explicitly supersede covered inputs. */
+export function mergeAcceptedSnapshotParts(parts) {
+  if (!Array.isArray(parts) || !parts.length) throw new TypeError("accepted snapshot parts must be a non-empty array");
+  let planText = null;
+  const itemContents = new Map();
+  const coverage = new Map();
+  const records = [];
+  for (const part of parts) {
+    if (!/^r[0-9]+$/i.test(part.revision ?? "")) throw new TypeError("snapshot part revision must have form r<number>");
+    if (!part.takenAt || Number.isNaN(Date.parse(part.takenAt))) throw new TypeError("snapshot part takenAt must be an ISO timestamp");
+    const revision = part.revision.toLowerCase();
+    if (part.planText !== undefined) {
+      planText = String(part.planText);
+      coverage.set("PLAN.md", { revision, takenAt: part.takenAt, sha256: hashText(planText) });
+    }
+    for (const entry of normalizeItemContents(part.itemContents)) {
+      itemContents.set(entry.relative, entry.text);
+      coverage.set(entry.relative, { revision, takenAt: part.takenAt, sha256: hashText(entry.text) });
+    }
+    records.push({ revision, takenAt: part.takenAt });
+  }
+  if (planText === null) throw new TypeError("accepted snapshot union must cover PLAN.md");
+  return {
+    revision: records.at(-1).revision,
+    takenAt: records.at(-1).takenAt,
+    planText,
+    itemContents: [...itemContents].map(([relative, text]) => ({ relative, text })),
+    coverage: Object.fromEntries(coverage),
+    parts: records,
+  };
+}
+
+function resumeInputs(proposal) {
+  const order = currentOrderRecord(proposal.planText);
+  const contents = new Map(normalizeItemContents(proposal.itemContents).map((entry) => [entry.relative, entry.text]));
+  const required = new Map();
+  if (order) {
+    required.set("PLAN.md", order.text.replace(/\s+$/, ""));
+    for (const { itemId } of order.work) {
+      const path = [`plan/items/${itemId}.md`, `plan/archive/${itemId}.md`].find((candidate) => contents.has(candidate));
+      if (path) required.set(path, contents.get(path));
+      else required.set(`plan/items/${itemId}.md`, null);
+    }
+  }
+  return { order, required };
+}
+
+/** Validate a resume against an immutable accepted-snapshot union and an explicit revision. */
+export function validateResume({ acceptedParts, published, revision = null, deliveryEvidence = null }) {
+  const accepted = mergeAcceptedSnapshotParts(acceptedParts);
+  const acceptedInputs = resumeInputs(accepted);
+  const publishedInputs = resumeInputs(published);
+  const errors = [];
+  if (!publishedInputs.order) errors.push("RESUME: published PLAN.md has no Current work order; expected one accepted order body");
+  if (publishedInputs.order?.orderId && /-r[0-9]+$/i.test(publishedInputs.order.orderId)) errors.push("RESUME: revision is encoded in Order ID; expected revision identity outside the parsed order id");
+  if (!publishedInputs.order?.revision) errors.push("RESUME: published brief has no revision identity; expected **Revision: r<number>** outside Order ID");
+
+  const uncovered = [...publishedInputs.required.keys()].filter((relative) => !accepted.coverage[relative]);
+  for (const relative of uncovered) errors.push(`RESUME: uncovered input ${relative}; expected it in the original snapshot or a dated amendment`);
+  const changed = [];
+  for (const [relative, text] of publishedInputs.required) {
+    if (!accepted.coverage[relative] || text === null) continue;
+    const acceptedText = acceptedInputs.required.get(relative);
+    if (acceptedText === undefined || acceptedText === null || hashText(acceptedText) !== hashText(text)) changed.push(relative);
+  }
+
+  if (changed.length) {
+    if (!revision) {
+      errors.push(`RESUME: published brief differs from accepted snapshot at ${changed.join(", ")}; expected an explicit delivered revision naming changes and resume point`);
+    } else {
+      if (revision.from !== accepted.revision) errors.push(`RESUME: revision from is ${revision.from ?? "missing"}; expected ${accepted.revision}`);
+      if (revision.to !== publishedInputs.order?.revision) errors.push(`RESUME: revision to is ${revision.to ?? "missing"}; expected ${publishedInputs.order?.revision ?? "the published revision"}`);
+      if (!revision.summary?.trim()) errors.push("RESUME: revision summary is missing; expected what changed");
+      if (!/^W[0-9]+$/i.test(revision.resumeAt ?? "")) errors.push("RESUME: revision resumeAt is missing; expected W<number>");
+      if (revision.delivered !== true) errors.push("RESUME: revision is not recorded as delivered; expected delivered: true from the explicit revision channel");
+      const named = new Set((revision.changedPaths ?? []).map((value) => String(value).replaceAll("\\", "/")));
+      for (const relative of changed) if (!named.has(relative)) errors.push(`RESUME: changed input ${relative} is not named by the revision; expected it in changedPaths`);
+    }
+  }
+
+  const resumeAt = revision?.resumeAt?.toUpperCase() ?? null;
+  const completedWork = publishedInputs.order?.completedWork ?? [];
+  if (resumeAt && completedWork.includes(resumeAt) && !(revision.reopen ?? []).map((value) => String(value).toUpperCase()).includes(resumeAt)) {
+    errors.push(`RESUME: ${resumeAt} is already complete; expected a later resume point or explicit reopen entry`);
+  }
+  return {
+    accepted: errors.length === 0,
+    errors,
+    acceptedRevision: accepted.revision,
+    publishedRevision: publishedInputs.order?.revision ?? null,
+    coverage: Object.keys(accepted.coverage).sort(),
+    uncovered,
+    changed,
+    resumeAt,
+    skipCompleted: completedWork,
+    revisionDelivered: revision?.delivered === true,
+    deliveryVerified: Boolean(deliveryEvidence?.verified && deliveryEvidence?.recordedAt),
+  };
+}
+
 export function loadPublishedProposal(root = scriptRoot) {
   const planPath = path.join(root, "PLAN.md");
   const itemContents = [];

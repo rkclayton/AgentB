@@ -5,7 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { loadPublishedProposal, validateProposal } from "./plan-lint.mjs";
+import { loadPublishedProposal, validateProposal, validateResume } from "./plan-lint.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const linter = path.join(here, "plan-lint.mjs");
@@ -38,7 +38,7 @@ function item(id, { state = "live", unknown = false, unresolved = "(none)" } = {
   ].join("\n");
 }
 
-function makeFixture(current, entries, { next = true, inFlight = "TEST/W0 started" } = {}) {
+function makeFixture(current, entries, { next = true, inFlight = "TEST/W0 started", revision = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "agentb-plan-lint-"));
   fixtureRoots.push(root);
   fs.mkdirSync(path.join(root, "plan", "items"), { recursive: true });
@@ -47,7 +47,7 @@ function makeFixture(current, entries, { next = true, inFlight = "TEST/W0 starte
   fs.writeFileSync(path.join(root, "plan", "_history.md"), "# History\n");
   for (const entry of entries) fs.writeFileSync(path.join(root, "plan", entry.where, `${entry.id}.md`), entry.text);
   fs.writeFileSync(path.join(root, "PLAN.md"), [
-    "# Plan fixture", "", "## Current work order — TEST", "", "Order ID: `TEST`", current, "",
+    "# Plan fixture", "", "## Current work order — TEST", "", ...(revision ? [`**Revision: ${revision}.**`, ""] : []), "Order ID: `TEST`", current, "",
     ...(next ? ["## Next work order — later", "", "Nothing queued.", ""] : []),
     "## In flight", "", `- ${inFlight}`, "", "## Index", "", "placeholder", "",
   ].join("\n"));
@@ -142,6 +142,68 @@ function prepare(root) {
   prepare(root);
   const validation = validateProposal({ ...loadPublishedProposal(root), structuralOnly: true });
   assert.equal(validation.completion[0].status, "complete", "an archived shipped item with acceptance evidence should close");
+}
+
+{
+  const root = makeFixture("\n- W1 **2a executable work.**\n- W2 Review.", [{ id: "2a", where: "items", text: item("2a") }], { inFlight: "TEST/W0 completed 12:00", revision: "r1" });
+  prepare(root);
+  const accepted = loadPublishedProposal(root);
+  const acceptedParts = [{
+    revision: "r1",
+    takenAt: "2026-09-10T00:00:00Z",
+    planText: accepted.planText,
+    itemContents: accepted.itemContents.filter(({ relative }) => relative === "plan/items/2a.md"),
+  }];
+  const published = {
+    planText: accepted.planText.replace("**Revision: r1.**", "**Revision: r2.**"),
+    itemContents: accepted.itemContents.map((entry) => entry.relative === "plan/items/2a.md"
+      ? { ...entry, text: entry.text.replace("Fixture behavior is verified.", "Revised fixture behavior is verified.") }
+      : entry),
+  };
+  const stale = validateResume({ acceptedParts, published });
+  assert.equal(stale.accepted, false);
+  assert.deepEqual(stale.changed.sort(), ["PLAN.md", "plan/items/2a.md"]);
+  assert.match(stale.errors.join("\n"), /expected an explicit delivered revision/);
+
+  const revision = { from: "r1", to: "r2", summary: "Acceptance changed.", changedPaths: ["PLAN.md", "plan/items/2a.md"], resumeAt: "W1", delivered: true };
+  const resumed = validateResume({ acceptedParts, published, revision });
+  assert.equal(resumed.accepted, true, resumed.errors.join("\n"));
+  assert.deepEqual(resumed.skipCompleted, ["W0"], "completed checkpoints must survive a revision");
+  assert.equal(resumed.deliveryVerified, false, "completion and revision delivery must not imply outcome delivery");
+
+  const repeated = validateResume({ acceptedParts, published: { ...published, planText: published.planText.replace("TEST/W0 completed", "TEST/W1 completed") }, revision });
+  assert.equal(repeated.accepted, false, "resume must not repeat an already completed step");
+  assert.match(repeated.errors.join("\n"), /W1 is already complete/);
+}
+
+{
+  const root = makeFixture("\n- W1 **2a executable work.**\n- W2 **2b added work.**", [
+    { id: "2a", where: "items", text: item("2a") },
+    { id: "2b", where: "items", text: item("2b") },
+  ], { revision: "r2" });
+  prepare(root);
+  const published = loadPublishedProposal(root);
+  const r1Plan = published.planText.replace("**Revision: r2.**", "**Revision: r1.**").replace("\n- W2 **2b added work.**", "");
+  const base = [{
+    revision: "r1",
+    takenAt: "2026-09-10T00:00:00Z",
+    planText: r1Plan,
+    itemContents: published.itemContents.filter(({ relative }) => relative === "plan/items/2a.md"),
+  }];
+  const uncovered = validateResume({ acceptedParts: base, published, revision: { from: "r1", to: "r2", summary: "Add 2b.", changedPaths: ["PLAN.md"], resumeAt: "W2", delivered: true } });
+  assert.deepEqual(uncovered.uncovered, ["plan/items/2b.md"]);
+  assert.match(uncovered.errors.join("\n"), /uncovered input plan\/items\/2b\.md/);
+
+  const amended = [...base, {
+    revision: "r2",
+    takenAt: "2026-09-10T01:00:00Z",
+    planText: published.planText,
+    itemContents: published.itemContents.filter(({ relative }) => relative === "plan/items/2b.md"),
+  }];
+  const covered = validateResume({ acceptedParts: amended, published });
+  assert.equal(covered.accepted, true, covered.errors.join("\n"));
+  assert.deepEqual(covered.uncovered, []);
+  assert.ok(covered.coverage.includes("plan/items/2a.md") && covered.coverage.includes("plan/items/2b.md"), "coverage must be the union of snapshot parts");
 }
 
 {
