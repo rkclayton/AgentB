@@ -15,6 +15,8 @@ test("Console uses the shared shell without retaining a task composer", () => {
   assert.doesNotMatch(shell, /\["chat", "Chat", "\/chat"\]|\["console", "Console", "\/"\]/);
   assert.match(shell, /\[\["plan", "\/plan"\]\]/);
   assert.match(shell, /requestNavigation\(navigation, next === "chat"/);
+  assert.match(index, /id="console-agent-profile"/);
+  assert.match(script, /async function bindAgentProfile\(\)/);
 });
 
 test("Activity uses the full panel height after composer removal", () => {

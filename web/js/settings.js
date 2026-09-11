@@ -9,6 +9,7 @@ const armed = new Set();
 const drafts = new Map();
 const draftKinds = new Map();
 const errors = new Map();
+const probeMessages = new Map();
 const shownKeys = new Set();
 let open = false;
 let lastFocus = null;
@@ -72,6 +73,12 @@ export function initSettings() {
     }
   });
   subscribe((_state, event) => {
+    if (event.type === "server.probed") {
+      const profileID = event.data?.server_id || "";
+      const findings = event.data?.capabilities?.findings || event.data?.findings || [];
+      const failed = findings.find((value) => String(value).startsWith("probe failed:"));
+      probeMessages.set(profileID, { message: failed ? `Test failed — ${String(failed).slice(13).trim()}` : "Test passed", alarm: !!failed });
+    }
     if (
       open && (
       [
@@ -205,34 +212,39 @@ function servers() {
     .map((profile) => {
       const isOpen = expanded.has(profile.id);
       const hasPendingChanges = [...drafts.keys()].some((path) => path.startsWith(`servers.${profile.id}.`));
+      const feedback = probeMessages.get(profile.id);
       const reason = profileReason(profile);
       const failed = (profile.capabilities?.findings || []).some((x) =>
         x.startsWith("probe failed:"),
       );
       const testState = profile._probing
         ? "testing"
-        : failed
-          ? "failed"
-          : !reason && profile.capabilities?.probed_at
-            ? "ready"
-            : "not tested";
+        : hasPendingChanges
+          ? "unsaved — Test will save first"
+          : feedback?.message
+            ? feedback.message
+            : failed
+              ? "failed"
+              : !reason && profile.capabilities?.probed_at
+                ? "ready"
+                : "not tested";
       const ready = !reason && !!profile.capabilities?.probed_at;
-      const lamp = failed || reason ? "alarm" : profile._probing || ready ? "live" : "";
+      const lamp = failed || feedback?.alarm || (reason && reason !== "context length unknown") ? "alarm" : profile._probing || ready || feedback ? "live" : "";
       const removeKey = `server:${profile.id}`;
       return `<div class="profile-row ${isOpen ? "selected" : ""}">
           <button type="button" class="profile-summary" data-action="profile-toggle" data-id="${attr(profile.id)}">
             <span class="lamp ${lamp}"></span><span>${html(profile.label)}</span><span class="profile-url">${html(profile.base_url)}</span><span class="profile-state">${testState}</span>
           </button>
-          <button type="button" data-action="probe" data-id="${attr(profile.id)}" title="${hasPendingChanges ? "Save this connection before testing it." : ""}" ${profile._probing || hasPendingChanges ? "disabled" : ""}>${profile._probing ? "Testing…" : "Test"}</button>
+          <button type="button" data-action="probe" data-id="${attr(profile.id)}" title="${hasPendingChanges ? "Test will save this connection first." : ""}" ${profile._probing ? "disabled" : ""}>${profile._probing ? "Testing…" : "Test"}</button>
           <button type="button" class="profile-remove ${armed.has(removeKey) ? "confirm" : ""}" data-action="remove-server" data-id="${attr(profile.id)}" aria-label="${armed.has(removeKey) ? `Confirm remove ${attr(profile.label)}` : `Remove ${attr(profile.label)}`}">${armed.has(removeKey) ? "Confirm ×" : "×"}</button>
       </div>`;
     })
     .join("");
   const editors = profiles.filter((profile) => expanded.has(profile.id)).map((profile) => `<section class="profile-editor" aria-label="${attr(profile.label)} connection settings">
-    <div class="profile-editor-head"><div><span class="lamp ${profileReason(profile) ? "alarm" : ""}"></span><h3>${html(profile.label)}</h3><span class="profile-url">${html(profile.base_url)}</span></div><button type="button" data-action="duplicate-server" data-id="${attr(profile.id)}">Duplicate</button></div>
+    <div class="profile-editor-head"><div><span class="lamp ${profileReason(profile) && profileReason(profile) !== "context length unknown" ? "alarm" : ""}"></span><h3>${html(profile.label)}</h3><span class="profile-url">${html(profile.base_url)}</span></div><button type="button" data-action="duplicate-server" data-id="${attr(profile.id)}">Duplicate</button></div>
     <div class="profile-fields">${profileFields(profile, profileReason(profile))}</div>
   </section>`).join("");
-  return `<div class="settings-actions settings-connections-actions"><button type="button" data-action="open-setup">Open setup guide</button><button type="button" data-action="add-server">Add server</button></div><div class="settings-subhead">Profiles</div><div class="profile-list">${rows || '<p class="settings-note inline">No connections configured.</p>'}</div>${editors}`;
+  return `<div class="settings-actions settings-connections-actions"><button type="button" data-action="open-setup">Open setup guide</button><button type="button" data-action="add-server">Add connection</button></div><div class="settings-subhead">Profiles</div><div class="profile-list">${rows || '<p class="settings-note inline">No connections configured.</p>'}</div>${editors}`;
 }
 
 function profileFields(profile, reason) {
@@ -269,14 +281,15 @@ function profileFields(profile, reason) {
     ${toggle(`${p}.reasoning.preserve`, "preserve", profile.reasoning.preserve)}
     ${number(`${p}.reasoning.max_tokens`, "reasoning cap", profile.reasoning.max_tokens || 0, "1")}
     ${number(`${p}.context.reserve_output`, "reserve", profile.context.reserve_output)}
-	${number(`${p}.context.n_ctx`, "context size", profile.context.n_ctx, "1", false, "", !profile.context.n_ctx)}</div>
+	${number(`${p}.context.n_ctx`, "context size", profile.context.n_ctx, "1")}
+    <p class="settings-note">Test fills this from the server when available. Otherwise enter the server's configured context window; it is required for use and for probe mode off.</p></div>
     <div class="profile-fieldset profile-sampling"><h4>Sampling</h4><div class="sampling-grid"><div></div><div class="sampling-column">Thinking</div><div class="sampling-column">Non-thinking</div>${samplingRows}</div></div>
     <div class="profile-fieldset profile-prompt"><h4>System prompt</h4>
     ${textarea(`${p}.system_prompt_override`, "system prompt override", profile.system_prompt_override || "")}
     <p class="settings-note">variables: {{workspace}} {{tools}} {{agent}} {{project}} {{memory}}</p></div>
     <div class="profile-fieldset profile-capabilities"><h4>Capabilities</h4>
     <div class="findings"><span class="settings-note">${html(caps.probed_at || "not probed")}</span><ul>${findings || "<li>no findings</li>"}</ul></div>
-    ${reason ? `<p class="field-error">${html(reason)}</p>` : ""}
+    ${reason && reason !== "context length unknown" ? `<p class="field-error">${html(reason)}</p>` : ""}
     ${errors.get(p) ? `<p class="field-error">${html(errors.get(p))}</p>` : ""}</div>`;
 }
 
@@ -715,14 +728,25 @@ async function click(event) {
     return render();
   }
   if (action === "probe") {
+    const pendingPrefix = `servers.${id}.`;
+    if ([...drafts.keys()].some((path) => path.startsWith(pendingPrefix))) {
+      probeMessages.set(id, { message: "Saving before Test…", alarm: false });
+      render();
+      if (!await saveSettings(pendingPrefix)) {
+        probeMessages.set(id, { message: "Test not run — save failed", alarm: true });
+        return render();
+      }
+    }
     const profile = serverProfiles().find((x) => x.id === id);
     if (profile) profile._probing = true;
+    probeMessages.set(id, { message: "Testing…", alarm: false });
     render();
     try {
       await api(`/api/servers/${encodeURIComponent(id)}/probe`);
     } catch (error) {
       if (profile) profile._probing = false;
       errors.set(`servers.${id}`, error.message);
+      probeMessages.set(id, { message: `Test failed — ${error.message}`, alarm: true });
       render();
     }
     return;
@@ -1095,9 +1119,10 @@ function combinedPatch(entries) {
   return result;
 }
 
-async function saveSettings() {
-  if (settingsSaving || !drafts.size) return;
-  const entries = [...drafts.entries()];
+async function saveSettings(pathPrefix = "") {
+  if (settingsSaving) return false;
+  const entries = [...drafts.entries()].filter(([path]) => !pathPrefix || path.startsWith(pathPrefix));
+  if (!entries.length) return true;
   const changedPaths = entries.map(([path]) => path);
   settingsSaving = true;
   settingsSaveMessage = "Saving changes…";
@@ -1111,17 +1136,19 @@ async function saveSettings() {
       errors.delete(path);
     }
     reduce({ type: "config.changed", data: { config: result } });
-    settingsSaveMessage = "All changes saved";
+    settingsSaveMessage = drafts.size ? `${drafts.size} unsaved change${drafts.size === 1 ? "" : "s"} remain` : "All changes saved";
     if (changedPaths.some((path) => path === "shell.service_account.account" || path === "shell.service_account.domain"))
       await refreshServiceAccountStatus();
   } catch (error) {
     errors.set(error.field || "config", error.message);
     settingsSaveMessage = `Save failed: ${error.message}`;
     settingsSaveAlarm = true;
+    return false;
   } finally {
     settingsSaving = false;
     if (open) render();
   }
+  return true;
 }
 
 function assign(target, parts, value) {
@@ -1135,8 +1162,17 @@ function assign(target, parts, value) {
 async function addServer() {
   const id = uniqueID("server");
   expanded.add(id);
-  const result = await api("/api/config", { servers: [{ id, label: id, base_url: "http://127.0.0.1:8000", model: "model" }] });
-  reduce({ type: "config.changed", data: { config: result } });
+  try {
+    const result = await api("/api/config", { servers: [{ id, label: id, base_url: "http://127.0.0.1:8000", model: "model" }] });
+    probeMessages.set(id, { message: "Added and saved — edit, then Test", alarm: false });
+    reduce({ type: "config.changed", data: { config: result } });
+  } catch (error) {
+    expanded.delete(id);
+    errors.set("servers", error.message);
+    settingsSaveMessage = `Add failed: ${error.message}`;
+    settingsSaveAlarm = true;
+    render();
+  }
 }
 
 async function duplicateServer(id) {

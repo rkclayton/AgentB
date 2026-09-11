@@ -21,6 +21,7 @@ const liveContent = document.getElementById("console-live-content");
 const liveEmpty = document.getElementById("console-live-empty");
 const dropLastMessage = document.getElementById("drop-last-message");
 const agentSelect = document.getElementById("console-agent");
+const agentProfileSelect = document.getElementById("console-agent-profile");
 const feedback = document.getElementById("console-feedback");
 const consoleStop = document.getElementById("console-stop");
 
@@ -42,6 +43,7 @@ agentSelect.addEventListener("change", () => {
   }
   void refreshLedger();
 });
+agentProfileSelect.addEventListener("change", () => void bindAgentProfile());
 document.getElementById("clear-stats").addEventListener("click", () => void clearStats());
 document.getElementById("flush-memory").addEventListener("click", () => void flushMemory());
 document.getElementById("console-tools").addEventListener("change", (event) => void toggleTool(event));
@@ -87,7 +89,9 @@ function renderConsole() {
   if (!agents.some((agent) => agentKey(agent) === selectedAgent)) selectedAgent = agentKey(agents[0]);
   agentSelect.replaceChildren(...agents.map((agent) => option(agentKey(agent), agent.name, agentKey(agent) === selectedAgent)));
   const agent = agents.find((candidate) => agentKey(candidate) === selectedAgent);
-  document.getElementById("console-agent-binding").textContent = agent ? `b ${agent.b}${agent.c ? ` · c ${agent.c}` : ""}${agent.d ? ` · d ${agent.d}` : ""}` : "No configured agents";
+  agentProfileSelect.replaceChildren(...(store.servers || []).map((profile) => option(profile.id, profile.label, profile.id === agent?.b)));
+  agentProfileSelect.disabled = !agent || store.replay;
+  document.getElementById("console-agent-binding").textContent = agent ? `${agent.c ? `c ${agent.c}` : ""}${agent.d ? `${agent.c ? " · " : ""}d ${agent.d}` : ""}` : "No configured agents";
   renderTools(agent);
   renderLifetime();
   const session = store.sessions[store.active];
@@ -100,6 +104,21 @@ function renderConsole() {
     renderRail(); renderFlow(); renderRack(); renderState(); renderTimeline(); placeDropLastMessage(); dropControl.render(); renderPendingApproval(session);
   }
   navigationSurfaceReady("console", store);
+}
+
+async function bindAgentProfile() {
+  const agents = store.config.agents || [];
+  const index = agents.findIndex((agent) => agentKey(agent) === selectedAgent);
+  if (index < 0 || !agentProfileSelect.value) return;
+  const updated = agents.map((agent, offset) => offset === index ? { ...agent, b: agentProfileSelect.value } : agent);
+  try {
+    const config = await api("/api/config", { agents: updated });
+    reduce({ type: "config.changed", data: { config } });
+    showFeedback(`Agent B profile changed to ${agentProfileSelect.selectedOptions[0]?.textContent || agentProfileSelect.value}. New chats use this connection.`);
+  } catch (error) {
+    showError(error.message);
+    scheduleRender();
+  }
 }
 
 function renderTools(agent) {

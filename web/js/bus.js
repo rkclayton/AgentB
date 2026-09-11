@@ -49,9 +49,18 @@ export function reduce(event) {
   switch (event.type) {
     case "server.probed": {
       const profile = store.servers.find((value) => value.id === data.server_id);
-      if (profile) { profile.capabilities = data.capabilities; profile.reasoning.valid_efforts = data.capabilities?.valid_efforts || []; profile._probing = false; }
+      if (profile) {
+        profile.capabilities = data.capabilities;
+        profile.reasoning.valid_efforts = data.capabilities?.valid_efforts || [];
+        if (!profile.context.n_ctx && data.capabilities?.n_ctx) profile.context.n_ctx = data.capabilities.n_ctx;
+        profile._probing = false;
+      }
       const configured = store.config.servers?.find((value) => value.id === data.server_id);
-      if (configured) { configured.capabilities = data.capabilities; configured.reasoning.valid_efforts = data.capabilities?.valid_efforts || []; }
+      if (configured) {
+        configured.capabilities = data.capabilities;
+        configured.reasoning.valid_efforts = data.capabilities?.valid_efforts || [];
+        if (!configured.context.n_ctx && data.capabilities?.n_ctx) configured.context.n_ctx = data.capabilities.n_ctx;
+      }
       break;
     }
     case "config.changed": store.config = data.config; store.servers = data.config.servers || store.servers; break;

@@ -124,3 +124,12 @@ test("session-scoped UI error evidence never notifies rendering subscribers", ()
   assert.equal(notifications, 1);
   unsubscribe();
 });
+
+test("successful probe projects a discovered context size into the live profile", () => {
+  const profile = { id: "new", reasoning: { valid_efforts: [] }, context: { n_ctx: 0 }, capabilities: {} };
+  reduce({ type: "snapshot", data: { sessions: {}, servers: [profile], config: { servers: [structuredClone(profile)] } } });
+  reduce({ type: "server.probed", data: { server_id: "new", capabilities: { n_ctx: 32768, valid_efforts: ["low"] } } });
+  assert.equal(store.servers[0].context.n_ctx, 32768);
+  assert.equal(store.config.servers[0].context.n_ctx, 32768);
+  assert.deepEqual(store.servers[0].reasoning.valid_efforts, ["low"]);
+});
