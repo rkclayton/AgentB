@@ -227,9 +227,8 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				turn--
 				continue
 			}
-			if host, unavailable := modelUnavailable(profile, budgetErr); unavailable {
+			if r.publishModelUnreachable(s, runID, profile, budgetErr) {
 				publishFinalBudget = false
-				r.bus.Publish(events.New(events.ModelUnreachable, s.ID, runID, map[string]any{"host": host, "detail": budgetErr.Error()}))
 				return "model_unreachable", budgetErr.Error(), turn - 1
 			}
 			return "model_error", "budget accounting: " + budgetErr.Error(), turn - 1
@@ -284,9 +283,8 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 			if ctx.Err() != nil {
 				return r.stopped(s, runID, turn, "model call canceled")
 			}
-			if host, unavailable := modelUnavailable(profile, callErr); unavailable {
+			if r.publishModelUnreachable(s, runID, profile, callErr) {
 				publishFinalBudget = false
-				r.bus.Publish(events.New(events.ModelUnreachable, s.ID, runID, map[string]any{"host": host, "detail": callErr.Error()}))
 				return "model_unreachable", callErr.Error(), turn
 			}
 			return "model_error", callErr.Error(), turn
@@ -773,6 +771,15 @@ func modelUnavailable(profile *config.Profile, err error) (string, bool) {
 	return modelHost(profile), true
 }
 
+func (r *Runner) publishModelUnreachable(s *session.Session, runID string, profile *config.Profile, err error) bool {
+	host, unavailable := modelUnavailable(profile, err)
+	if !unavailable {
+		return false
+	}
+	r.bus.Publish(events.New(events.ModelUnreachable, s.ID, runID, map[string]any{"host": host, "detail": err.Error()}))
+	return true
+}
+
 func modelHost(profile *config.Profile) string {
 	host := strings.TrimSpace(profile.BaseURL)
 	if endpoint, parseErr := url.Parse(host); parseErr == nil && endpoint.Host != "" {
@@ -792,6 +799,7 @@ func (r *Runner) PublishBudget(ctx context.Context, s *session.Session) {
 	budget, err := r.measureSession(ctx, p, s, nil, false)
 	if err != nil {
 		r.operationalError(s, "", "budget", err)
+		r.publishModelUnreachable(s, "", p, err)
 		return
 	}
 	r.bus.Publish(events.New(events.BudgetEvent, s.ID, "", budget))
