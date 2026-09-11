@@ -494,6 +494,7 @@ if (realModel) {
   shellStyleBoundaryEvidence = { negative_control: negativeControl, chat: chatStyles, console: consoleStyles, empty_state_illustration: emptyStateIllustration };
   await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
   await page.locator("#chat-task").waitFor({ state: "visible" });
+  await browser.wait(`document.querySelector('#chat-log')?.innerText.includes('VISIBLE PARTIAL COMPLETE')`, "baseline Chat transcript restored");
 
   const baselineDirectory = join(args.evidence, "baseline-initial");
   await mkdir(baselineDirectory, { recursive: true });
