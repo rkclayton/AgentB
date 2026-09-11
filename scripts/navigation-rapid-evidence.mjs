@@ -11,6 +11,8 @@ for (const name of ["exe", "app-root", "data", "evidence"]) assert.ok(args[name]
 const intervalMS = Number(args["interval-ms"] || 333);
 const maximumClicks = Number(args["maximum-clicks"] || 40);
 const settlingMS = Number(args["settling-ms"] || 10000);
+const modelCondition = args["model-condition"] || "reachable";
+assert.ok(["reachable", "unreachable"].includes(modelCondition), "--model-condition must be reachable or unreachable");
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 async function freePort() {
@@ -64,7 +66,7 @@ const config = {
   services: {}, agents: [{ name: "Navigation", b: "navigation", toolset }], chat: { auto_rename: false },
   run: { max_turns: 4, cycle_window: 8, max_consecutive_tool_errors: 3, max_concurrent: 1, queue_depth: 0 }, approval: { mode: "boundary-only" },
   deliver: { mode: "chips", exchange_folder: join(dataRoot, "exchange") }, operator_files: { allow_mailbox_approvals: false, log_retention_days: 30 },
-  context: { soft_pct: .75, summary_pct: .95, accounting: "estimated" }, memory: { enabled: false, dir: join(dataRoot, "memory"), max_tokens: 1500 },
+  context: { soft_pct: .75, summary_pct: .95, accounting: modelCondition === "unreachable" ? "exact" : "estimated" }, memory: { enabled: false, dir: join(dataRoot, "memory"), max_tokens: 1500 },
   tools: { read_file: { default_limit: 16384, max_limit: 65536 }, attachments: { max_bytes: 8388608 }, list_dir: { max_entries: 300, ignore: [".git"] }, grep: { max_matches: 50, max_line_chars: 200 }, shell: { operator_commands: [] }, fetch: { timeout_s: 20, max_bytes: 2097152, max_redirects: 5, default_limit: 16384, max_limit: 65536, allow_domains: [], deny_domains: [], allow_internal_hosts: [] }, find_files: { skip_roots: [] } },
   shell: { command: ["powershell", "-NoProfile", "-NonInteractive", "-Command"], timeout_s: 60, max_timeout_s: 600, max_output_lines_head: 60, max_output_lines_tail: 40, file_routing_guard: true, operator_context: false, operator_context_idle_timeout_minutes: 20, service_account: { enabled: false, account: "agentb-svc", domain: "." }, deny: [] },
   signing: { thumbprint: "", timestamp_url: "http://timestamp.digicert.com" },
@@ -92,6 +94,17 @@ try {
   }
   const initial = await waitFor(state, "candidate startup");
   assert.ok(initial.sessions.main, "main chat missing");
+  if (modelCondition === "unreachable") {
+    model.closeAllConnections?.();
+    await new Promise((done) => model.close(done));
+    const response = await fetch(`${base}/api/sessions/main`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AgentB-Mutation-Token": initial.mutation_token },
+      body: JSON.stringify({ agent_id: "navigation" }),
+    });
+    assert.equal(response.status, 200, await response.text());
+    await waitFor(async () => (await state()).sessions.main?.model_unreachable, "unreachable projection");
+  }
   const logPath = initial.sessions.main.log_path;
   async function events() {
     const text = await readFile(logPath, "utf8");
@@ -179,7 +192,7 @@ try {
     schema: 1,
     measured_at: new Date().toISOString(),
     build: initial.build,
-    parameters: { interval_ms: intervalMS, maximum_clicks: maximumClicks, settling_ms: settlingMS, degradation_rule: "completion exceeds 70s, or four consecutive completed samples have nondecreasing rebuild and connect with at least one growing 1.5x" },
+    parameters: { model_condition: modelCondition, interval_ms: intervalMS, maximum_clicks: maximumClicks, settling_ms: settlingMS, degradation_rule: "completion exceeds 70s, or four consecutive completed samples have nondecreasing rebuild and connect with at least one growing 1.5x" },
     baseline,
     rapid,
     degradation,
