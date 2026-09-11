@@ -10,7 +10,7 @@ import { callServiceKey, callServiceStatus } from "./call-service-display.js";
 import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, uploadAttachment } from "./attachment-upload.js";
 import { agentAuthor, isRunning, openSessions } from "./chat-lifecycle.js";
 import { renderStopState } from "./stop-state.js";
-import { groupResponseRows, itemFailed, responseBlocks, responseSummary } from "./chat-response-groups.js";
+import { groupResponseRows, hasVisibleChatContent, itemFailed, responseBlocks, responseSummary } from "./chat-response-groups.js";
 import { navigationSurfaceReady } from "./navigation-telemetry.js";
 
 const budget = document.getElementById("chat-budget");
@@ -204,7 +204,7 @@ function reconcileChildren(parent, nodes) {
 
 function buildEntries(session) {
   const chat = Array.isArray(session?.chat) ? session.chat : [];
-  return groupResponses(chat.filter((entry) => !["operator.context", "message.queued", "run.queued"].includes(entry?.event?.type)));
+  return groupResponses(chat.filter((entry) => !["operator.context", "message.queued", "run.queued"].includes(entry?.event?.type)).filter(hasVisibleChatContent));
 }
 
 function changeBound(value) {

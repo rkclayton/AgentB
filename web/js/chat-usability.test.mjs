@@ -134,6 +134,7 @@ test("Chat uses the narrow monospace label gutter and the agent_b tab restores i
 });
 
 test("Model-unreachable transcript notices are flat and stay outside response counts", () => {
+	assert.match(chat, /filter\(hasVisibleChatContent\)/);
 	assert.match(chat, /entry\.event\?\.type === "run\.stopped" && entry\.event\?\.data\?\.reason === "model_unreachable"[\s\S]*grouped\.push\(entry\);[\s\S]*response = null/);
 	assert.match(chat, /entry\.text \|\| session\.model_unreachable\?\.host/);
 	assert.doesNotMatch(chat, /data\.reason === "model_unreachable"[\s\S]{0,500}createElement\("details"\)/);

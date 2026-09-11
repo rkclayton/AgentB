@@ -2,6 +2,13 @@ import { groupAdjacentRuns } from "./timeline-groups.js";
 
 export const thinThoughtTokenLimit = 64;
 
+export function hasVisibleChatContent(item) {
+  if (!item || typeof item !== "object") return true;
+  if (item.type === "notice" && item.event?.type === "files.delivered") return (item.event.data?.items || []).length > 0;
+  if (item.type !== "agent") return true;
+  return !!item.text || !!item.reasoning || item.done !== true;
+}
+
 export function thoughtTokens(item) {
   if (Number.isFinite(Number(item?.reasoningTokens)) && Number(item.reasoningTokens) > 0) return Number(item.reasoningTokens);
   return Math.ceil(Array.from(item?.reasoning || "").length / 3.6);

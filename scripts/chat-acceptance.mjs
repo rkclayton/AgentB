@@ -908,6 +908,24 @@ if (realModel) {
   await setTask("acceptance: unreachable");
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('model unreachable')`, "unreachable strip");
   await waitEvent(sessionID, (event) => event.type === "model.unreachable", "model.unreachable");
+  await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.data?.reason === "model_unreachable", "unreachable run stopped");
+  const unreachableRows = await page.evaluate(() => {
+    const rows = [...document.querySelectorAll("#chat-log > .chat-entry")];
+    const user = rows.findLastIndex((row) => row.classList.contains("chat-user") && row.innerText.includes("acceptance: unreachable"));
+    const after = user < 0 ? [] : rows.slice(user + 1);
+    return {
+      user,
+      responses: after.filter((row) => row.classList.contains("chat-response")).length,
+      step_folds: after.reduce((total, row) => total + row.querySelectorAll(".chat-step-fold").length, 0),
+      flat_notices: after.filter((row) => row.classList.contains("chat-notice-row") && row.innerText.includes("model unreachable ·")).length,
+    };
+  });
+  assert.ok(unreachableRows.user >= 0, JSON.stringify(unreachableRows));
+  assert.equal(unreachableRows.responses, 0, JSON.stringify(unreachableRows));
+  assert.equal(unreachableRows.step_folds, 0, JSON.stringify(unreachableRows));
+  assert.equal(unreachableRows.flat_notices, 1, JSON.stringify(unreachableRows));
+  await page.screenshot({ path: join(args.evidence, "unreachable-no-empty-folds.png") });
+  record("model-unreachable-no-empty-fold-groups");
   await browser.wait(`document.querySelector('.agent-tab[data-agent="agent_b"] .agent-tab-robot')?.classList.contains('offline')`, "offline agent eyes");
   assert.equal(await page.locator("#chat-task").isEnabled(), true);
   assert.equal(await page.locator("#chat-send").isEnabled(), true);

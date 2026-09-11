@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { groupResponseRows, isThinThought, responseBlocks, responseSummary, thinThoughtTokenLimit } from "./chat-response-groups.js";
+import { groupResponseRows, hasVisibleChatContent, isThinThought, responseBlocks, responseSummary, thinThoughtTokenLimit } from "./chat-response-groups.js";
 
 const tool = (key, name, ok = true, ms = 1) => ({ type: "tool", key, name, args: {}, result: { ok, ms } });
 const thought = (key, tokens, text = "") => ({ type: "agent", key, reasoning: "x", reasoningTokens: tokens, text, done: true, thinkingMS: 2 });
@@ -62,4 +62,16 @@ test("tool-only responses create no empty prose region", () => {
   assert.equal(blocks.length, 1);
   assert.equal(blocks[0].prose, null);
   assert.deepEqual(blocks[0].steps.map((item) => item.key), ["only"]);
+});
+
+test("only completed agent entries with no content are omitted from Chat", () => {
+  assert.equal(hasVisibleChatContent({ type: "agent", key: "empty", done: true }), false);
+  assert.equal(hasVisibleChatContent({ type: "agent", key: "reasoning", reasoning: "thinking", done: true }), true);
+  assert.equal(hasVisibleChatContent({ type: "agent", key: "answer", text: "done", done: true }), true);
+  assert.equal(hasVisibleChatContent({ type: "agent", key: "streaming", done: false }), true);
+  assert.equal(hasVisibleChatContent({ type: "tool", key: "tool" }), true);
+  assert.equal(hasVisibleChatContent({ type: "notice", key: "notice" }), true);
+  assert.equal(hasVisibleChatContent({ type: "notice", key: "empty-delivery", event: { type: "files.delivered", data: { items: [] } } }), false);
+  assert.equal(hasVisibleChatContent({ type: "notice", key: "delivery", event: { type: "files.delivered", data: { items: [{}] } } }), true);
+  assert.equal(hasVisibleChatContent(null), true);
 });
