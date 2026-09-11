@@ -532,6 +532,58 @@ func (r *Registry) SetAgent(id, agentID string) error {
 	return nil
 }
 
+func (r *Registry) ApplyAgentBinding(agentID string) error {
+	agent, ok := r.resolveAgent(agentID)
+	if !ok {
+		return fmt.Errorf("agent_id: unknown agent %s", agentID)
+	}
+	profile, ok := r.profiles(agent.B)
+	if !ok {
+		return fmt.Errorf("agent_id: b profile %s was not found", agent.B)
+	}
+	if runnable, reason := runnable(profile, r.config().Context.Accounting); !runnable {
+		return fmt.Errorf("agent_id: %s", reason)
+	}
+	for _, item := range r.List() {
+		snapshot := item.Snapshot()
+		if snapshot.AgentID != agentID || snapshot.Closed {
+			continue
+		}
+		if snapshot.Run.Status == "running" || snapshot.Run.Status == "stopping" {
+			return fmt.Errorf("agent_id: session %s is running", snapshot.ID)
+		}
+		memoryBlock, memoryPath := snapshot.MemoryContent, snapshot.MemoryPath
+		if r.memory != nil {
+			var err error
+			memoryBlock, memoryPath, err = r.memory(context.Background(), snapshot.Workspace, agent.B)
+			if err != nil {
+				return err
+			}
+		}
+		agentMemoryBlock, agentMemoryPath := snapshot.AgentMemoryContent, snapshot.AgentMemoryPath
+		if r.agentMemory != nil {
+			var err error
+			agentMemoryBlock, agentMemoryPath, err = r.agentMemory(context.Background(), agentID, agent.B)
+			if err != nil {
+				return err
+			}
+		}
+		item.ApplyAgentConfig(agentID, *agent, *profile)
+		item.mu.Lock()
+		item.MemoryBlock, item.MemoryPath = memoryBlock, memoryPath
+		item.AgentMemoryBlock, item.AgentMemoryPath = agentMemoryBlock, agentMemoryPath
+		item.Budget = initialBudget(profile)
+		item.mu.Unlock()
+		r.bus.Publish(events.New(events.SessionUpdated, item.ID, "", map[string]any{
+			"session_id": item.ID, "agent_id": agentID, "server_id": agent.B,
+			"agent_name": agent.Name, "b_profile": profile.Label, "runnable": true,
+			"not_runnable_reason": "", "memory_path": memoryPath, "memory_content": memoryBlock,
+			"agent_memory_path": agentMemoryPath, "agent_memory_content": agentMemoryBlock,
+		}))
+	}
+	return nil
+}
+
 func (r *Registry) ApplyAgentToolset(agentID string, enabled map[string]bool) {
 	for _, item := range r.List() {
 		if item.AgentID != agentID {

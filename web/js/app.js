@@ -21,6 +21,9 @@ const liveContent = document.getElementById("console-live-content");
 const liveEmpty = document.getElementById("console-live-empty");
 const dropLastMessage = document.getElementById("drop-last-message");
 const agentSelect = document.getElementById("console-agent");
+const agentServerSelect = document.getElementById("console-agent-server");
+const agentServerState = document.getElementById("console-agent-server-state");
+const agentServerCancel = document.getElementById("console-agent-server-cancel");
 const feedback = document.getElementById("console-feedback");
 const consoleStop = document.getElementById("console-stop");
 
@@ -42,6 +45,8 @@ agentSelect.addEventListener("change", () => {
   }
   void refreshLedger();
 });
+agentServerSelect.addEventListener("change", () => void changeAgentServer());
+agentServerCancel.addEventListener("click", () => void cancelAgentServerChange());
 document.getElementById("clear-stats").addEventListener("click", () => void clearStats());
 document.getElementById("flush-memory").addEventListener("click", () => void flushMemory());
 document.getElementById("console-tools").addEventListener("change", (event) => void toggleTool(event));
@@ -87,7 +92,8 @@ function renderConsole() {
   if (!agents.some((agent) => agentKey(agent) === selectedAgent)) selectedAgent = agentKey(agents[0]);
   agentSelect.replaceChildren(...agents.map((agent) => option(agentKey(agent), agent.name, agentKey(agent) === selectedAgent)));
   const agent = agents.find((candidate) => agentKey(candidate) === selectedAgent);
-  document.getElementById("console-agent-binding").textContent = agent ? `b ${agent.b}${agent.c ? ` · c ${agent.c}` : ""}${agent.d ? ` · d ${agent.d}` : ""}` : "No configured agents";
+  renderAgentServer(agent);
+  document.getElementById("console-agent-binding").textContent = agent ? `${agent.c ? `c ${agent.c}` : ""}${agent.c && agent.d ? " · " : ""}${agent.d ? `d ${agent.d}` : ""}` : "No configured agents";
   renderTools(agent);
   renderLifetime();
   const session = store.sessions[store.active];
@@ -100,6 +106,36 @@ function renderConsole() {
     renderRail(); renderFlow(); renderRack(); renderState(); renderTimeline(); placeDropLastMessage(); dropControl.render(); renderPendingApproval(session);
   }
   navigationSurfaceReady("console", store);
+}
+
+function renderAgentServer(agent) {
+  const profiles = store.servers || store.config.servers || [];
+  const pending = store.agent_server_changes?.[selectedAgent];
+  agentServerSelect.replaceChildren(...profiles.map((profile) => option(profile.id, profile.label || profile.id, profile.id === agent?.b)));
+  agentServerSelect.disabled = !agent || store.replay;
+  agentServerState.textContent = !agent ? "" : pending ? `Applied ${agent.b} · pending ${pending.to}` : `Applied ${agent.b}`;
+  agentServerState.className = pending ? "pending" : "";
+  agentServerCancel.hidden = !pending;
+  agentServerCancel.disabled = store.replay;
+}
+
+async function changeAgentServer() {
+  if (!selectedAgent || store.replay) return;
+  const serverID = agentServerSelect.value;
+  try {
+    const result = await api(`/api/agents/${encodeURIComponent(selectedAgent)}/server`, { action: "set", server_id: serverID });
+    showFeedback(result.status === "pending" ? `Server change queued for ${selectedAgent}.` : `Server changed for ${selectedAgent}.`);
+    await refreshState();
+  } catch (error) { showError(error.message); scheduleRender(); }
+}
+
+async function cancelAgentServerChange() {
+  if (!selectedAgent || store.replay) return;
+  try {
+    await api(`/api/agents/${encodeURIComponent(selectedAgent)}/server`, { action: "cancel" });
+    showFeedback(`Pending server change cancelled for ${selectedAgent}.`);
+    await refreshState();
+  } catch (error) { showError(error.message); }
 }
 
 function renderTools(agent) {

@@ -84,6 +84,9 @@ type Server struct {
 	pendingBinds     map[string]pendingBind
 	navigationMu     sync.Mutex
 	navigationIDs    map[string]time.Time
+	agentServerMu    sync.Mutex
+	agentServers     map[string]pendingAgentServer
+	tryAgentIdle     func(string) bool
 }
 
 type probeRun struct{ cancel context.CancelFunc }
@@ -117,6 +120,7 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 		probeCancels:  map[string]*probeRun{},
 		pendingBinds:  map[string]pendingBind{},
 		navigationIDs: map[string]time.Time{},
+		agentServers:  map[string]pendingAgentServer{},
 		extractClient: &http.Client{},
 		detectLocal: func(ctx context.Context, account string) (any, error) {
 			return detection.Local(ctx, filepath.Join(roots.Application, "scripts", "detect-local-capabilities.ps1"), account)
@@ -146,6 +150,10 @@ func (s *Server) SetRuntime(scheduler *agent.Scheduler, runner *agent.Runner, pr
 	s.scheduler = scheduler
 	s.runner = runner
 	s.prompt = prompt
+	if scheduler != nil {
+		scheduler.SetAgentIdleCallback(s.applyPendingAgentServer)
+		s.tryAgentIdle = scheduler.TryAgentIdle
+	}
 	if runner != nil {
 		runner.SetToolActivity(func(phase string) {
 			s.touchOperatorContext("idle window reset: tool execution " + phase)
@@ -346,9 +354,10 @@ func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any 
 	}
 	return map[string]any{
 		"sessions": sessions, "servers": masked.Servers, "config": masked, "replay": replay,
-		"build":          buildinfo.Current(),
-		"signature":      s.signingState(),
-		"mutation_token": s.mutationToken, "shell_credential": credentialStatus, "shell_identity": identityStatus,
+		"agent_server_changes": s.agentServerChanges(),
+		"build":                buildinfo.Current(),
+		"signature":            s.signingState(),
+		"mutation_token":       s.mutationToken, "shell_credential": credentialStatus, "shell_identity": identityStatus,
 		"serving_facts": servingFacts(filepath.Join(s.roots.Application, "SERVING.md")),
 		"flow":          map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}},
 		"tools": []map[string]string{
@@ -1623,6 +1632,10 @@ func (s *Server) stats(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) agentAction(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/agents/"), "/"), "/")
+	if len(parts) == 2 && parts[1] == "server" {
+		s.agentServer(w, r, parts[0])
+		return
+	}
 	if len(parts) != 3 || parts[1] != "memory" || parts[2] != "flush" || r.Method != http.MethodPost {
 		method(w)
 		return

@@ -81,6 +81,7 @@ const (
 const (
 	NavigationDocumentStarted   = "navigation.document_started"
 	NavigationDocumentCompleted = "navigation.document_completed"
+	AgentServerChange           = "agent.server_change"
 )
 
 var Stages = []string{"assemble", "call_model", "parse", "dispatch", "execute", "append", "compact", "wait_user"}

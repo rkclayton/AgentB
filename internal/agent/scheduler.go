@@ -40,10 +40,40 @@ type Scheduler struct {
 	held        map[string]bool
 	unreachable map[string]bool
 	ids         atomic.Int64
+	agentIdle   func(string)
 }
 
 func NewScheduler(runner *Runner, registry *session.Registry, bus *events.Bus, cfg func() config.Config) *Scheduler {
 	return &Scheduler{runner: runner, registry: registry, bus: bus, cfg: cfg, active: map[string]*activeRun{}, pending: map[string][]queuedRun{}, held: map[string]bool{}, unreachable: map[string]bool{}}
+}
+func (s *Scheduler) SetAgentIdleCallback(callback func(string)) {
+	s.mu.Lock()
+	s.agentIdle = callback
+	s.mu.Unlock()
+}
+func (s *Scheduler) TryAgentIdle(agentID string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.agentActiveLocked(agentID) {
+		return false
+	}
+	if s.agentIdle != nil {
+		s.agentIdle(agentID)
+	}
+	return true
+}
+func (s *Scheduler) agentActiveLocked(agentID string) bool {
+	for sessionID := range s.active {
+		if item, ok := s.registry.Get(sessionID); ok && item.Snapshot().AgentID == agentID {
+			return true
+		}
+	}
+	return false
+}
+func (s *Scheduler) notifyAgentIdleLocked(agentID string) {
+	if agentID != "" && !s.agentActiveLocked(agentID) && s.agentIdle != nil {
+		s.agentIdle(agentID)
+	}
 }
 func (s *Scheduler) Submit(ctx context.Context, sessionID, text string) (SubmitResult, error) {
 	return s.SubmitAttachments(ctx, sessionID, text, nil)
@@ -181,6 +211,7 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 	}
 	entry.s.SetRun(state)
 	s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": reason, "detail": detail, "turns": turns, "queue_held": queueHeld}))
+	s.notifyAgentIdleLocked(entry.s.Snapshot().AgentID)
 	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
 		next := s.queue[0]
 		s.queue = s.queue[1:]
@@ -241,6 +272,7 @@ func (s *Scheduler) repositionLocked() {
 func (s *Scheduler) Stop(sessionID string, all bool) []string {
 	s.mu.Lock()
 	stopped := []string{}
+	idleAgents := map[string]bool{}
 	type waitRun struct {
 		id     string
 		active *activeRun
@@ -270,6 +302,7 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 	kept := s.queue[:0]
 	for _, entry := range s.queue {
 		if all || entry.s.ID == sessionID {
+			idleAgents[entry.s.Snapshot().AgentID] = true
 			if len(s.pending[entry.s.ID]) > 0 {
 				s.held[entry.s.ID] = true
 			}
@@ -287,6 +320,9 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 	}
 	s.queue = kept
 	s.repositionLocked()
+	for agentID := range idleAgents {
+		s.notifyAgentIdleLocked(agentID)
+	}
 	s.mu.Unlock()
 	for _, waiting := range waits {
 		timer := time.NewTimer(cancellationBound)
@@ -324,6 +360,7 @@ func (s *Scheduler) forceFinish(sessionID string, expected *activeRun, detail st
 	}
 	item.SetRun(state)
 	s.bus.Publish(events.New(events.RunStopped, sessionID, active.runID, map[string]any{"run_id": active.runID, "reason": active.stopReason, "detail": detail, "turns": turn, "queue_held": queueHeld}))
+	s.notifyAgentIdleLocked(item.Snapshot().AgentID)
 	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
 		next := s.queue[0]
 		s.queue = s.queue[1:]

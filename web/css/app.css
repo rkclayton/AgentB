@@ -1847,6 +1847,10 @@
 .console-selector span,
 .console-actions span { color: var(--mute); }
 .console-selector select { min-width: 180px; }
+.console-selector #console-agent-server { min-width: 180px; }
+.console-selector #console-agent-server-state { font:12px/20px var(--mono); white-space:nowrap; }
+.console-selector #console-agent-server-state.pending { color:var(--trace); }
+.console-selector #console-agent-server-cancel { min-height:26px; }
 .console-pane {
   min-width: 0;
   min-height: 0;

@@ -3,6 +3,7 @@ import { navigationEventSourceConstructed, navigationEventSourceOpened, navigati
 
 export const store = {
   sessions: {}, active: "", selection: readSelection(), servers: [], config: {}, flow: { stages: [], edges: [] }, tools: [], serving_facts: {},
+  agent_server_changes: {},
   build: { tag: "", commit: "unknown", dirty: false, known: false, source: "unknown", display: "unknown" }, signature: {},
   mutation_token: "", shell_credential: { stored: false, stored_at: "" },
   shell_identity: { fallback: false, operator_approval_required: false, operator_context: false, reason: "", since: "" }, replay: false,
@@ -64,6 +65,11 @@ export function reduce(event) {
       break;
     }
     case "config.changed": store.config = data.config; store.servers = data.config.servers || store.servers; break;
+    case "agent.server_change":
+      store.agent_server_changes ||= {};
+      if (data.status === "pending" && data.change?.agent_id) store.agent_server_changes[data.change.agent_id] = data.change;
+      else if (data.agent_id) delete store.agent_server_changes[data.agent_id];
+      break;
     case "shell.identity": store.shell_identity = data; operatorReconciler.observed(); break;
     case "shell.credential": store.shell_credential = data; break;
     case "operator.context":
@@ -222,7 +228,7 @@ export function applyServerEvent(event) {
   }
 }
 source.onmessage = applyServerEvent;
-for (const type of ["snapshot", "projection.patch", "server.probed", "config.changed", "shell.identity", "shell.credential", "operator.context"])
+for (const type of ["snapshot", "projection.patch", "server.probed", "config.changed", "agent.server_change", "shell.identity", "shell.credential", "operator.context"])
   source.addEventListener(type, applyServerEvent);
 function reconcileVisibleClient() { if (!document.hidden) void operatorReconciler.reconcile().catch(() => {}); }
 document.addEventListener("visibilitychange", reconcileVisibleClient);

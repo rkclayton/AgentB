@@ -133,3 +133,12 @@ test("successful probe projects a discovered context size into the live profile"
   assert.equal(store.config.servers[0].context.n_ctx, 32768);
   assert.deepEqual(store.servers[0].reasoning.valid_efforts, ["low"]);
 });
+
+test("pending agent server changes are projected and cleared by terminal events", () => {
+  snapshot();
+  const change = { agent_id: "coder", from: "old", to: "new", requested_at: "now" };
+  reduce({ type: "agent.server_change", data: { status: "pending", change } });
+  assert.deepEqual(store.agent_server_changes.coder, change);
+  reduce({ type: "agent.server_change", data: { status: "cancelled", agent_id: "coder" } });
+  assert.equal(store.agent_server_changes.coder, undefined);
+});
