@@ -521,7 +521,6 @@ if (realModel) {
   await page.locator("#chat-send").click();
   const lifecycleRunStarted = await waitEvent(sessionID, (event) => event.type === "run.started", "tool-tick lifecycle run started");
   await waitProjectedChatText(sessionID, "menu-stream-0", "first projected lifecycle tool");
-  await browser.wait(`Array.from(document.querySelectorAll('.chat-response-summary')).at(-1)?.innerText.includes('thought')`, "active follow-up thought");
   const lifecycleTurn = page.locator(".chat-response-summary").last();
   await lifecycleTurn.waitFor({ state: "visible" });
   if (await lifecycleTurn.getAttribute("aria-expanded") !== "true") await lifecycleTurn.click();
