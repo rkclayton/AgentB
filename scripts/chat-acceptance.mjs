@@ -464,6 +464,8 @@ if (realModel) {
     flow.append(fixture);
     const fixtureStyle = getComputedStyle(fixture);
     const imageStyle = getComputedStyle(fixture.querySelector("img"));
+    const fixtureRect = fixture.getBoundingClientRect();
+    const imageRect = fixture.querySelector("img").getBoundingClientRect();
     const result = {
       position: fixtureStyle.position,
       inset: fixtureStyle.inset,
@@ -471,11 +473,22 @@ if (realModel) {
       image_width: imageStyle.width,
       image_height: imageStyle.height,
       image_margin: imageStyle.margin,
+      container_width: fixtureRect.width,
+      image_horizontal_center_delta: (imageRect.left + imageRect.width / 2) - (fixtureRect.left + fixtureRect.width / 2),
     };
     fixture.remove();
     return result;
   });
-  assert.deepEqual(emptyStateIllustration, { position: "absolute", inset: "0px", display: "grid", image_width: "96px", image_height: "96px", image_margin: "auto" });
+  assert.deepEqual({
+    position: emptyStateIllustration.position,
+    inset: emptyStateIllustration.inset,
+    display: emptyStateIllustration.display,
+    image_width: emptyStateIllustration.image_width,
+    image_height: emptyStateIllustration.image_height,
+    image_margin: emptyStateIllustration.image_margin,
+  }, { position: "absolute", inset: "0px", display: "grid", image_width: "96px", image_height: "96px", image_margin: "0px" });
+  assert.ok(emptyStateIllustration.container_width > 96, JSON.stringify(emptyStateIllustration));
+  assert.ok(Math.abs(emptyStateIllustration.image_horizontal_center_delta) <= 0.5, JSON.stringify(emptyStateIllustration));
   for (const state of agentStates) assert.deepEqual(consoleStyles.robots[state], chatStyles.robots[state], `Console and Chat robot differ in ${state}`);
   shellStyleBoundaryEvidence = { negative_control: negativeControl, chat: chatStyles, console: consoleStyles, empty_state_illustration: emptyStateIllustration };
   await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
