@@ -26,6 +26,10 @@ $evidence = if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
 } else {
     Join-Path $sourceRoot ('logs\evidence\2026-09-09-v0.18.0-playwright\candidate-' + [Guid]::NewGuid().ToString('N'))
 }
+$expectedCommit = (& git -C $sourceRoot rev-parse HEAD).Trim()
+if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($expectedCommit)) { throw 'Could not resolve the source commit.' }
+$expectedDirty = if (@(& git -C $sourceRoot status --porcelain --untracked-files=no).Count -gt 0) { 'true' } else { 'false' }
+if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the source dirty state.' }
 
 if (Test-Path -LiteralPath $evidence) {
     throw "EvidenceDirectory already exists: $evidence"
@@ -51,7 +55,9 @@ try {
             '--app', $application,
             '--data', $data,
             '--workspace', $workspace,
-            '--evidence', $evidence
+            '--evidence', $evidence,
+            '--expected-commit', $expectedCommit,
+            '--expected-dirty', $expectedDirty
         )
         if ($RealModel) {
             if ([string]::IsNullOrWhiteSpace($RealModelUrl) -or [string]::IsNullOrWhiteSpace($RealModelName)) {
