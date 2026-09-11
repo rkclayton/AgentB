@@ -32,6 +32,7 @@ function item(id, body = "Fixture body.") {
     "milestone: 0.2",
     "kind: feature",
     "surfaces: plan, tests",
+    "authorization: operator",
     "evidence: Operator-authorized fixture scope.",
     "acceptance: Fixture behavior is verified.",
     "",

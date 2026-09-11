@@ -24,6 +24,7 @@ function item(id, { state = "live", unknown = false, unresolved = "(none)" } = {
     `milestone: ${resolved ?? "0.2"}`,
     `kind: ${resolved ?? "feature"}`,
     `surfaces: ${resolved ?? "chat"}`,
+    `authorization: ${resolved ?? "operator"}`,
     `evidence: ${resolved ?? "Operator-authorized fixture scope."}`,
     `acceptance: ${resolved ?? "Fixture behavior is verified."}`,
     "",
@@ -91,10 +92,21 @@ function prepare(root) {
 }
 
 {
-  const root = makeFixture("\n- W1 **2a observed but unapproved work.**", [{ id: "2a", where: "items", text: item("2a").replace("Operator-authorized fixture scope.", "Observed fixture behavior; approval status is ambiguous.") }]);
+  const root = makeFixture("\n- W1 **2a operator authorization denial.**", [{ id: "2a", where: "items", text: item("2a").replace("authorization: operator\n", "").replace("Operator-authorized fixture scope.", "No operator authorization recorded on purpose.") }]);
   prepare(root);
   const result = run(root);
   assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /no recorded authorization/);
+}
+
+{
+  const root = makeFixture("\n- W1 **2a executable work.**", [{ id: "2a", where: "items", text: item("2a") }]);
+  prepare(root);
+  const itemPath = path.join(root, "plan", "items", "2a.md");
+  fs.writeFileSync(itemPath, fs.readFileSync(itemPath, "utf8").replace("authorization: operator", "authorization: no operator authorization recorded on purpose"));
+  const result = run(root);
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /invalid authorization/);
   assert.match(result.stderr, /no recorded authorization/);
 }
 

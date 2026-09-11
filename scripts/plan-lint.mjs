@@ -10,7 +10,8 @@ const scriptRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const validStates = new Set(["proposed", "live", "shipped", "superseded", "dead"]);
 const validKinds = new Set(["defect", "feature", "decision", "discovery"]);
 const validSurfaces = new Set(["chat", "chat-list", "composer", "tab-strip", "console", "settings", "run-loop", "accounting", "tools", "install", "plan", "tests"]);
-const validMetadata = new Set(["state", "milestone", "shipped", "kind", "surfaces", "evidence", "acceptance", "depends-on", "agent"]);
+const validAuthorizations = new Set(["operator"]);
+const validMetadata = new Set(["state", "milestone", "shipped", "kind", "surfaces", "authorization", "evidence", "acceptance", "depends-on", "agent"]);
 
 function lineCount(text) {
   return text === "" ? 0 : text.split(/\r?\n/).length - (text.endsWith("\n") ? 1 : 0);
@@ -84,7 +85,8 @@ function issueDetail(message) {
           : message.includes("Current work order") ? "current-work-order"
             : message.includes("Index") || message.includes("index") ? "index"
               : reference ? "reference" : "plan");
-  const expected = message.includes("no recorded authorization") ? "an operator authorization record in the W clause or item evidence"
+  const expected = message.includes("no recorded authorization") ? "authorization: operator in item metadata"
+    : message.includes("invalid authorization") ? "operator"
     : message.includes("non-empty ## Unresolved") ? "(none), or an explicit discovery/blocker representation"
       : message.includes("does not exist") || message.includes("unresolved item reference") ? "a resolvable item file in plan/items or plan/archive"
         : message.includes("expected live") ? "state: live"
@@ -161,6 +163,8 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
     const rawSurfaces = metadata.get("surfaces");
     const surfaces = rawSurfaces?.split(",").map((value) => value.trim()).filter(Boolean) ?? [];
     if (rawSurfaces && rawSurfaces !== "unknown" && (!surfaces.length || surfaces.some((surface) => !validSurfaces.has(surface)))) errors.push(`${relative}: invalid surfaces ${JSON.stringify(rawSurfaces)}`);
+    const authorization = metadata.get("authorization");
+    if (authorization && authorization !== "unknown" && !validAuthorizations.has(authorization)) errors.push(`${relative}: invalid authorization ${JSON.stringify(authorization)}`);
     for (const field of ["milestone", "kind", "surfaces", "evidence", "acceptance"]) if (metadata.get(field) === "unknown") warnings.push(`${relative}: unresolved metadata ${field}`);
     const heading = body.match(/^# ([0-9]+[a-z]*) — ([^\n]+)$/m);
     if (!heading) {
@@ -257,8 +261,7 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
             admission.errors.push(message);
           }
         }
-        const authorizationRecord = `${execution.clause}\n${item.metadata.get("evidence") ?? ""}`;
-        if (!/\boperator\b|\bauthori[sz](?:e|ed|ation)\b/i.test(authorizationRecord)) {
+        if (item.metadata.get("authorization") !== "operator") {
           const message = `ORDER GATE: executable item ${id} has no recorded authorization for this scope`;
           errors.push(message);
           admission.errors.push(message);
