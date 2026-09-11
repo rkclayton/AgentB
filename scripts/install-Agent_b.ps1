@@ -16,7 +16,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$displayVersion = '0.29.0'
+$displayVersion = '0.30.0'
 
 function Get-FullPath {
     param([string]$Path)
