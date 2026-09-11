@@ -14,12 +14,13 @@ test("Lifetime rows expose all six per-brief reliability fields", () => {
   assert.equal(rows.get("failure attribution model | harness | brief"), "1 | 2 | 3");
 });
 
-test("Console body owns selectors tools lifetime clear flush and conditional instruments", () => {
+test("Console body exposes selectors tools lifetime instruments and maintenance together", () => {
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const script = fs.readFileSync(new URL("app.js", import.meta.url), "utf8");
-  for (const value of ["console-agent", "console-tools", "console-stats", "clear-stats", "flush-memory", "console-live"]) assert.match(html, new RegExp(value));
+  for (const value of ["console-agent", "console-tools", "console-stats", "clear-stats", "flush-memory", "console-live", "console-live-content", "console-maintenance-title"]) assert.match(html, new RegExp(value));
   assert.doesNotMatch(html + script, /console-closed|renderClosed|deleteChat/);
-  assert.match(script, /showLive = .*\["running", "queued", "paused", "stopping"\]/);
+  assert.match(script, /liveContent\.hidden = !hasSelectedChat/);
+  assert.doesNotMatch(script, /lifetime\.hidden|live\.hidden/);
   assert.match(script, /patchEndedRun/);
   assert.match(script, /if \(next\) setActive\(next\.id\)/);
 });

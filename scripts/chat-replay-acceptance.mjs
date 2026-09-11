@@ -227,9 +227,54 @@ try {
   await tab.click();
   await page.waitForURL((url) => url.pathname === "/" && url.searchParams.get("session") === sessionID);
   await page.locator('.agent-tab[data-agent="agent_b"]').waitFor();
+  await page.locator("#console-agent option", { hasText: "Acceptance" }).waitFor({ state: "attached" });
+  await page.locator("#flow .activity-row").first().waitFor();
   assert.equal(await page.locator('.agent-tab[data-agent="agent_b"]').getAttribute("data-side"), "console");
   const consoleGeometry = await shellGeometry();
+  const consoleCapabilities = await page.evaluate(() => {
+    const visible = (selector) => {
+      const node = document.querySelector(selector);
+      if (!node) return false;
+      const style = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      return !node.hidden && style.display !== "none" && style.visibility !== "hidden" && box.width > 0 && box.height > 0;
+    };
+    return {
+      groups: [...document.querySelectorAll(".console-surface > .console-group > .panel-caption > span:first-child")].map((node) => node.textContent.trim()),
+      visible: Object.fromEntries(["#console-agent", "#console-agent-binding", "#console-tools-panel", "#console-lifetime", "#console-live-content", "#rail", "#flow", ".rack-well", "#state-list", "#timeline-list", "#clear-stats", "#flush-memory"].map((selector) => [selector, visible(selector)])),
+      pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      fixedHeaderHeight: document.querySelector("#app-shell").getBoundingClientRect().height,
+      selectedAgent: document.querySelector("#console-agent")?.selectedOptions[0]?.textContent || "",
+      flowRows: document.querySelectorAll("#flow .activity-row").length,
+    };
+  });
+  assert.deepEqual(consoleCapabilities.groups, ["Agent", "Tools", "Lifetime", "Live run", "Maintenance"], JSON.stringify(consoleCapabilities));
+  assert.ok(Object.values(consoleCapabilities.visible).every(Boolean), JSON.stringify(consoleCapabilities));
+  assert.ok(consoleCapabilities.pageOverflow <= 0, JSON.stringify(consoleCapabilities));
+  assert.equal(consoleCapabilities.fixedHeaderHeight, chatGeometry.shell.height, JSON.stringify(consoleCapabilities));
+  assert.equal(consoleCapabilities.selectedAgent, "Acceptance", JSON.stringify(consoleCapabilities));
+  assert.ok(consoleCapabilities.flowRows > 0, JSON.stringify(consoleCapabilities));
   await page.screenshot({ path: join(args.evidence, "real-tape-console.png") });
+  const consoleWidths = [];
+  for (const width of [820, 520, 320]) {
+    await page.setViewportSize({ width, height: 975 });
+    const layout = await page.evaluate(() => ({
+      width: document.documentElement.clientWidth,
+      overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      groups: [...document.querySelectorAll(".console-surface > .console-group > .panel-caption > span:first-child")].filter((node) => getComputedStyle(node).display !== "none").map((node) => node.textContent.trim()),
+      stateDisplay: getComputedStyle(document.querySelector(".state-well")).display,
+      historyDisplay: getComputedStyle(document.querySelector(".timeline-well")).display,
+      bindingVisible: document.querySelector("#console-agent-binding").getClientRects().length > 0,
+    }));
+    assert.equal(layout.overflow, 0, JSON.stringify(layout));
+    assert.deepEqual(layout.groups, consoleCapabilities.groups, JSON.stringify(layout));
+    assert.notEqual(layout.stateDisplay, "none", JSON.stringify(layout));
+    assert.notEqual(layout.historyDisplay, "none", JSON.stringify(layout));
+    assert.equal(layout.bindingVisible, true, JSON.stringify(layout));
+    consoleWidths.push(layout);
+    await page.screenshot({ path: join(args.evidence, `real-tape-console-${width}.png`), fullPage: true });
+  }
+  await page.setViewportSize({ width: 1250, height: 975 });
   await page.locator('.agent-tab[data-agent="agent_b"]').click();
   await page.waitForURL((url) => url.pathname === "/chat" && url.searchParams.get("session") === sessionID);
   await page.locator(".chat-entry").first().waitFor();
@@ -269,6 +314,8 @@ try {
     settingsFailedResponses,
     chatFailedResponses,
     ui,
+    consoleCapabilities,
+    consoleWidths,
     shellGeometry: { chat: chatGeometry, console: consoleGeometry, returned_chat: returnedChatGeometry },
     plusUsableHitTarget: chatGeometry.plus.width >= 20 && chatGeometry.plus.height >= 20,
     cursor: result.cursor,

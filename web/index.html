@@ -11,23 +11,31 @@
 </head>
 <body>
   <header id="app-shell" class="app-shell window-titlebar" data-page="console"></header>
-  <main id="console-lifetime" class="console-lifetime">
-    <header class="console-selector"><label for="console-agent">Agent</label><select id="console-agent"></select><span id="console-agent-binding"></span></header>
-    <a id="console-tools-link" class="console-tools-link" href="#console-tools">0 tools active</a>
-    <section id="console-tools-panel" class="console-pane"><header class="panel-caption"><span>Tools</span><span>toggle · name · calls · fail % · last used</span></header><div id="console-tools" class="console-lines"></div></section>
-    <section class="console-pane"><header class="panel-caption"><span>Lifetime</span><span>brief = run until Plan exists</span></header><div id="console-stats" class="console-lines"></div></section>
-    <footer class="console-actions"><button id="clear-stats" type="button">Clear all stats</button><button id="flush-memory" type="button">Flush memory</button><span id="console-feedback" role="status"></span></footer>
+  <main id="console-surface" class="console-surface">
+    <section class="console-group console-agent-group" aria-labelledby="console-agent-title">
+      <header class="panel-caption"><span id="console-agent-title">Agent</span><span>profile bindings and selected chat</span></header>
+      <div class="console-selector"><label for="console-agent">Agent</label><select id="console-agent"></select><span id="console-agent-binding"></span></div>
+    </section>
+    <section id="console-tools-panel" class="console-pane console-group" aria-labelledby="console-tools-title"><header class="panel-caption"><span id="console-tools-title">Tools</span><span><a id="console-tools-link" class="console-tools-link" href="#console-tools">0 tools active</a> · toggle · name · calls · fail % · last used</span></header><div id="console-tools" class="console-lines"></div></section>
+    <section id="console-lifetime" class="console-pane console-group console-lifetime-group" aria-labelledby="console-lifetime-title"><header class="panel-caption"><span id="console-lifetime-title">Lifetime</span><span>brief = run until Plan exists</span></header><div id="console-stats" class="console-lines"></div></section>
+    <section id="console-live" class="console-live console-group" aria-labelledby="console-live-title">
+      <header class="panel-caption"><span id="console-live-title">Live run</span><span class="console-live-actions"><span id="console-live-state" role="status"></span><button id="console-stop" class="stop-sign" type="button" aria-label="Stop"><span aria-hidden="true"></span></button></span></header>
+      <p id="console-live-empty" class="console-empty" hidden>No open chat for this agent.</p>
+      <div id="console-live-content" class="console-live-content">
+        <section id="rail" class="rail" aria-label="Context budget"></section>
+        <div class="grid">
+          <section class="well flow-well"><header class="panel-caption"><span>Activity</span><span id="flow-count"></span></header><div id="flow" class="flow"></div></section>
+          <section class="well rack-well"><header class="panel-caption"><span>Tools</span><span id="tool-count"></span></header><div id="rack" class="rack"></div></section>
+          <section class="well state-well"><header class="panel-caption"><span>Context</span><span id="state-count"></span></header><div id="state-list" class="panel-scroll"></div></section>
+          <section class="well timeline-well"><header class="panel-caption"><span>History</span><span class="history-controls"><span id="timeline-count"></span><button id="drop-last-message" type="button">Drop last message</button></span></header><div id="timeline-list" class="panel-scroll"></div><div id="console-pending-approval" class="pending-approval" hidden></div></section>
+        </div>
+      </div>
+    </section>
+    <section class="console-group console-maintenance" aria-labelledby="console-maintenance-title">
+      <header class="panel-caption"><span id="console-maintenance-title">Maintenance</span><span>selected agent and workspace</span></header>
+      <footer class="console-actions"><button id="clear-stats" type="button">Clear all stats</button><button id="flush-memory" type="button">Flush memory</button><span id="console-feedback" role="status"></span></footer>
+    </section>
   </main>
-  <section id="console-live" hidden>
-    <section id="rail" class="rail" aria-label="Context budget"></section>
-    <main class="grid">
-      <section class="well flow-well"><header class="panel-caption"><span>Activity</span><span id="flow-count"></span></header><div id="flow" class="flow"></div></section>
-      <section class="well rack-well"><header class="panel-caption"><span>Tools</span><span id="tool-count"></span></header><div id="rack" class="rack"></div></section>
-      <section class="well state-well"><header class="panel-caption"><span>Context</span><span id="state-count"></span></header><div id="state-list" class="panel-scroll"></div></section>
-      <section class="well timeline-well"><header class="panel-caption"><span>History</span><span class="history-controls"><span id="timeline-count"></span><button id="drop-last-message" type="button">Drop last message</button></span></header><div id="timeline-list" class="panel-scroll"></div><div id="console-pending-approval" class="pending-approval" hidden></div></section>
-    </main>
-    <footer class="console-live-controls"><span id="console-live-state" role="status"></span><button id="console-stop" class="stop-sign" type="button" aria-label="Stop"><span aria-hidden="true"></span></button></footer>
-  </section>
   <section id="settings-page" class="settings-page" aria-label="Settings" aria-hidden="true" hidden></section>
   <script type="module" src="/static/js/app.js"></script>
 </body>

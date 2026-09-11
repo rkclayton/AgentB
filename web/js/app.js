@@ -16,8 +16,8 @@ let initialSession = requestedSession;
 let selectedAgent = "";
 let ledger = null;
 let renderFrame = 0;
-const lifetime = document.getElementById("console-lifetime");
-const live = document.getElementById("console-live");
+const liveContent = document.getElementById("console-live-content");
+const liveEmpty = document.getElementById("console-live-empty");
 const dropLastMessage = document.getElementById("drop-last-message");
 const agentSelect = document.getElementById("console-agent");
 const feedback = document.getElementById("console-feedback");
@@ -53,7 +53,7 @@ subscribe((_state, event) => {
   }
   if (!selectedAgent || ["selection.changed", "active.changed"].includes(event.type)) selectedAgent = store.sessions[store.active]?.agent_id || agentKey(store.config.agents?.[0]);
   if (event.type === "projection.patch" && (event.data?.operations || []).some((operation) => operation.path === "/run/partial" || /^\/chat\/[^/]+\/(reasoning|text)$/.test(operation.path))) {
-    if (!live.hidden) scheduleFlowRender();
+    if (!liveContent.hidden) scheduleFlowRender();
     return;
   }
   if (["snapshot", "config.changed"].includes(event.type) || (event.type === "projection.patch" && patchEndedRun(event.data))) void refreshLedger(false);
@@ -70,7 +70,7 @@ function scheduleFlowRender() {
 }
 setInterval(() => {
   const session = store.sessions[store.active];
-  if (!live.hidden && session?.run?.status === "running" && session.activity?.stage === "call_model") scheduleFlowRender();
+  if (!liveContent.hidden && session?.run?.status === "running" && session.activity?.stage === "call_model") scheduleFlowRender();
 }, 1000);
 
 async function refreshLedger(render = true) {
@@ -90,13 +90,13 @@ function renderConsole() {
   renderTools(agent);
   renderLifetime();
   const session = store.sessions[store.active];
-  const showLive = !!session && session.agent_id === selectedAgent && ["running", "queued", "paused", "stopping"].includes(session.run?.status);
-  lifetime.hidden = showLive;
-  live.hidden = !showLive;
-  if (showLive) {
+  const hasSelectedChat = !!session && session.agent_id === selectedAgent;
+  liveContent.hidden = !hasSelectedChat;
+  liveEmpty.hidden = hasSelectedChat;
+  renderStopState(consoleStop, hasSelectedChat ? session : null, store.replay);
+  document.getElementById("console-live-state").textContent = !hasSelectedChat ? "no open chat" : session.pending_approval ? "waiting for you" : session.run?.status || "idle";
+  if (hasSelectedChat) {
     renderRail(); renderFlow(); renderRack(); renderState(); renderTimeline(); placeDropLastMessage(); dropControl.render(); renderPendingApproval(session);
-    renderStopState(consoleStop, session, store.replay);
-    document.getElementById("console-live-state").textContent = session.pending_approval ? "waiting for you" : session.run?.status || "idle";
   }
 }
 
