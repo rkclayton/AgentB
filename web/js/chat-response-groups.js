@@ -4,7 +4,10 @@ export const thinThoughtTokenLimit = 64;
 
 export function hasVisibleChatContent(item) {
   if (!item || typeof item !== "object") return true;
-  if (item.type === "notice" && item.event?.type === "files.delivered") return (item.event.data?.items || []).length > 0;
+  if (item.type === "notice" && item.event?.type === "files.delivered") {
+    const items = item.event.data?.items;
+    return !Array.isArray(items) || items.length > 0;
+  }
   if (item.type !== "agent") return true;
   return !!item.text || !!item.reasoning || item.done !== true;
 }

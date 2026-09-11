@@ -109,7 +109,7 @@ function renderConsole() {
 }
 
 function renderAgentServer(agent) {
-  const profiles = store.servers || store.config.servers || [];
+  const profiles = store.servers?.length ? store.servers : store.config.servers || [];
   const pending = store.agent_server_changes?.[selectedAgent];
   agentServerSelect.replaceChildren(...profiles.map((profile) => option(profile.id, profile.label || profile.id, profile.id === agent?.b)));
   agentServerSelect.disabled = !agent || store.replay;

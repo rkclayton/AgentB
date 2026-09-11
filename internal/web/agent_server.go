@@ -100,6 +100,9 @@ func (s *Server) agentServer(w http.ResponseWriter, r *http.Request, agentID str
 func (s *Server) applyPendingAgentServer(agentID string) {
 	s.agentServerMu.Lock()
 	change, exists := s.agentServers[agentID]
+	if exists {
+		delete(s.agentServers, agentID)
+	}
 	s.agentServerMu.Unlock()
 	if !exists {
 		return
@@ -115,6 +118,7 @@ func (s *Server) applyPendingAgentServer(agentID string) {
 	}
 	if index < 0 {
 		s.mu.Unlock()
+		s.restorePendingAgentServer(change)
 		s.bus.Publish(events.New(events.Error, "", "", map[string]any{"where": "agent_server_change", "message": "agent not found: " + agentID}))
 		return
 	}
@@ -123,6 +127,7 @@ func (s *Server) applyPendingAgentServer(agentID string) {
 	if err := s.cfg.Save(s.configPath); err != nil {
 		s.cfg.Agents[index].B = previous
 		s.mu.Unlock()
+		s.restorePendingAgentServer(change)
 		s.bus.Publish(events.New(events.Error, "", "", map[string]any{"where": "agent_server_change", "message": err.Error()}))
 		return
 	}
@@ -136,11 +141,14 @@ func (s *Server) applyPendingAgentServer(agentID string) {
 			s.bus.Publish(events.New(events.Error, "", "", map[string]any{"where": "agent_server_change", "message": err.Error()}))
 		}
 	}
-	s.agentServerMu.Lock()
-	if current, ok := s.agentServers[agentID]; ok && current.To == change.To {
-		delete(s.agentServers, agentID)
-	}
-	s.agentServerMu.Unlock()
 	s.bus.Publish(events.New(events.ConfigChanged, "", "", map[string]any{"config": masked}))
 	s.bus.Publish(events.New(events.AgentServerChange, "", "", map[string]any{"status": "applied", "agent_id": agentID, "from": change.From, "to": change.To}))
+}
+
+func (s *Server) restorePendingAgentServer(change pendingAgentServer) {
+	s.agentServerMu.Lock()
+	if _, replaced := s.agentServers[change.AgentID]; !replaced {
+		s.agentServers[change.AgentID] = change
+	}
+	s.agentServerMu.Unlock()
 }

@@ -73,5 +73,6 @@ test("only completed agent entries with no content are omitted from Chat", () =>
   assert.equal(hasVisibleChatContent({ type: "notice", key: "notice" }), true);
   assert.equal(hasVisibleChatContent({ type: "notice", key: "empty-delivery", event: { type: "files.delivered", data: { items: [] } } }), false);
   assert.equal(hasVisibleChatContent({ type: "notice", key: "delivery", event: { type: "files.delivered", data: { items: [{}] } } }), true);
+  assert.equal(hasVisibleChatContent({ type: "notice", key: "malformed-delivery", event: { type: "files.delivered", data: {} } }), true);
   assert.equal(hasVisibleChatContent(null), true);
 });
