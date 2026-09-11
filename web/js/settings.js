@@ -1161,6 +1161,7 @@ function assign(target, parts, value) {
 
 async function addServer() {
   const id = uniqueID("server");
+  expanded.clear();
   expanded.add(id);
   try {
     const result = await api("/api/config", { servers: [{ id, label: id, base_url: "http://127.0.0.1:8000", model: "model" }] });
@@ -1186,6 +1187,7 @@ async function duplicateServer(id) {
     copy.api_key = "";
     copy.credential = "";
   }
+  expanded.clear();
   expanded.add(copy.id);
   const result = await api("/api/config", { servers: [copy] });
   reduce({ type: "config.changed", data: { config: result } });

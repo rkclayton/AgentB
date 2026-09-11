@@ -81,8 +81,12 @@ try {
   const page = await browser.newPage({ viewport: { width: 1250, height: 975 } });
   await page.goto(`${base}/`);
   await page.locator(".shell-settings").click();
+  await page.locator('.profile-summary[data-id="seed"]').click();
+  assert.equal(await page.locator(".profile-editor").count(), 1);
   await page.getByRole("button", { name: "Add connection" }).click();
   await page.locator('.profile-summary[data-id="server"]').waitFor();
+  assert.equal(await page.locator(".profile-editor").count(), 1);
+  assert.equal(await page.locator('.profile-editor[aria-label="server connection settings"]').count(), 1);
   const persistedAfterAdd = (await state()).config.servers.find((item) => item.id === "server");
   assert.ok(persistedAfterAdd, "Add connection did not persist the new profile");
   const baseInput = page.locator('[data-path="servers.server.base_url"]');
