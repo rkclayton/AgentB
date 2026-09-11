@@ -69,6 +69,13 @@ try {
   app.stderr.on("data", (chunk) => { stderr += String(chunk); });
   const base = `http://127.0.0.1:${appPort}`;
   async function state() { const response = await fetch(`${base}/api/state`); assert.equal(response.status, 200); return response.json(); }
+  async function configure(body) {
+    const current = await state();
+    const response = await fetch(`${base}/api/config`, { method: "POST", headers: { "Content-Type": "application/json", "X-AgentB-Mutation-Token": current.mutation_token }, body: JSON.stringify(body) });
+    const text = await response.text();
+    assert.equal(response.status, 200, text);
+    return JSON.parse(text);
+  }
   async function waitFor(check, label, timeout = 20000) {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) { try { const value = await check(); if (value) return value; } catch {} await sleep(50); }
@@ -125,8 +132,9 @@ try {
   await waitFor(async () => (await state()).config.servers.find((item) => item.id === "server")?.label === "Evidence connection", "explicit Save persistence");
 
   await page.locator('.settings-head [data-action="close"]').click();
-  await page.locator("#console-agent-profile").selectOption("server");
-  await waitFor(async () => (await state()).config.agents[0]?.b === "server", "Console B profile binding");
+  const fixtureAgents = (await state()).config.agents.map((agent) => ({ ...agent, b: "server" }));
+  await configure({ agents: fixtureAgents });
+  await waitFor(async () => (await state()).config.agents[0]?.b === "server", "test-fixture profile binding");
   const beforeSessions = Object.keys((await state()).sessions);
   await page.locator(".agent-tab-new").click();
   await page.locator(".shell-new-choice").first().click();
@@ -142,7 +150,7 @@ try {
     test_success: { visible_state: successState, context_size: Number(contextValue) },
     test_failure: { visible_state: failureState },
     explicit_save: { persisted_label: persistedDocument.servers.find((item) => item.id === "server")?.label },
-    use: { control: "Console B profile", agent_profile: persistedDocument.agents[0]?.b, new_session_id: used.id, new_session_profile: used.server_id },
+    use: { binding_setup: "test fixture via existing config API; item 2av remains excluded", agent_profile: persistedDocument.agents[0]?.b, new_session_id: used.id, new_session_profile: used.server_id },
   };
   await mkdir(resolve(args.evidence), { recursive: true });
   await writeFile(resolve(args.evidence, "connection-flow.json"), JSON.stringify(output, null, 2));

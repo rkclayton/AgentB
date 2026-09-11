@@ -1846,7 +1846,7 @@
 .console-selector label,
 .console-selector span,
 .console-actions span { color: var(--mute); }
-.console-selector select { min-width: 150px; }
+.console-selector select { min-width: 180px; }
 .console-pane {
   min-width: 0;
   min-height: 0;
