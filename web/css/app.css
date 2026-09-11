@@ -1887,7 +1887,8 @@
 .console-maintenance { display:grid; grid-template-rows:22px 36px; }
 @media (max-width: 820px) {
   .console-surface { display:block; overflow-x:hidden; overflow-y:auto; }
-  .console-agent-group,.console-maintenance { height:58px; }
+  .console-agent-group { height:78px; grid-template-rows:22px 56px; }
+  .console-maintenance { height:58px; }
   #console-tools-panel,.console-lifetime-group { height:320px; }
   .console-live { min-height:900px; }
   .console-live-content { grid-template-rows:40px auto; }
@@ -1896,7 +1897,7 @@
   .console-selector { flex-wrap:wrap; }
 }
 @media (max-width: 520px) {
-  .console-agent-group { height:78px; grid-template-rows:22px 56px; }
+  .console-agent-group { height:110px; grid-template-rows:22px 88px; }
   .console-tool-line { grid-template-columns:24px minmax(100px,1fr) 48px 48px; }
   .console-tool-line > :last-child { grid-column:2 / -1; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .console-live .timeline-head { height:auto; min-height:28px; grid-template-columns:minmax(0,1fr) auto; gap:2px 8px; padding:4px 6px; }

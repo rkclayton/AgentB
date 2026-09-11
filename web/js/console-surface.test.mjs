@@ -42,6 +42,11 @@ test("Settings navigation remains install-global while agent controls live on Co
   assert.match(index, /id="flush-memory"/);
 });
 
+test("Console server controls gain wrapped height before narrow layouts can clip them", () => {
+  assert.match(styles, /@media \(max-width: 820px\)[\s\S]*\.console-agent-group \{ height:78px; grid-template-rows:22px 56px; \}/);
+  assert.match(styles, /@media \(max-width: 520px\)[\s\S]*\.console-agent-group \{ height:110px; grid-template-rows:22px 88px; \}/);
+});
+
 test("Console pins the current approval and shows waiting for you in state colour", () => {
 	assert.match(index, /id="console-pending-approval" class="pending-approval" hidden/);
 	assert.match(script, /renderPendingApproval\(session\)/);
