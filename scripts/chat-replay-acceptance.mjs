@@ -265,14 +265,30 @@ try {
       stateDisplay: getComputedStyle(document.querySelector(".state-well")).display,
       historyDisplay: getComputedStyle(document.querySelector(".timeline-well")).display,
       bindingVisible: document.querySelector("#console-agent-binding").getClientRects().length > 0,
+      historyOverflow: document.querySelector(".timeline-well").scrollWidth - document.querySelector(".timeline-well").clientWidth,
+      timelineOverlaps: [...document.querySelectorAll(".timeline-head")].reduce((count, head) => {
+        const boxes = [...head.children].map((node) => node.getBoundingClientRect()).filter((box) => box.width > 0 && box.height > 0);
+        return count + boxes.reduce((rowCount, box, index) => rowCount + boxes.slice(index + 1).filter((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top).length, 0);
+      }, 0),
     }));
     assert.equal(layout.overflow, 0, JSON.stringify(layout));
     assert.deepEqual(layout.groups, consoleCapabilities.groups, JSON.stringify(layout));
     assert.notEqual(layout.stateDisplay, "none", JSON.stringify(layout));
     assert.notEqual(layout.historyDisplay, "none", JSON.stringify(layout));
     assert.equal(layout.bindingVisible, true, JSON.stringify(layout));
-    consoleWidths.push(layout);
-    await page.screenshot({ path: join(args.evidence, `real-tape-console-${width}.png`), fullPage: true });
+    assert.ok(layout.historyOverflow <= 0, JSON.stringify(layout));
+    assert.equal(layout.timelineOverlaps, 0, JSON.stringify(layout));
+    await page.screenshot({ path: join(args.evidence, `real-tape-console-${width}.png`) });
+    const bottom = await page.evaluate(() => {
+      const surface = document.querySelector("#console-surface");
+      surface.scrollTop = surface.scrollHeight;
+      const box = document.querySelector(".console-maintenance").getBoundingClientRect();
+      return { scrollTop: surface.scrollTop, scrollHeight: surface.scrollHeight, maintenanceTop: box.top, maintenanceBottom: box.bottom, maintenanceReachable: box.top >= 32 && box.bottom <= innerHeight };
+    });
+    assert.equal(bottom.maintenanceReachable, true, JSON.stringify(bottom));
+    consoleWidths.push({ ...layout, ...bottom });
+    await page.screenshot({ path: join(args.evidence, `real-tape-console-${width}-bottom.png`) });
+    await page.locator("#console-surface").evaluate((surface) => { surface.scrollTop = 0; });
   }
   await page.setViewportSize({ width: 1250, height: 975 });
   await page.locator('.agent-tab[data-agent="agent_b"]').click();

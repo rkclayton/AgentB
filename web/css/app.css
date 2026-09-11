@@ -1789,6 +1789,12 @@
   .console-agent-group { height:78px; grid-template-rows:22px 56px; }
   .console-tool-line { grid-template-columns:24px minmax(100px,1fr) 48px 48px; }
   .console-tool-line > :last-child { grid-column:2 / -1; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .console-live .timeline-head { height:auto; min-height:28px; grid-template-columns:minmax(0,1fr) auto; gap:2px 8px; padding:4px 6px; }
+  .console-live .timeline-tool { margin-left:0; }
+  .console-live .timeline-tool .timeline-head,
+  .console-live .timeline-tool-group .timeline-head { grid-template-columns:8px minmax(0,1fr) auto; }
+  .console-live .timeline-inline .timeline-head { display:flex; flex-wrap:wrap; }
+  .console-live .timeline-head > * { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 }
 
 @media (max-width: 800px) {
