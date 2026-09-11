@@ -2,6 +2,7 @@ import { api, reduce, setSelection, store, subscribe } from "./bus.js";
 import { chatRowText, closeConfirmText, firstUserLine, isRunning } from "./chat-lifecycle.js";
 import { agentTabLayout } from "./agent-tabs.js";
 import { installUIErrorRelay } from "./ui-error-relay.js";
+import { beginNavigation } from "./navigation-telemetry.js";
 
 const activeRunStates = new Set(["running", "queued", "stopping"]);
 const agentKey = (agent) => String(agent?.name || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
@@ -52,6 +53,10 @@ export function initShell(options = {}) {
   settings.textContent = "⚙";
   settings.setAttribute("aria-label", "Settings");
   settings.title = "Settings";
+  settings.addEventListener("click", () => {
+    const closing = settings.getAttribute("aria-expanded") === "true";
+    beginNavigation({ kind: "settings", from: closing ? "settings" : page, to: closing ? page : "settings", fullDocument: page === "chat", chatID: store.active });
+  });
   right.append(pages, settings);
   root.append(left, right);
   document.addEventListener("click", (event) => {
@@ -119,7 +124,9 @@ export function initShell(options = {}) {
       tab.onclick = () => {
         const current = store.selection.session_id;
         const owned = sessionsFor(agentID, false);
-        setSelection(agentID, owned.some((item) => item.id === current) ? current : owned[0]?.id || "");
+        const targetSession = owned.some((item) => item.id === current) ? current : owned[0]?.id || "";
+        beginNavigation({ kind: "flip", from: page, to: side === "chat" ? "console" : "chat", fullDocument: true, chatID: targetSession });
+        setSelection(agentID, targetSession);
         const next = side === "chat" ? "console" : "chat";
         rememberAgentSide(agentID, next);
         const sessionID = store.selection.session_id;

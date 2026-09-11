@@ -1,4 +1,5 @@
 import { createOperatorReconciler } from "./operator-reconcile.js";
+import { navigationEventSourceConstructed, navigationEventSourceOpened, navigationSnapshotStarted, navigationStateFetchEnded, navigationStateFetchStarted } from "./navigation-telemetry.js";
 
 export const store = {
   sessions: {}, active: "", selection: readSelection(), servers: [], config: {}, flow: { stages: [], edges: [] }, tools: [], serving_facts: {},
@@ -9,9 +10,12 @@ export const store = {
 const listeners = new Set();
 const operatorReconciler = createOperatorReconciler({
   readState: async () => {
-    const response = await fetch("/api/state", { cache: "no-store" });
-    if (!response.ok) throw new Error(`state reconciliation failed: HTTP ${response.status}`);
-    return response.json();
+    const sample = navigationStateFetchStarted("/api/state");
+    try {
+      const response = await fetch("/api/state", { cache: "no-store" });
+      if (!response.ok) throw new Error(`state reconciliation failed: HTTP ${response.status}`);
+      return response.json();
+    } finally { navigationStateFetchEnded(sample); }
   },
   applyIdentity: (identity) => reduce({ type: "shell.identity", data: identity }),
 });
@@ -167,7 +171,10 @@ export async function api(path, body, method = "POST") {
   const options = { method, headers: {} };
   if (method !== "GET" && method !== "HEAD") options.headers["X-AgentB-Mutation-Token"] = store.mutation_token;
   if (body !== undefined) { options.headers["Content-Type"] = "application/json"; options.body = JSON.stringify(body); }
-  const response = await fetch(path, options);
+  const sample = navigationStateFetchStarted(path);
+  let response;
+  try { response = await fetch(path, options); }
+  finally { navigationStateFetchEnded(sample); }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) { const error = new Error(data.error || `HTTP ${response.status}`); error.field = data.field || ""; error.status = response.status; error.data = data; throw error; }
   return data;
@@ -176,8 +183,10 @@ export async function api(path, body, method = "POST") {
 let reconnected = false;
 const eventSearch = typeof location === "undefined" ? "" : location.search;
 const eventURL = new URLSearchParams(eventSearch).get("instant") === "1" ? "/api/events?instant=1" : "/api/events";
+navigationEventSourceConstructed();
 const source = new EventSource(eventURL);
 source.onopen = () => {
+  navigationEventSourceOpened();
   const connection = document.getElementById("connection");
   if (reconnected && connection) { connection.textContent = "reconnected"; connection.className = ""; setTimeout(() => { connection.textContent = ""; }, 3000); }
   reconnected = true;
@@ -186,7 +195,9 @@ source.onopen = () => {
 source.onerror = () => { const connection = document.getElementById("connection"); if (connection) { connection.textContent = "connection lost — retrying"; connection.className = "alarm"; } };
 export function applyServerEvent(event) {
   try {
-    reduce(JSON.parse(event.data));
+    const parsed = JSON.parse(event.data);
+    if (parsed.type === "snapshot") navigationSnapshotStarted();
+    reduce(parsed);
     return true;
   } catch (error) {
     const eventType = event?.type || "message";

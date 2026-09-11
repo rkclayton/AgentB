@@ -1,5 +1,6 @@
 import { api, reduce, setActive, store, subscribe } from "./bus.js";
 import { operatorStatusView } from "./operator-status.js";
+import { navigationSurfaceReady } from "./navigation-telemetry.js";
 
 const sheet = document.getElementById("settings-page");
 let gear;
@@ -126,6 +127,7 @@ function closeSettings() {
   gear.classList.remove("selected");
   history.replaceState(null, "", `${location.pathname}${location.search}`);
   (lastFocus || gear).focus();
+  navigationSurfaceReady("console", store);
 }
 
 function render() {
@@ -172,6 +174,7 @@ function render() {
   const focusNode = [...sheet.querySelectorAll("button, input, textarea, select, summary")]
     .find((node) => controlKey(node) === focusKey);
   focusNode?.focus({ preventScroll: true });
+  navigationSurfaceReady("settings", store);
 }
 
 function refreshSaveControls() {

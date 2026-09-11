@@ -82,6 +82,8 @@ type Server struct {
 	probeCancels     map[string]*probeRun
 	bindMu           sync.Mutex
 	pendingBinds     map[string]pendingBind
+	navigationMu     sync.Mutex
+	navigationIDs    map[string]time.Time
 }
 
 type probeRun struct{ cancel context.CancelFunc }
@@ -114,6 +116,7 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 		openFolder:    openContainingFolder,
 		probeCancels:  map[string]*probeRun{},
 		pendingBinds:  map[string]pendingBind{},
+		navigationIDs: map[string]time.Time{},
 		extractClient: &http.Client{},
 		detectLocal: func(ctx context.Context, account string) (any, error) {
 			return detection.Local(ctx, filepath.Join(roots.Application, "scripts", "detect-local-capabilities.ps1"), account)
@@ -181,6 +184,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/operator-attachments", s.operatorAttachments)
 	mux.HandleFunc("/api/operator-files", s.replayGuard(s.operatorFileState))
 	mux.HandleFunc("/api/ui-errors", s.replayGuard(s.uiError))
+	mux.HandleFunc("/api/navigation-measurements", s.replayGuard(s.navigationMeasurement))
 	mux.HandleFunc("/api/sessions", s.replayGuard(s.sessions))
 	mux.HandleFunc("/api/sessions/", s.replayGuard(s.session))
 	mux.HandleFunc("/api/workspaces", s.replayGuard(s.workspaces))

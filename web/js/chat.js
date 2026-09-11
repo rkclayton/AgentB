@@ -11,6 +11,7 @@ import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, 
 import { agentAuthor, isRunning, openSessions } from "./chat-lifecycle.js";
 import { renderStopState } from "./stop-state.js";
 import { groupResponseRows, itemFailed, responseBlocks, responseSummary } from "./chat-response-groups.js";
+import { navigationSurfaceReady } from "./navigation-telemetry.js";
 
 const budget = document.getElementById("chat-budget");
 const log = document.getElementById("chat-log");
@@ -111,6 +112,7 @@ function render() {
   renderBudget(session);
   renderLog(session);
   renderComposer(session);
+  navigationSurfaceReady("chat", store);
 }
 
 function newestOpenSessions() {

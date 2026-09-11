@@ -73,6 +73,7 @@ const (
 	CompactionSummary     = "compaction.summary"
 	BudgetEvent           = "budget"
 	FilesDelivered        = "files.delivered"
+	NavigationMeasured    = "navigation.measured"
 )
 
 var Stages = []string{"assemble", "call_model", "parse", "dispatch", "execute", "append", "compact", "wait_user"}

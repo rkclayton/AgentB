@@ -10,6 +10,7 @@ import { createMessageDropController } from "./message-drop.js";
 import { createApprovalCard } from "./approval.js";
 import { agentKey, lifetimeRows, ratio } from "./console-lifetime.js";
 import { renderStopState } from "./stop-state.js";
+import { navigationSurfaceReady } from "./navigation-telemetry.js";
 
 const requestedSession = new URLSearchParams(location.search).get("session");
 let initialSession = requestedSession;
@@ -98,6 +99,7 @@ function renderConsole() {
   if (hasSelectedChat) {
     renderRail(); renderFlow(); renderRack(); renderState(); renderTimeline(); placeDropLastMessage(); dropControl.render(); renderPendingApproval(session);
   }
+  navigationSurfaceReady("console", store);
 }
 
 function renderTools(agent) {
