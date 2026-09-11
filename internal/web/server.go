@@ -184,6 +184,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/operator-attachments", s.operatorAttachments)
 	mux.HandleFunc("/api/operator-files", s.replayGuard(s.operatorFileState))
 	mux.HandleFunc("/api/ui-errors", s.replayGuard(s.uiError))
+	mux.HandleFunc("/api/navigation-starts", s.replayGuard(s.navigationStart))
 	mux.HandleFunc("/api/navigation-measurements", s.replayGuard(s.navigationMeasurement))
 	mux.HandleFunc("/api/sessions", s.replayGuard(s.sessions))
 	mux.HandleFunc("/api/sessions/", s.replayGuard(s.session))

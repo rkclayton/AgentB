@@ -82,3 +82,9 @@ func (b *Bus) Subscribe() (chan Event, func()) {
 	var once sync.Once
 	return ch, func() { once.Do(func() { b.mu.Lock(); delete(b.subscribers, id); b.mu.Unlock() }) }
 }
+
+func (b *Bus) SubscriberCount() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return len(b.subscribers)
+}

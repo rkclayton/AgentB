@@ -36,15 +36,22 @@ test("same-document settings navigation records zero absent phases and context",
   const runtime = fakeRuntime(storage, 1000);
   runtime.advance(100);
   const telemetry = createNavigationTelemetry(runtime);
-  telemetry.begin({ kind: "settings", from: "console", to: "settings", fullDocument: false, chatID: "s1" });
+  telemetry.begin({ kind: "settings", from: "console", to: "settings", fullDocument: false, chatID: "s1", mutationToken: "token" });
   runtime.advance(105);
   telemetry.surfaceReady("settings", { mutation_token: "token", active: "s1", sessions: { s1: { id: "s1", chat: [{}, {}, {}], model_unreachable: null } } });
   runtime.frame(120);
   runtime.frame(140);
   await new Promise((resolve) => setImmediate(resolve));
 
-  assert.equal(runtime.posts.length, 1);
-  const body = JSON.parse(runtime.posts[0].options.body);
+  assert.equal(runtime.posts.length, 2);
+  assert.equal(runtime.posts[0].path, "/api/navigation-starts");
+  assert.equal(runtime.posts[0].options.headers["X-AgentB-Mutation-Token"], "token");
+  const start = JSON.parse(runtime.posts[0].options.body);
+  assert.equal(start.navigation_id, "nav-1");
+  assert.equal(start.clicked_at, 1100);
+  assert.equal(start.full_document, false);
+  assert.equal(runtime.posts[1].path, "/api/navigation-measurements");
+  const body = JSON.parse(runtime.posts[1].options.body);
   assert.equal(body.navigation_kind, "settings");
   assert.equal(body.document_request_parse_ms, 0);
   assert.equal(body.module_page_init_ms, 0);
@@ -57,13 +64,14 @@ test("same-document settings navigation records zero absent phases and context",
   assert.equal(body.model_reachability, "reachable");
   assert.equal(body.since_previous_navigation_ms, null);
   assert.equal(runtime.posts[0].options.keepalive, true);
+  assert.equal(runtime.posts[1].options.keepalive, true);
 });
 
 test("cross-document flip carries the click and records all five harness boundaries", async () => {
   const storage = memoryStorage();
   const source = fakeRuntime(storage, 1000);
   source.advance(100);
-  createNavigationTelemetry(source).begin({ kind: "flip", from: "console", to: "chat", fullDocument: true, chatID: "large" });
+  createNavigationTelemetry(source).begin({ kind: "flip", from: "console", to: "chat", fullDocument: true, chatID: "large", mutationToken: "token" });
 
   const target = fakeRuntime(storage, 1110, { startTime: 0, domInteractive: 20, domContentLoadedEventEnd: 25 });
   const telemetry = createNavigationTelemetry(target);
@@ -77,7 +85,7 @@ test("cross-document flip carries the click and records all five harness boundar
   target.frame(40);
   await new Promise((resolve) => setImmediate(resolve));
 
-  const body = JSON.parse(target.posts[0].options.body);
+  const body = JSON.parse(target.posts.find((post) => post.path === "/api/navigation-measurements").options.body);
   assert.equal(body.document_request_parse_ms, 30);
   assert.equal(body.module_page_init_ms, 5);
   assert.equal(body.session_state_fetch_ms, 3);

@@ -27,6 +27,50 @@ type navigationMeasurementBody struct {
 	InstrumentationSyncMS           float64  `json:"instrumentation_sync_ms"`
 }
 
+type navigationStartBody struct {
+	NavigationID              string   `json:"navigation_id"`
+	NavigationKind            string   `json:"navigation_kind"`
+	From                      string   `json:"from"`
+	To                        string   `json:"to"`
+	FullDocument              bool     `json:"full_document"`
+	ClickedAt                 float64  `json:"clicked_at"`
+	ChatID                    string   `json:"chat_id"`
+	SincePreviousNavigationMS *float64 `json:"since_previous_navigation_ms"`
+}
+
+func (s *Server) navigationStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	var body navigationStartBody
+	if !decode(w, r, &body) {
+		return
+	}
+	if !validNavigationStart(body) {
+		writeError(w, http.StatusBadRequest, "invalid navigation start", "body")
+		return
+	}
+	if body.ChatID != "" && s.registry != nil {
+		if _, ok := s.registry.Get(body.ChatID); !ok {
+			writeError(w, http.StatusNotFound, "chat not found", "chat_id")
+			return
+		}
+	}
+	if !s.claimNavigationID(events.NavigationStarted + "\x00" + body.NavigationID) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	s.bus.Publish(events.New(events.NavigationStarted, body.ChatID, "", map[string]any{
+		"navigation_id": body.NavigationID, "navigation_kind": body.NavigationKind,
+		"from": body.From, "to": body.To, "full_document": body.FullDocument,
+		"clicked_at": body.ClickedAt, "chat_id": body.ChatID,
+		"since_previous_navigation_ms": body.SincePreviousNavigationMS,
+		"subscriber_count":             s.bus.SubscriberCount(),
+	}))
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) navigationMeasurement(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		method(w)
@@ -92,6 +136,25 @@ func validNavigationMeasurement(body navigationMeasurementBody) bool {
 		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 || value > 600_000 {
 			return false
 		}
+	}
+	return body.SincePreviousNavigationMS == nil || (!math.IsNaN(*body.SincePreviousNavigationMS) && !math.IsInf(*body.SincePreviousNavigationMS, 0) && *body.SincePreviousNavigationMS >= 0 && *body.SincePreviousNavigationMS <= float64((366*24*time.Hour).Milliseconds()))
+}
+
+func validNavigationStart(body navigationStartBody) bool {
+	if body.NavigationID == "" || len(body.NavigationID) > 128 || strings.ContainsAny(body.NavigationID, "\r\n\t") {
+		return false
+	}
+	if body.NavigationKind != "flip" && body.NavigationKind != "settings" {
+		return false
+	}
+	validSurface := func(value string) bool {
+		return value == "chat" || value == "console" || value == "settings" || value == "plan"
+	}
+	if !validSurface(body.From) || !validSurface(body.To) || body.From == body.To || len(body.ChatID) > 256 {
+		return false
+	}
+	if math.IsNaN(body.ClickedAt) || math.IsInf(body.ClickedAt, 0) || body.ClickedAt <= 0 {
+		return false
 	}
 	return body.SincePreviousNavigationMS == nil || (!math.IsNaN(*body.SincePreviousNavigationMS) && !math.IsInf(*body.SincePreviousNavigationMS, 0) && *body.SincePreviousNavigationMS >= 0 && *body.SincePreviousNavigationMS <= float64((366*24*time.Hour).Milliseconds()))
 }

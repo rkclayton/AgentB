@@ -73,6 +73,7 @@ const (
 	CompactionSummary     = "compaction.summary"
 	BudgetEvent           = "budget"
 	FilesDelivered        = "files.delivered"
+	NavigationStarted     = "navigation.started"
 	NavigationMeasured    = "navigation.measured"
 )
 

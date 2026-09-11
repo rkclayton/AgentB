@@ -55,7 +55,7 @@ export function initShell(options = {}) {
   settings.title = "Settings";
   settings.addEventListener("click", () => {
     const closing = settings.getAttribute("aria-expanded") === "true";
-    beginNavigation({ kind: "settings", from: closing ? "settings" : page, to: closing ? page : "settings", fullDocument: page !== "console", chatID: store.active });
+    beginNavigation({ kind: "settings", from: closing ? "settings" : page, to: closing ? page : "settings", fullDocument: page !== "console", chatID: store.active, mutationToken: store.mutation_token });
   });
   right.append(pages, settings);
   root.append(left, right);
@@ -125,7 +125,7 @@ export function initShell(options = {}) {
         const current = store.selection.session_id;
         const owned = sessionsFor(agentID, false);
         const targetSession = owned.some((item) => item.id === current) ? current : owned[0]?.id || "";
-        beginNavigation({ kind: "flip", from: page, to: side === "chat" ? "console" : "chat", fullDocument: true, chatID: targetSession });
+        beginNavigation({ kind: "flip", from: page, to: side === "chat" ? "console" : "chat", fullDocument: true, chatID: targetSession, mutationToken: store.mutation_token });
         setSelection(agentID, targetSession);
         const next = side === "chat" ? "console" : "chat";
         rememberAgentSide(agentID, next);

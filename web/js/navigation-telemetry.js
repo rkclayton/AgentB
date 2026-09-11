@@ -42,7 +42,7 @@ export function createNavigationTelemetry(runtime) {
     try { runtime.storage?.setItem(pendingKey, JSON.stringify(value)); } catch {}
   }
 
-  function begin({ kind, from, to, fullDocument, chatID = "" }) {
+  function begin({ kind, from, to, fullDocument, chatID = "", mutationToken = "" }) {
     const instrumentationStarted = runtime.now();
     const clickedAt = runtime.epochNow();
     let previous = null;
@@ -71,6 +71,21 @@ export function createNavigationTelemetry(runtime) {
     persist(active);
     active.instrumentation_sync_ms = Math.max(0, runtime.now() - instrumentationStarted);
     persist(active);
+    void runtime.fetch("/api/navigation-starts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AgentB-Mutation-Token": mutationToken },
+      body: JSON.stringify({
+        navigation_id: active.navigation_id,
+        navigation_kind: active.navigation_kind,
+        from: active.from,
+        to: active.to,
+        full_document: active.full_document,
+        clicked_at: active.clicked_at,
+        chat_id: active.chat_id,
+        since_previous_navigation_ms: active.since_previous_navigation_ms,
+      }),
+      keepalive: true,
+    }).catch(() => {});
     return active.navigation_id;
   }
 

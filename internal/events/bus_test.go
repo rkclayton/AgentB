@@ -50,3 +50,24 @@ func TestSubscriberOverflowClosesForResync(t *testing.T) {
 		t.Fatal("overflowed subscriber remained open")
 	}
 }
+
+func TestSubscriberCountTracksSubscribeAndUnsubscribe(t *testing.T) {
+	bus := NewBus()
+	if got := bus.SubscriberCount(); got != 0 {
+		t.Fatalf("initial subscriber count = %d", got)
+	}
+	_, unsubscribeFirst := bus.Subscribe()
+	_, unsubscribeSecond := bus.Subscribe()
+	if got := bus.SubscriberCount(); got != 2 {
+		t.Fatalf("subscribed count = %d", got)
+	}
+	unsubscribeFirst()
+	if got := bus.SubscriberCount(); got != 1 {
+		t.Fatalf("after first unsubscribe = %d", got)
+	}
+	unsubscribeFirst()
+	unsubscribeSecond()
+	if got := bus.SubscriberCount(); got != 0 {
+		t.Fatalf("final subscriber count = %d", got)
+	}
+}
