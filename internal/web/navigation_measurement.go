@@ -153,7 +153,7 @@ func (s *Server) navigationMeasurement(w http.ResponseWriter, r *http.Request) {
 }
 
 func validNavigationMeasurement(body navigationMeasurementBody) bool {
-	if body.NavigationID == "" || len(body.NavigationID) > 128 || strings.ContainsAny(body.NavigationID, "\r\n\t") {
+	if !validNavigationID(body.NavigationID) {
 		return false
 	}
 	if body.NavigationKind != "flip" && body.NavigationKind != "settings" {
@@ -180,7 +180,7 @@ func validNavigationMeasurement(body navigationMeasurementBody) bool {
 }
 
 func validNavigationStart(body navigationStartBody) bool {
-	if body.NavigationID == "" || len(body.NavigationID) > 128 || strings.ContainsAny(body.NavigationID, "\r\n\t") {
+	if !validNavigationID(body.NavigationID) {
 		return false
 	}
 	if body.NavigationKind != "flip" && body.NavigationKind != "settings" {

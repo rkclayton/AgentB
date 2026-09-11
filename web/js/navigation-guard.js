@@ -9,8 +9,9 @@ export function createNavigationGuard(runtime) {
   return {
     request(details, target) {
       if (!runtime.enabled) {
-        runtime.begin(details);
-        runtime.assign(target);
+        const navigationID = runtime.begin(details);
+        const destination = runtime.decorate(target, navigationID);
+        runtime.assign(destination);
         return true;
       }
       if (claimed) {
@@ -18,9 +19,10 @@ export function createNavigationGuard(runtime) {
         return false;
       }
       claimed = true;
-      runtime.begin(details);
+      const navigationID = runtime.begin(details);
+      const destination = runtime.decorate(target, navigationID);
       try {
-        const result = runtime.assign(runtime.decorate(target));
+        const result = runtime.assign(destination);
         if (result === false) claimed = false;
         return result !== false;
       } catch (error) {
@@ -38,9 +40,10 @@ function browserRuntime() {
     enabled,
     begin: beginNavigation,
     assign: (target) => location.assign(target),
-    decorate(target) {
+    decorate(target, navigationID) {
       const url = new URL(target, location.href);
-      url.searchParams.set("navigation_guard", "1");
+      if (navigationID) url.searchParams.set("navigation_id", navigationID);
+      if (enabled) url.searchParams.set("navigation_guard", "1");
       return `${url.pathname}${url.search}${url.hash}`;
     },
     onPageShow: (listener) => window.addEventListener("pageshow", listener),

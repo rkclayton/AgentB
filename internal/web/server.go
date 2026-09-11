@@ -579,6 +579,10 @@ func (s *Server) writeFrame(w http.ResponseWriter, event events.Event) {
 }
 
 func (s *Server) page(w http.ResponseWriter, r *http.Request) {
+	s.instrumentDocument(w, r, s.pageContent)
+}
+
+func (s *Server) pageContent(w http.ResponseWriter, r *http.Request) {
 	name := "index.html"
 	if r.URL.Path == "/setup" {
 		name = "setup.html"

@@ -120,6 +120,78 @@ func TestNavigationStartWritesWithoutCompletionAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestDocumentRequestRecordsServerPhasesAndConnection(t *testing.T) {
+	root := t.TempDir()
+	webDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(webDir, "chat.html"), []byte("hello"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writers, err := events.NewWriters(filepath.Join(root, "logs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = writers.Close() })
+	path, err := writers.OpenSession("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus := events.NewBus()
+	bus.SetSink(writers.Write)
+	cfg := config.Defaults(root)
+	server := New(&cfg, filepath.Join(root, "harness.json"), webDir, RuntimeRoots{Data: root, Workspace: root}, bus)
+	request := httptest.NewRequest(http.MethodGet, "/chat?setup=skip&session=s1&navigation_id=nav-document-1", nil)
+	request.RemoteAddr = "127.0.0.1:54321"
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK || response.Body.String() != "hello" {
+		t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
+	}
+
+	opened, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer opened.Close()
+	scanner := bufio.NewScanner(opened)
+	var got []events.Event
+	for scanner.Scan() {
+		var event events.Event
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, event)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Type != events.NavigationDocumentStarted || got[1].Type != events.NavigationDocumentCompleted {
+		t.Fatalf("events=%+v", got)
+	}
+	for _, event := range got {
+		if event.SessionID != "s1" {
+			t.Fatalf("event session=%q", event.SessionID)
+		}
+		encoded, _ := json.Marshal(event.Data)
+		for _, want := range []string{`"navigation_id":"nav-document-1"`, `"request_id":"nav-document-1"`, `"connection_identity":"127.0.0.1:54321"`} {
+			if !strings.Contains(string(encoded), want) {
+				t.Fatalf("%s data=%s missing %s", event.Type, encoded, want)
+			}
+		}
+	}
+	started, _ := json.Marshal(got[0].Data)
+	for _, want := range []string{`"arrival_at":`, `"handler_entered_at":`} {
+		if !strings.Contains(string(started), want) {
+			t.Fatalf("started=%s missing %s", started, want)
+		}
+	}
+	completed, _ := json.Marshal(got[1].Data)
+	for _, want := range []string{`"handler_exited_at":`, `"bytes_written":5`} {
+		if !strings.Contains(string(completed), want) {
+			t.Fatalf("completed=%s missing %s", completed, want)
+		}
+	}
+}
+
 func TestNavigationSuppressionWritesOneSessionTapeEvent(t *testing.T) {
 	root := t.TempDir()
 	writers, err := events.NewWriters(filepath.Join(root, "logs"))
