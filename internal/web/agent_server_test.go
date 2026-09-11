@@ -158,6 +158,9 @@ func TestAgentServerChangeCanBeCancelled(t *testing.T) {
 	if response := postAgentServer(t, fixture.server, fixture.session.AgentID, `{"action":"set","server_id":"new"}`); response.Code != http.StatusAccepted {
 		t.Fatalf("pending status=%d body=%s", response.Code, response.Body)
 	}
+	if response := postAgentServer(t, fixture.server, fixture.session.AgentID, `{"action":"set","server_id":"old"}`); response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"status":"pending"`) {
+		t.Fatalf("current selection must preserve pending change: status=%d body=%s", response.Code, response.Body)
+	}
 	if response := postAgentServer(t, fixture.server, fixture.session.AgentID, `{"action":"cancel"}`); response.Code != http.StatusOK {
 		t.Fatalf("cancel status=%d body=%s", response.Code, response.Body)
 	}

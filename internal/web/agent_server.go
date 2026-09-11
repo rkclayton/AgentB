@@ -72,12 +72,10 @@ func (s *Server) agentServer(w http.ResponseWriter, r *http.Request, agentID str
 	if body.ServerID == agent.B {
 		s.agentServerMu.Lock()
 		change, pending := s.agentServers[agentID]
-		if pending {
-			delete(s.agentServers, agentID)
-		}
 		s.agentServerMu.Unlock()
 		if pending {
-			s.bus.Publish(events.New(events.AgentServerChange, "", "", map[string]any{"status": "cancelled", "agent_id": agentID, "from": change.From, "to": change.To}))
+			writeJSON(w, http.StatusAccepted, map[string]any{"status": "pending", "change": change})
+			return
 		}
 		writeJSON(w, http.StatusOK, map[string]any{"status": "applied", "agent_id": agentID, "server_id": body.ServerID})
 		return
