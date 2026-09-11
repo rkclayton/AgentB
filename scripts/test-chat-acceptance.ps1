@@ -28,7 +28,7 @@ $evidence = if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
 }
 $expectedCommit = (& git -C $sourceRoot rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($expectedCommit)) { throw 'Could not resolve the source commit.' }
-$expectedDirty = if (@(& git -C $sourceRoot status --porcelain --untracked-files=no).Count -gt 0) { 'true' } else { 'false' }
+$expectedDirty = if (@(& git -C $sourceRoot status --porcelain --untracked-files=normal).Count -gt 0) { 'true' } else { 'false' }
 if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the source dirty state.' }
 
 if (Test-Path -LiteralPath $evidence) {
