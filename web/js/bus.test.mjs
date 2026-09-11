@@ -94,6 +94,16 @@ test("queued count reconstructs from projected state", () => {
 	assert.equal(store.sessions.main.queued_messages, 2);
 });
 
+test("projection-neutral tape events advance the cursor without rerendering views", () => {
+  snapshot();
+  let notifications = 0;
+  const unsubscribe = subscribe((_state, event) => { if (event.type !== "init") notifications++; });
+  patch(11, [], 10);
+  assert.equal(store.sessions.main.cursor.offset, 11);
+  assert.equal(notifications, 0);
+  unsubscribe();
+});
+
 test("one agent and chat selection object persists across page loads", () => {
   snapshot();
   setSelection("agent_b", "main");

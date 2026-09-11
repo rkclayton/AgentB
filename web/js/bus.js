@@ -43,7 +43,7 @@ export function reduce(event) {
   }
   if (event.type === "projection.patch") {
     applyProjectionPatch(data);
-    notify(event);
+    if ((data.operations || []).length) notify(event);
     return;
   }
   switch (event.type) {

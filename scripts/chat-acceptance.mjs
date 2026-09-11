@@ -349,11 +349,11 @@ if (realModel) {
   assert.equal(await page.locator(".shell-page").getAttribute("title"), "plan");
   assert.equal(await page.locator(".shell-settings").count(), 1);
   assert.equal(await page.locator("#chat-title").count(), 0);
-  const chatSide = await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').evaluate((node) => ({
-    side: node.dataset.side,
-    color: getComputedStyle(node).color,
-    expected: getComputedStyle(document.documentElement).getPropertyValue("--ink").trim()
-  }));
+  const captureAgentTabStyle = () => page.evaluate(() => {
+    const node = document.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab');
+    return { side: node.dataset.side, color: getComputedStyle(node).color, background: getComputedStyle(node.closest(".agent-tab-wrap")).backgroundColor };
+  });
+  const chatSide = await captureAgentTabStyle();
   assert.equal(chatSide.side, "chat");
   assert.equal(chatSide.color, "rgb(216, 221, 227)");
   const captureShellGeometry = () => page.evaluate(() => Object.fromEntries([
@@ -392,11 +392,7 @@ if (realModel) {
   await page.waitForFunction(() => window.__agentbLoadTiming?.snapshot !== null);
   const chatToConsoleMS = performance.now() - chatToConsoleStarted;
   assert.equal(await page.locator('.shell-page[aria-label="plan"] .shell-page-icon').count(), 1);
-  const consoleSide = await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').evaluate((node) => ({
-    side: node.dataset.side,
-    color: getComputedStyle(node).color,
-    background: getComputedStyle(node.closest(".agent-tab-wrap")).backgroundColor
-  }));
+  const consoleSide = await captureAgentTabStyle();
   assert.equal(consoleSide.side, "console");
   assert.equal(consoleSide.color, "rgb(216, 221, 227)");
   assert.equal(consoleSide.background, "rgba(216, 221, 227, 0.16)");
