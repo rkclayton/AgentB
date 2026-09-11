@@ -18,6 +18,16 @@ const allRequests = source.runs.flatMap((run) => run.raw_network_events
 const correlatedKeys = new Set(correlations.filter((value) => value.network_request).map((value) => `${value.trial}\0${value.navigation_id}`));
 const orphanRequests = allRequests.filter((event) => !correlatedKeys.has(`${event.trial}\0${event.navigation_id}`));
 const responseRows = correlations.filter((value) => value.network_response);
+const cancellationRows = correlations.filter((value) => value.network_loading_failed?.error_text === "net::ERR_ABORTED");
+
+assert.equal(
+  correlations.length,
+  correlations.filter((value) => !value.network_request).length + correlations.filter((value) => value.network_request).length,
+  "app starts must partition into absent and observed Network requests",
+);
+assert.ok(cancellationRows.every((value) => value.network_loading_failed.canceled === true), "ERR_ABORTED rows must be marked canceled");
+assert.ok(cancellationRows.every((value) => !value.network_response), "ERR_ABORTED rows unexpectedly include a response");
+assert.ok(responseRows.every((value) => value.server_started && value.server_completed), "every response must correlate to a completed server handler");
 
 const networkToServerMS = (value) => value.network_request && value.server_started
   ? Date.parse(value.server_started.arrival_at) - value.network_request.wall_time * 1000
@@ -83,7 +93,7 @@ const analysis = {
   },
   per_trial: perTrial,
   cancellations: {
-    count: correlations.filter((value) => value.network_loading_failed?.error_text === "net::ERR_ABORTED").length,
+    count: cancellationRows.length,
     error_text: "net::ERR_ABORTED",
     canceled: true,
     response_received: false,

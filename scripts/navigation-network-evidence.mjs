@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { chromium } from "@playwright/test";
@@ -192,6 +192,8 @@ try {
     started: runs.reduce((sum, run) => sum + run.app.started_count, 0),
     trials_with_incomplete: runs.filter((run) => run.app.incomplete_count > 0).length,
   };
+  const retainedTape = join(evidenceRoot, "server-tape.jsonl");
+  await copyFile(logPath, retainedTape);
   const output = {
     schema: 1,
     measured_at: new Date().toISOString(),
@@ -205,7 +207,7 @@ try {
     },
     w1_reproduction_from_app_tape: { ...reproduction, reproduced: reproduction.trials_with_incomplete > 0 },
     runs,
-    tape: { path: logPath },
+    tape: { path: retainedTape, source_path: logPath },
   };
   await writeFile(join(evidenceRoot, "raw.json"), JSON.stringify(output, null, 2));
   process.stdout.write(`${JSON.stringify({ build: output.build, fidelity: output.fidelity, w1_reproduction_from_app_tape: output.w1_reproduction_from_app_tape, trials: runs.map((run) => ({ trial: run.trial, app: run.app, network: run.network })) }, null, 2)}\n`);
