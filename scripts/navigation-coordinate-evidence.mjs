@@ -9,6 +9,7 @@ const args = Object.fromEntries(Array.from({ length: Math.floor(argv.length / 2)
 for (const name of ["exe", "app-root", "data", "evidence", "expected-commit"]) assert.ok(args[name], `missing --${name}`);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 const postCadenceSeconds = Number(args["post-cadence-seconds"] || 70);
+const navigationGuard = args["navigation-guard"] === "1";
 
 async function freePort() {
   const probe = createServer();
@@ -112,19 +113,21 @@ try {
   await mkdir(evidenceRoot, { recursive: true });
   async function navigationEvents() {
     const text = await readFile(logPath, "utf8");
-    return text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line)).filter((event) => event.type === "navigation.started" || event.type === "navigation.measured");
+    return text.split(/\r?\n/).filter(Boolean).map((line) => JSON.parse(line)).filter((event) => event.type === "navigation.started" || event.type === "navigation.measured" || event.type === "navigation.suppressed");
   }
 
   const runs = [];
   for (const pattern of selectedPatterns) {
     const before = await navigationEvents();
-    const driver = await runPowerShell(["-Url", `${base}/chat?session=main`, "-OffsetsJson", JSON.stringify(pattern.offsets), "-PostCadenceSeconds", String(postCadenceSeconds)]);
+    const initialURL = `${base}/chat?session=main${navigationGuard ? "&navigation_guard=1" : ""}`;
+    const driver = await runPowerShell(["-Url", initialURL, "-OffsetsJson", JSON.stringify(pattern.offsets), "-PostCadenceSeconds", String(postCadenceSeconds)]);
     await writeFile(join(evidenceRoot, `${pattern.name}-driver.json`), JSON.stringify(driver, null, 2));
     await sleep(1000);
     const after = await navigationEvents();
     const added = after.slice(before.length);
     const started = added.filter((event) => event.type === "navigation.started");
     const measured = added.filter((event) => event.type === "navigation.measured");
+    const suppressed = added.filter((event) => event.type === "navigation.suppressed");
     assert.ok(started.length > 0, `${pattern.name}: coordinate input did not produce a navigation`);
     const completions = new Map(measured.map((event) => [event.data?.navigation_id, event]));
     let active = 0;
@@ -142,6 +145,7 @@ try {
         click_count: pattern.offsets.length,
         started_count: started.length,
         measured_count: measured.length,
+        suppressed_count: suppressed.length,
         maximum_in_flight: maximumInFlight,
         incomplete_ids: started.map((event) => event.data?.navigation_id).filter((id) => !completions.has(id)),
         maximum_document_request_and_parse_ms: measured.reduce((maximum, event) => Math.max(maximum, Number(event.data?.document_request_parse_ms || event.data?.document_request_and_parse_ms || 0)), 0),
@@ -161,6 +165,7 @@ try {
       production_browser_arguments: ["--app=<url>"],
       evidence_browser_arguments: ["--app=<disposable-url>"],
       same_launch_style: true,
+      navigation_guard_enabled: navigationGuard,
       remote_debugging: false,
       differences: ["disposable Agent_b server, data root, model endpoint, and URL/port", "window moved after launch to make a stable physical coordinate"],
     },

@@ -75,6 +75,7 @@ const (
 	FilesDelivered        = "files.delivered"
 	NavigationStarted     = "navigation.started"
 	NavigationMeasured    = "navigation.measured"
+	NavigationSuppressed  = "navigation.suppressed"
 )
 
 var Stages = []string{"assemble", "call_model", "parse", "dispatch", "execute", "append", "compact", "wait_user"}

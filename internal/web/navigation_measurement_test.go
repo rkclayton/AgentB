@@ -120,6 +120,51 @@ func TestNavigationStartWritesWithoutCompletionAndDeduplicates(t *testing.T) {
 	}
 }
 
+func TestNavigationSuppressionWritesOneSessionTapeEvent(t *testing.T) {
+	root := t.TempDir()
+	writers, err := events.NewWriters(filepath.Join(root, "logs"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = writers.Close() })
+	path, err := writers.OpenSession("s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bus := events.NewBus()
+	bus.SetSink(writers.Write)
+	cfg := config.Defaults(root)
+	server := New(&cfg, filepath.Join(root, "harness.json"), root, RuntimeRoots{Data: root, Workspace: root}, bus)
+	body := `{"suppression_id":"suppressed-1","navigation_kind":"flip","from":"chat","to":"console","clicked_at":1789090000123.5,"chat_id":"s1"}`
+	for range 2 {
+		response := httptest.NewRecorder()
+		server.navigationSuppression(response, httptest.NewRequest(http.MethodPost, "/api/navigation-suppressions", strings.NewReader(body)))
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+		}
+	}
+	opened, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer opened.Close()
+	scanner := bufio.NewScanner(opened)
+	var got []events.Event
+	for scanner.Scan() {
+		var event events.Event
+		if err := json.Unmarshal(scanner.Bytes(), &event); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, event)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].Type != events.NavigationSuppressed || got[0].SessionID != "s1" {
+		t.Fatalf("events=%+v", got)
+	}
+}
+
 func TestNavigationMeasurementRejectsInvalidPhase(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root)

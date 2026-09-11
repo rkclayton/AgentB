@@ -41,7 +41,7 @@ test("agent tabs are ordered and expose state through per-letter robot eyes", ()
   assert.match(tokens, /--agent-tab-width:92px/);
   assert.match(tokens, /\.agent-tab-wrap\{[^}]*flex:0 0 var\(--agent-tab-width\)/);
   assert.match(tokens, /\.agent-tab\{[^}]*flex:0 0 69px;[^}]*width:69px/);
-  assert.match(shell, /location\.assign\(next === "chat" \? `\/chat\$\{suffix\}` : `\/\$\{suffix\}`\)/);
+  assert.match(shell, /requestNavigation\(navigation, next === "chat" \? `\/chat\$\{suffix\}` : `\/\$\{suffix\}`\)/);
   assert.match(shell, /agentb\.side\.\$\{agentID\}/);
   assert.match(tokens, /\.agent-tab\.side-chat\{color:var\(--ink\)\}/);
   assert.match(tokens, /\.agent-tab\.side-console\{color:var\(--ink\)\}/);

@@ -2,6 +2,7 @@ import { api, reduce, setSelection, store, subscribe } from "./bus.js";
 import { chatRowText, closeConfirmText, firstUserLine, isRunning } from "./chat-lifecycle.js";
 import { agentTabLayout } from "./agent-tabs.js";
 import { installUIErrorRelay } from "./ui-error-relay.js";
+import { requestNavigation } from "./navigation-guard.js";
 import { beginNavigation } from "./navigation-telemetry.js";
 
 const activeRunStates = new Set(["running", "queued", "stopping"]);
@@ -125,13 +126,13 @@ export function initShell(options = {}) {
         const current = store.selection.session_id;
         const owned = sessionsFor(agentID, false);
         const targetSession = owned.some((item) => item.id === current) ? current : owned[0]?.id || "";
-        beginNavigation({ kind: "flip", from: page, to: side === "chat" ? "console" : "chat", fullDocument: true, chatID: targetSession, mutationToken: store.mutation_token });
+        const navigation = { kind: "flip", from: page, to: side === "chat" ? "console" : "chat", fullDocument: true, chatID: targetSession, mutationToken: store.mutation_token };
         setSelection(agentID, targetSession);
         const next = side === "chat" ? "console" : "chat";
         rememberAgentSide(agentID, next);
         const sessionID = store.selection.session_id;
         const suffix = sessionID ? `?session=${encodeURIComponent(sessionID)}` : "";
-        location.assign(next === "chat" ? `/chat${suffix}` : `/${suffix}`);
+        requestNavigation(navigation, next === "chat" ? `/chat${suffix}` : `/${suffix}`);
       };
       const menu = node("div", "shell-menu agent-chat-menu");
       menu.hidden = true;

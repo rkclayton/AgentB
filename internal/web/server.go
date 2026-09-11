@@ -186,6 +186,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/ui-errors", s.replayGuard(s.uiError))
 	mux.HandleFunc("/api/navigation-starts", s.replayGuard(s.navigationStart))
 	mux.HandleFunc("/api/navigation-measurements", s.replayGuard(s.navigationMeasurement))
+	mux.HandleFunc("/api/navigation-suppressions", s.replayGuard(s.navigationSuppression))
 	mux.HandleFunc("/api/sessions", s.replayGuard(s.sessions))
 	mux.HandleFunc("/api/sessions/", s.replayGuard(s.session))
 	mux.HandleFunc("/api/workspaces", s.replayGuard(s.workspaces))

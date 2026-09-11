@@ -38,6 +38,45 @@ type navigationStartBody struct {
 	SincePreviousNavigationMS *float64 `json:"since_previous_navigation_ms"`
 }
 
+type navigationSuppressionBody struct {
+	SuppressionID  string  `json:"suppression_id"`
+	NavigationKind string  `json:"navigation_kind"`
+	From           string  `json:"from"`
+	To             string  `json:"to"`
+	ClickedAt      float64 `json:"clicked_at"`
+	ChatID         string  `json:"chat_id"`
+}
+
+func (s *Server) navigationSuppression(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		method(w)
+		return
+	}
+	var body navigationSuppressionBody
+	if !decode(w, r, &body) {
+		return
+	}
+	if !validNavigationSuppression(body) {
+		writeError(w, http.StatusBadRequest, "invalid navigation suppression", "body")
+		return
+	}
+	if body.ChatID != "" && s.registry != nil {
+		if _, ok := s.registry.Get(body.ChatID); !ok {
+			writeError(w, http.StatusNotFound, "chat not found", "chat_id")
+			return
+		}
+	}
+	if !s.claimNavigationID(events.NavigationSuppressed + "\x00" + body.SuppressionID) {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	s.bus.Publish(events.New(events.NavigationSuppressed, body.ChatID, "", map[string]any{
+		"suppression_id": body.SuppressionID, "navigation_kind": body.NavigationKind,
+		"from": body.From, "to": body.To, "clicked_at": body.ClickedAt, "chat_id": body.ChatID,
+	}))
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (s *Server) navigationStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		method(w)
@@ -157,6 +196,19 @@ func validNavigationStart(body navigationStartBody) bool {
 		return false
 	}
 	return body.SincePreviousNavigationMS == nil || (!math.IsNaN(*body.SincePreviousNavigationMS) && !math.IsInf(*body.SincePreviousNavigationMS, 0) && *body.SincePreviousNavigationMS >= 0 && *body.SincePreviousNavigationMS <= float64((366*24*time.Hour).Milliseconds()))
+}
+
+func validNavigationSuppression(body navigationSuppressionBody) bool {
+	if body.SuppressionID == "" || len(body.SuppressionID) > 128 || strings.ContainsAny(body.SuppressionID, "\r\n\t") {
+		return false
+	}
+	if body.NavigationKind != "flip" || len(body.ChatID) > 256 {
+		return false
+	}
+	if (body.From != "chat" && body.From != "console") || (body.To != "chat" && body.To != "console") || body.From == body.To {
+		return false
+	}
+	return !math.IsNaN(body.ClickedAt) && !math.IsInf(body.ClickedAt, 0) && body.ClickedAt > 0
 }
 
 func (s *Server) claimNavigationID(id string) bool {
