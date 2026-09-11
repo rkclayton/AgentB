@@ -78,3 +78,10 @@ func TestNavigationMeasurementRejectsInvalidPhase(t *testing.T) {
 		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestNavigationMeasurementAcceptsPlanSettingsSource(t *testing.T) {
+	body := navigationMeasurementBody{NavigationID: "plan-settings", NavigationKind: "settings", From: "plan", To: "settings", ModelReachability: "unknown"}
+	if !validNavigationMeasurement(body) {
+		t.Fatal("Plan uses the shared settings cog and is a valid source surface")
+	}
+}

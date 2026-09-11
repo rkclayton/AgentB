@@ -76,7 +76,9 @@ func validNavigationMeasurement(body navigationMeasurementBody) bool {
 	if body.NavigationKind != "flip" && body.NavigationKind != "settings" {
 		return false
 	}
-	validSurface := func(value string) bool { return value == "chat" || value == "console" || value == "settings" }
+	validSurface := func(value string) bool {
+		return value == "chat" || value == "console" || value == "settings" || value == "plan"
+	}
 	if !validSurface(body.From) || !validSurface(body.To) || body.From == body.To {
 		return false
 	}

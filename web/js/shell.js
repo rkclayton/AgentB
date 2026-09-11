@@ -55,7 +55,7 @@ export function initShell(options = {}) {
   settings.title = "Settings";
   settings.addEventListener("click", () => {
     const closing = settings.getAttribute("aria-expanded") === "true";
-    beginNavigation({ kind: "settings", from: closing ? "settings" : page, to: closing ? page : "settings", fullDocument: page === "chat", chatID: store.active });
+    beginNavigation({ kind: "settings", from: closing ? "settings" : page, to: closing ? page : "settings", fullDocument: page !== "console", chatID: store.active });
   });
   right.append(pages, settings);
   root.append(left, right);

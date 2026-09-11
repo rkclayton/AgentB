@@ -128,6 +128,15 @@ async function exerciseNavigations(expectedMinimumEntries) {
   await page.locator(".shell-settings").click();
   await page.locator("#settings-page").waitFor({ state: "hidden" });
   await waitForTapeEntry();
+  await page.locator('.shell-page[data-page="plan"]').click();
+  await page.waitForURL((url) => url.pathname === "/plan");
+  await page.locator(".shell-settings").click();
+  await page.waitForURL((url) => url.pathname === "/" && url.hash.startsWith("#settings/"));
+  await page.locator("#settings-page:not([hidden])").waitFor();
+  await waitForTapeEntry();
+  await page.locator(".shell-settings").click();
+  await page.locator("#settings-page").waitFor({ state: "hidden" });
+  await waitForTapeEntry();
   await context.close();
 }
 
@@ -146,10 +155,10 @@ assert.ok(largeState.sessions.main.chat.length >= largeTurns * 2, `large transcr
 await exerciseNavigations(largeTurns * 2);
 const allEvents = await readNavigationEvents();
 const largeEvents = allEvents.slice(smallEvents.length);
-assert.equal(smallEvents.length, 4);
-assert.equal(largeEvents.length, 4);
-assert.deepEqual(smallEvents.map((event) => event.data.navigation_kind), ["flip", "flip", "settings", "settings"]);
-assert.deepEqual(largeEvents.map((event) => event.data.navigation_kind), ["flip", "flip", "settings", "settings"]);
+assert.equal(smallEvents.length, 6);
+assert.equal(largeEvents.length, 6);
+assert.deepEqual(smallEvents.map((event) => event.data.navigation_kind), ["flip", "flip", "settings", "settings", "settings", "settings"]);
+assert.deepEqual(largeEvents.map((event) => event.data.navigation_kind), ["flip", "flip", "settings", "settings", "settings", "settings"]);
 
 const logPath = (await state()).sessions.main.log_path;
 const output = {
