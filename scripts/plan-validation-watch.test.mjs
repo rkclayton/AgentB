@@ -3,7 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
 import { fileURLToPath } from "node:url";
 import { loadPublishedProposal } from "./plan-lint.mjs";
 import {
@@ -16,6 +17,7 @@ import {
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const linter = path.join(here, "plan-lint.mjs");
+const watcherScript = path.join(here, "plan-validation-watch.mjs");
 const roots = [];
 process.on("exit", () => {
   for (const root of roots) {
@@ -137,6 +139,16 @@ async function waitForResult(requestPath, timeoutMs = 2000, publishedRoot = unde
   throw new Error(`timed out waiting for ${resultPathFor(requestPath)}`);
 }
 
+async function waitForWatcherState(dropDirectory, expected, timeoutMs = 2000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const status = readWatcherStatus(dropDirectory);
+    if (status.state === expected) return status;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`timed out waiting for watcher state ${expected}`);
+}
+
 const root = fixture();
 const drop = path.join(root, "plan", "validation");
 const originalPlan = fs.readFileSync(path.join(root, "PLAN.md"), "utf8");
@@ -144,6 +156,34 @@ const originalItem = fs.readFileSync(path.join(root, "plan", "items", "2a.md"), 
 assert.equal(readWatcherStatus(drop).state, "absent");
 const watcher = startValidationWatcher({ dropDirectory: drop, publishedRoot: root });
 assert.equal(readWatcherStatus(drop).state, "ready");
+const readyCLI = spawnSync(process.execPath, [watcherScript, "--status", "--drop-dir", drop], { encoding: "utf8" });
+assert.equal(readyCLI.status, 0, readyCLI.stdout + readyCLI.stderr);
+assert.equal(JSON.parse(readyCLI.stdout).state, "ready");
+
+// A killed watcher cannot update its heartbeat. The next read after the
+// freshness lease expires must report stale without consulting its PID.
+const deadDrop = path.join(root, "plan", "dead-watcher");
+const doomed = spawn(process.execPath, [watcherScript, "--drop-dir", deadDrop], { stdio: "ignore" });
+const doomedStatus = await waitForWatcherState(deadDrop, "ready");
+const doomedExit = once(doomed, "exit");
+assert.equal(doomed.kill("SIGKILL"), true);
+await doomedExit;
+await new Promise((resolve) => setTimeout(resolve, 75));
+assert.equal(readWatcherStatus(deadDrop, { staleAfterMs: 50 }).state, "stale");
+
+// Simulate the recorded PID having been reused by this still-live test
+// process. PID existence must never revive an expired heartbeat.
+const reusedPIDStatus = {
+  ...doomedStatus.status,
+  pid: process.pid,
+  updated_at: new Date(Date.now() - 4000).toISOString(),
+};
+fs.writeFileSync(path.join(deadDrop, "watcher.status.json"), `${JSON.stringify(reusedPIDStatus, null, 2)}\n`);
+process.kill(process.pid, 0);
+assert.equal(readWatcherStatus(deadDrop, { staleAfterMs: 50 }).state, "stale");
+const staleCLI = spawnSync(process.execPath, [watcherScript, "--status", "--drop-dir", deadDrop], { encoding: "utf8" });
+assert.equal(staleCLI.status, 1, staleCLI.stdout + staleCLI.stderr);
+assert.equal(JSON.parse(staleCLI.stdout).state, "stale");
 
 // A proposal that adds an item validates against its generated in-memory index.
 const validPath = path.join(drop, "valid.request.json");

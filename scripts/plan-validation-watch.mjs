@@ -325,20 +325,29 @@ export function startValidationWatcher({
 
 function parseCLI(argv) {
   let dropDirectory = path.join(scriptRoot, "plan", "validation");
+  let operation = "watch";
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === "--drop-dir" && argv[index + 1]) dropDirectory = path.resolve(argv[++index]);
+    else if (argv[index] === "--status") operation = "status";
     else throw new TypeError(`unknown argument: ${argv[index]}`);
   }
-  return { dropDirectory };
+  return { dropDirectory, operation };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   try {
-    const resident = startValidationWatcher(parseCLI(process.argv.slice(2)));
-    console.log(`plan validation watcher ready: ${resident.dropDirectory}`);
-    const stop = () => { resident.close(); process.exit(0); };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
+    const options = parseCLI(process.argv.slice(2));
+    if (options.operation === "status") {
+      const status = readWatcherStatus(options.dropDirectory);
+      console.log(JSON.stringify(status, null, 2));
+      if (status.state !== "ready") process.exitCode = 1;
+    } else {
+      const resident = startValidationWatcher(options);
+      console.log(`plan validation watcher ready: ${resident.dropDirectory}`);
+      const stop = () => { resident.close(); process.exit(0); };
+      process.once("SIGINT", stop);
+      process.once("SIGTERM", stop);
+    }
   } catch (error) {
     console.error(`plan validation watcher failed: ${error.message}`);
     process.exit(2);
