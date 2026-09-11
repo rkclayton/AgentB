@@ -200,7 +200,8 @@ function group(name, content) {
 }
 
 function servers() {
-  const rows = serverProfiles()
+  const profiles = serverProfiles();
+  const rows = profiles
     .map((profile) => {
       const isOpen = expanded.has(profile.id);
       const hasPendingChanges = [...drafts.keys()].some((path) => path.startsWith(`servers.${profile.id}.`));
@@ -217,20 +218,21 @@ function servers() {
             : "not tested";
       const ready = !reason && !!profile.capabilities?.probed_at;
       const lamp = failed || reason ? "alarm" : profile._probing || ready ? "live" : "";
-      return `<div class="profile ${isOpen ? "expanded" : ""}">
-        <div class="profile-row">
+      const removeKey = `server:${profile.id}`;
+      return `<div class="profile-row ${isOpen ? "selected" : ""}">
           <button type="button" class="profile-summary" data-action="profile-toggle" data-id="${attr(profile.id)}">
             <span class="lamp ${lamp}"></span><span>${html(profile.label)}</span><span class="profile-url">${html(profile.base_url)}</span><span class="profile-state">${testState}</span>
           </button>
           <button type="button" data-action="probe" data-id="${attr(profile.id)}" title="${hasPendingChanges ? "Save this connection before testing it." : ""}" ${profile._probing || hasPendingChanges ? "disabled" : ""}>${profile._probing ? "Testing…" : "Test"}</button>
-        </div>
-        <div class="profile-expansion"><div class="profile-fields">
-          ${profileFields(profile, reason)}
-        </div></div>
+          <button type="button" class="profile-remove ${armed.has(removeKey) ? "confirm" : ""}" data-action="remove-server" data-id="${attr(profile.id)}" aria-label="${armed.has(removeKey) ? `Confirm remove ${attr(profile.label)}` : `Remove ${attr(profile.label)}`}">${armed.has(removeKey) ? "Confirm ×" : "×"}</button>
       </div>`;
     })
     .join("");
-  return `<div class="settings-actions"><button type="button" data-action="open-setup">Open setup guide</button></div><div class="settings-subhead">Profiles</div>${rows}<button type="button" class="text-action" data-action="add-server">Add server</button>`;
+  const editors = profiles.filter((profile) => expanded.has(profile.id)).map((profile) => `<section class="profile-editor" aria-label="${attr(profile.label)} connection settings">
+    <div class="profile-editor-head"><div><span class="lamp ${profileReason(profile) ? "alarm" : ""}"></span><h3>${html(profile.label)}</h3><span class="profile-url">${html(profile.base_url)}</span></div><button type="button" data-action="duplicate-server" data-id="${attr(profile.id)}">Duplicate</button></div>
+    <div class="profile-fields">${profileFields(profile, profileReason(profile))}</div>
+  </section>`).join("");
+  return `<div class="settings-actions settings-connections-actions"><button type="button" data-action="open-setup">Open setup guide</button><button type="button" data-action="add-server">Add server</button></div><div class="settings-subhead">Profiles</div><div class="profile-list">${rows || '<p class="settings-note inline">No connections configured.</p>'}</div>${editors}`;
 }
 
 function profileFields(profile, reason) {
@@ -239,20 +241,18 @@ function profileFields(profile, reason) {
   const caps = profile.capabilities || {};
   const efforts = profile.reasoning?.valid_efforts || caps.valid_efforts || [];
   const llama = caps.server === "llama.cpp";
-  const sample = (name, title) => {
-    const value = profile.sampling[name];
-    return `<div class="settings-subhead">${title}</div>
-      ${number(`${p}.sampling.${name}.temperature`, "temperature", value.temperature, "0.01")}
-      ${number(`${p}.sampling.${name}.top_p`, "top_p", value.top_p, "0.01")}
-      ${number(`${p}.sampling.${name}.top_k`, "top_k", value.top_k, "1", !llama, !llama ? "llama.cpp only" : "")}
-      ${number(`${p}.sampling.${name}.min_p`, "min_p", value.min_p, "0.01", !llama, !llama ? "llama.cpp only" : "")}
-      ${number(`${p}.sampling.${name}.presence_penalty`, "presence penalty", value.presence_penalty, "0.1")}
-      ${number(`${p}.sampling.${name}.repeat_penalty`, "repeat penalty", value.repeat_penalty, "0.1", !llama, !llama ? "llama.cpp only" : "")}`;
-  };
   const findings = (caps.findings || [])
     .map((value) => `<li>${html(value)}</li>`)
     .join("");
-	return `${text(`${p}.label`, "label", profile.label)}
+  const samplingRows = [
+    ["temperature", "temperature", "0.01", false],
+    ["top_p", "top_p", "0.01", false],
+    ["top_k", "top_k", "1", !llama],
+    ["min_p", "min_p", "0.01", !llama],
+    ["presence_penalty", "presence penalty", "0.1", false],
+    ["repeat_penalty", "repeat penalty", "0.1", !llama],
+  ].map(([name, label, step, disabled]) => `<div class="sampling-label">${html(label)}</div>${["thinking", "nonthinking"].map((mode) => `<div>${numberControl(`${p}.sampling.${mode}.${name}`, profile.sampling[mode][name], step, disabled)}${disabled ? '<span class="control-note">llama.cpp only</span>' : ""}</div>`).join("")}`).join("");
+	return `<div class="profile-fieldset profile-identity"><h4>Connection</h4>${text(`${p}.label`, "label", profile.label)}
     ${text(`${p}.base_url`, "base_url", profile.base_url)}
 	${text(`${p}.extract_url`, "extract_url", profile.extract_url || "")}
     ${text(`${p}.model`, "model", profile.model)}
@@ -261,27 +261,23 @@ function profileFields(profile, reason) {
 	<p class="settings-note">API keys are stored in user-scoped DPAPI storage; configuration keeps only the credential reference.</p>
     ${number(`${p}.request_timeout_s`, "timeout", profile.request_timeout_s)}
     ${choices(`${p}.probe_mode`, "probe mode", ["full", "minimal", "off"], profile.probe_mode)}
-    <p class="settings-note">minimal and off skip checks that spend tokens; assumed values are marked in findings</p>
-    ${sample("thinking", "Sampling — thinking")}
-    ${sample("nonthinking", "Sampling — nonthinking")}
-    <div class="settings-subhead">Reasoning</div>
+    <p class="settings-note">minimal and off skip checks that spend tokens; assumed values are marked in findings</p></div>
+    <div class="profile-fieldset profile-reasoning"><h4>Reasoning &amp; context</h4>
     ${choices(`${p}.reasoning.control`, "control", ["auto", "chat_template_kwargs", "top_level", "server_flag", "none"], profile.reasoning.control)}
     ${toggle(`${p}.reasoning.enabled`, "enabled", profile.reasoning.enabled)}
     ${efforts.length ? choices(`${p}.reasoning.effort`, "effort", efforts, profile.reasoning.effort) : row("effort", '<span class="settings-note inline">not supported by this server</span>')}
     ${toggle(`${p}.reasoning.preserve`, "preserve", profile.reasoning.preserve)}
     ${number(`${p}.reasoning.max_tokens`, "reasoning cap", profile.reasoning.max_tokens || 0, "1")}
     ${number(`${p}.context.reserve_output`, "reserve", profile.context.reserve_output)}
-	${number(`${p}.context.n_ctx`, "context size", profile.context.n_ctx, "1", false, "", !profile.context.n_ctx)}
+	${number(`${p}.context.n_ctx`, "context size", profile.context.n_ctx, "1", false, "", !profile.context.n_ctx)}</div>
+    <div class="profile-fieldset profile-sampling"><h4>Sampling</h4><div class="sampling-grid"><div></div><div class="sampling-column">Thinking</div><div class="sampling-column">Non-thinking</div>${samplingRows}</div></div>
+    <div class="profile-fieldset profile-prompt"><h4>System prompt</h4>
     ${textarea(`${p}.system_prompt_override`, "system prompt override", profile.system_prompt_override || "")}
-    <p class="settings-note">variables: {{workspace}} {{tools}} {{agent}} {{project}} {{memory}}</p>
-    <div class="settings-subhead">Capabilities</div>
+    <p class="settings-note">variables: {{workspace}} {{tools}} {{agent}} {{project}} {{memory}}</p></div>
+    <div class="profile-fieldset profile-capabilities"><h4>Capabilities</h4>
     <div class="findings"><span class="settings-note">${html(caps.probed_at || "not probed")}</span><ul>${findings || "<li>no findings</li>"}</ul></div>
     ${reason ? `<p class="field-error">${html(reason)}</p>` : ""}
-    ${errors.get(p) ? `<p class="field-error">${html(errors.get(p))}</p>` : ""}
-    <div class="settings-actions">
-      <button type="button" data-action="duplicate-server" data-id="${attr(id)}">Duplicate</button>
-      <button type="button" class="${armed.has(`server:${id}`) ? "confirm" : ""}" data-action="remove-server" data-id="${attr(id)}">${armed.has(`server:${id}`) ? "Confirm remove" : "Remove"}</button>
-    </div>`;
+    ${errors.get(p) ? `<p class="field-error">${html(errors.get(p))}</p>` : ""}</div>`;
 }
 
 function sessions() {
@@ -633,8 +629,12 @@ function text(path, label, value, kind = "text") {
 }
 
 function number(path, label, value, step = "1", disabled = false, note = "", alarm = false, kind = "number") {
-  const control = `<input class="setting-input number" type="number" step="${step}" data-path="${attr(path)}" data-kind="${kind}" value="${attr(current(path, value))}" ${disabled ? "disabled" : ""}>${note ? `<span class="control-note">${html(note)}</span>` : ""}`;
+  const control = `${numberControl(path, value, step, disabled, kind)}${note ? `<span class="control-note">${html(note)}</span>` : ""}`;
   return field(path, label, control, alarm);
+}
+
+function numberControl(path, value, step = "1", disabled = false, kind = "number") {
+  return `<input class="setting-input number" type="number" step="${step}" data-path="${attr(path)}" data-kind="${kind}" value="${attr(current(path, value))}" ${disabled ? "disabled" : ""}>`;
 }
 
 function textarea(path, label, value) {
@@ -689,7 +689,9 @@ async function click(event) {
     return render();
   }
   if (action === "profile-toggle") {
-    expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+    const wasOpen = expanded.has(id);
+    expanded.clear();
+    if (!wasOpen) expanded.add(id);
     return render();
   }
   if (action === "show-key") {
