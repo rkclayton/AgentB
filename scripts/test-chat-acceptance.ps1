@@ -6,6 +6,9 @@ param(
     [string]$ReplayPath,
     [string]$ReplayApplicationDirectory,
     [string]$EvidenceDirectory,
+    [string]$ExpectedCommit,
+    [ValidateSet('true', 'false')]
+    [string]$ExpectedDirty,
     [switch]$SkipBuild,
     [switch]$ReplayOnly,
     [switch]$ExpectStableShell
@@ -26,10 +29,16 @@ $evidence = if (-not [string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
 } else {
     Join-Path $sourceRoot ('logs\evidence\2026-09-09-v0.18.0-playwright\candidate-' + [Guid]::NewGuid().ToString('N'))
 }
-$expectedCommit = (& git -C $sourceRoot rev-parse HEAD).Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($expectedCommit)) { throw 'Could not resolve the source commit.' }
-$expectedDirty = if (@(& git -C $sourceRoot status --porcelain --untracked-files=normal).Count -gt 0) { 'true' } else { 'false' }
-if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the source dirty state.' }
+$expectedCommit = $ExpectedCommit
+if ([string]::IsNullOrWhiteSpace($expectedCommit)) {
+    $expectedCommit = (& git -C $sourceRoot rev-parse HEAD).Trim()
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($expectedCommit)) { throw 'Could not resolve the source commit.' }
+}
+$expectedDirty = $ExpectedDirty
+if ([string]::IsNullOrWhiteSpace($expectedDirty)) {
+    $expectedDirty = if (@(& git -C $sourceRoot status --porcelain --untracked-files=normal).Count -gt 0) { 'true' } else { 'false' }
+    if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the source dirty state.' }
+}
 
 if (Test-Path -LiteralPath $evidence) {
     throw "EvidenceDirectory already exists: $evidence"
