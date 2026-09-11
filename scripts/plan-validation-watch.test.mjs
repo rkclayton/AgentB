@@ -18,6 +18,8 @@ import {
 const here = path.dirname(fileURLToPath(import.meta.url));
 const linter = path.join(here, "plan-lint.mjs");
 const watcherScript = path.join(here, "plan-validation-watch.mjs");
+const supervisorScript = path.join(here, "plan-validation-supervisor.mjs");
+const managerScript = path.join(here, "manage-plan-validation-watcher.ps1");
 const roots = [];
 process.on("exit", () => {
   for (const root of roots) {
@@ -242,6 +244,53 @@ assert.equal(resume.state, "pass", JSON.stringify(resume.result?.validation?.err
 
 watcher.close();
 assert.equal(readWatcherStatus(drop).state, "stopped");
+
+// A restart must not rewrite an existing adjacent result. Request names are
+// append-only evidence; a new request gets a new name.
+const preservedPath = path.join(drop, "preserved.request.json");
+fs.writeFileSync(preservedPath, JSON.stringify(proposalRequest(root), null, 2));
+processRequestFile(preservedPath, { publishedRoot: root });
+const preservedResult = fs.readFileSync(resultPathFor(preservedPath));
+const restarted = startValidationWatcher({ dropDirectory: drop, publishedRoot: root });
+await new Promise((resolve) => setTimeout(resolve, 100));
+restarted.close();
+assert.deepEqual(fs.readFileSync(resultPathFor(preservedPath)), preservedResult, "watcher restart rewrote existing result evidence");
+
+// The fixed supervisor restarts a killed watcher child and the replacement
+// processes a new validation request without operator action.
+const supervisedDrop = path.join(root, "plan", "supervised-validation");
+const supervisor = spawn(process.execPath, [supervisorScript, "--drop-dir", supervisedDrop], { stdio: "ignore" });
+const firstSupervised = await waitForWatcherState(supervisedDrop, "ready");
+process.kill(firstSupervised.status.pid, "SIGKILL");
+let secondSupervised;
+const supervisorDeadline = Date.now() + 5000;
+while (Date.now() < supervisorDeadline) {
+  const candidate = readWatcherStatus(supervisedDrop);
+  if (candidate.state === "ready" && candidate.status.pid !== firstSupervised.status.pid) {
+    secondSupervised = candidate;
+    break;
+  }
+  await new Promise((resolve) => setTimeout(resolve, 25));
+}
+assert.ok(secondSupervised, "supervisor did not replace killed watcher");
+const supervisedRequest = path.join(supervisedDrop, "after-kill.request.json");
+fs.writeFileSync(supervisedRequest, JSON.stringify({
+  version: 1,
+  operation: "validateProposal",
+  proposal: { base: "published", structuralOnly: true, itemContents: [] },
+}, null, 2));
+const supervisedResult = await waitForResult(supervisedRequest, 2000, path.resolve(here, ".."));
+assert.equal(supervisedResult.state, "pass", JSON.stringify(supervisedResult.result?.validation?.errors));
+const supervisorExit = once(supervisor, "exit");
+supervisor.kill("SIGTERM");
+await supervisorExit;
+
+const managerText = fs.readFileSync(managerScript, "utf8");
+assert.match(managerText, /New-ScheduledTaskTrigger -AtLogOn/);
+assert.match(managerText, /-LogonType Interactive -RunLevel Limited/);
+assert.match(managerText, /-RestartCount 999/);
+assert.match(managerText, /plan-validation-supervisor\.mjs/);
+assert.doesNotMatch(managerText, /RunLevel Highest|UserId ['"]?(?:SYSTEM|NT AUTHORITY)/i);
 
 // A changed published input invalidates a base-mode result even when the
 // exact request bytes have not changed.

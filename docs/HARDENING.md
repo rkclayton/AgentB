@@ -43,6 +43,16 @@ The elevated installer preserves existing settings, state, workspace contents, a
 
 The network rule permits every loopback and Tailscale destination, not only the model server. It prevents ordinary public/LAN egress by this Windows identity; it is not a domain allowlist, protocol inspection, or protection against a kernel-level exploit.
 
+## Plan-validation watcher lifecycle
+
+The plan-validation watcher is repository development tooling and is separate from Agent_b's service identity. Preview its current-user scheduled task with:
+
+```powershell
+.\scripts\manage-plan-validation-watcher.ps1 -Action Install -WhatIf
+```
+
+Install or refresh it by removing `-WhatIf`. The task runs at interactive user logon with Limited run level and starts a fixed supervisor script; the supervisor restarts only the fixed validation watcher. It deliberately has the current user's access to the checkout, not `agentb-svc` restrictions. Keep the checkout operator-owned and never install the task against a tree writable by an untrusted identity. Use `-Action Status` to inspect it and `-Action Uninstall -WhatIf` before an intentional removal.
+
 ## 4. RBAC demonstration checks
 
 Run these through Agent_b after **Apply protection** succeeds:

@@ -304,7 +304,11 @@ export function startValidationWatcher({
       catch (error) { console.error(`plan validation watcher: ${error.message}`); }
     }, 25));
   };
-  for (const requestPath of requestFiles(absoluteDrop)) schedule(requestPath);
+  for (const requestPath of requestFiles(absoluteDrop)) {
+    const bytes = fs.readFileSync(requestPath);
+    if (fs.existsSync(resultPathFor(requestPath))) seen.set(requestPath, exactInputIdentity(bytes));
+    else schedule(requestPath);
+  }
   const watcher = fs.watch(absoluteDrop, (_event, name) => {
     if (name && String(name).endsWith(requestSuffix)) schedule(path.join(absoluteDrop, String(name)));
     else if (!name) for (const requestPath of requestFiles(absoluteDrop)) schedule(requestPath);
