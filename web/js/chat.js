@@ -297,6 +297,12 @@ function renderEntry(session, entry) {
     }
     for (const attachment of entry.attachments || []) {
       nodes.push(renderFileChip(session, attachmentChipFile(attachment)));
+      if (attachment.outcome) {
+        const outcome = document.createElement("div");
+        outcome.className = "chat-attachment-warning";
+        outcome.textContent = attachment.outcome;
+        nodes.push(outcome);
+      }
     }
     reconcileChildren(content, nodes);
     view.text = entry.text;

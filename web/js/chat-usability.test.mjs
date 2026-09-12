@@ -35,6 +35,12 @@ test("Whole Chat is the only attachment drop target and is invisible at rest", (
   assert.match(css, /\.chat-page\.drop-target::after/);
 });
 
+test("A native attachment context refusal is visible beside its chip", () => {
+  assert.match(chat, /if \(attachment\.outcome\)/);
+  assert.match(chat, /outcome\.textContent = attachment\.outcome/);
+  assert.match(css, /\.chat-attachment-warning \{ color: var\(--alarm\); \}/);
+});
+
 test("Composer clusters one paperclip above stop and send and pending files occupy no row when empty", () => {
   assert.match(html, /id="chat-attach"[^>]*>📎<\/button>/);
   assert.match(html, /class="chat-composer-row"/);

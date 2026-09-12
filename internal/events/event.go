@@ -93,9 +93,10 @@ type ToolCall struct {
 	Arguments string `json:"arguments"`
 }
 type Attachment struct {
-	Path   string `json:"path"`
-	Bytes  int64  `json:"bytes"`
-	SHA256 string `json:"sha256"`
+	Path    string `json:"path"`
+	Bytes   int64  `json:"bytes"`
+	SHA256  string `json:"sha256"`
+	Outcome string `json:"outcome,omitempty"`
 }
 type Message struct {
 	ID          string       `json:"id"`
