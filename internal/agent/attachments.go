@@ -49,7 +49,6 @@ func renderedUserText(profile *config.Profile, s *session.Session, message event
 }
 
 func requestMessage(profile *config.Profile, s *session.Session, message events.Message) llm.Message {
-	message.Attachments = prepareNativeAttachments(profile, message.Attachments)
 	content := any(renderedUserText(profile, s, message))
 	parts := []any{}
 	for _, item := range message.Attachments {
@@ -95,15 +94,18 @@ func nativeAttachmentFrame(item events.Attachment) string {
 }
 
 func prepareNativeAttachments(profile *config.Profile, attachments []events.Attachment) []events.Attachment {
+	return prepareNativeAttachmentsWithBudget(profile, attachments, nativeAttachmentBudget(profile))
+}
+
+func prepareNativeAttachmentsWithBudget(profile *config.Profile, attachments []events.Attachment, remaining int64) []events.Attachment {
 	prepared := append([]events.Attachment(nil), attachments...)
-	remaining := int64(max(0, profile.Context.NCtx-profile.Context.ReserveOutput))
 	for index := range prepared {
 		prepared[index].Outcome = ""
 		kind := attachmentfile.Classify(prepared[index].Path)
 		if !nativeAttachment(profile, kind) {
 			continue
 		}
-		encodedBytes := int64(len("data:"+attachmentfile.ContentType(prepared[index].Path)+";base64,")) + ((max(int64(0), prepared[index].Bytes) + 2) / 3 * 4)
+		encodedBytes := nativeAttachmentEncodedUpperBound(prepared[index])
 		if encodedBytes > remaining {
 			prepared[index].Outcome = fmt.Sprintf("not sent inline: encoded payload needs up to %d tokens but only %d remain in this profile's context budget", encodedBytes, remaining)
 			continue
@@ -111,6 +113,26 @@ func prepareNativeAttachments(profile *config.Profile, attachments []events.Atta
 		remaining -= encodedBytes
 	}
 	return prepared
+}
+
+func nativeAttachmentBudget(profile *config.Profile) int64 {
+	return int64(max(0, profile.Context.NCtx-profile.Context.ReserveOutput))
+}
+
+func remainingNativeAttachmentBudget(profile *config.Profile, messages []events.Message) int64 {
+	remaining := nativeAttachmentBudget(profile)
+	for _, message := range messages {
+		for _, item := range message.Attachments {
+			if item.Outcome == "" && nativeAttachment(profile, attachmentfile.Classify(item.Path)) {
+				remaining = max(int64(0), remaining-nativeAttachmentEncodedUpperBound(item))
+			}
+		}
+	}
+	return remaining
+}
+
+func nativeAttachmentEncodedUpperBound(item events.Attachment) int64 {
+	return int64(len("data:"+attachmentfile.ContentType(item.Path)+";base64,")) + ((max(int64(0), item.Bytes) + 2) / 3 * 4)
 }
 
 func regularWorkspaceFile(workspace, path string) bool {

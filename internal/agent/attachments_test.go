@@ -130,6 +130,29 @@ func TestNativeAttachmentOverContextBudgetHasVisibleOutcomeAndNoPayload(t *testi
 	}
 }
 
+func TestNativeAttachmentBudgetIsCumulativeAcrossQueuedHistory(t *testing.T) {
+	workspace := t.TempDir()
+	profile := config.Defaults(workspace).Servers[0]
+	profile.Capabilities.ImageInput = true
+	profile.Context.NCtx, profile.Context.ReserveOutput = 100, 8
+	cfg := config.Defaults(workspace)
+	cfg.Servers[0] = profile
+	runner := NewRunner(events.NewBus(), tools.New(), &PromptRenderer{text: "system"}, cfg.Profile, func() config.Config { return cfg })
+	item := &session.Session{ServerID: profile.ID, Workspace: workspace}
+	attachment := events.Attachment{Path: "attachments/pixel.png", Bytes: 9}
+	for index := 0; index < 2; index++ {
+		message, err := runner.QueueUserAttachments(context.Background(), item, "", []events.Attachment{attachment})
+		if err != nil || message.Attachments[0].Outcome != "" {
+			t.Fatalf("queue %d: message=%#v err=%v", index, message, err)
+		}
+		item.Append(message)
+	}
+	message, err := runner.QueueUserAttachments(context.Background(), item, "", []events.Attachment{attachment})
+	if err != nil || !strings.Contains(message.Attachments[0].Outcome, "not sent inline") {
+		t.Fatalf("third queue: message=%#v err=%v", message, err)
+	}
+}
+
 func TestAttachmentExtractOverrideNeverSendsImageWhenProbeSaysPresent(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workspace, "attachments"), 0o700); err != nil {

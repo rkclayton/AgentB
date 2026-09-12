@@ -96,7 +96,7 @@ func (r *Runner) QueueUserAttachments(ctx context.Context, s *session.Session, t
 	if !ok {
 		return events.Message{}, fmt.Errorf("profile not found")
 	}
-	attachments = prepareNativeAttachments(profile, attachments)
+	attachments = prepareNativeAttachmentsWithBudget(profile, attachments, remainingNativeAttachmentBudget(profile, s.MessagesCopy()))
 	message := events.Message{ID: r.id("m"), Role: "user", Content: text, Category: "history", Attachments: append([]events.Attachment(nil), attachments...)}
 	tokens, estimated := r.count(ctx, profile, renderedUserText(profile, s, message))
 	message.Tokens, message.Estimated = tokens, estimated
