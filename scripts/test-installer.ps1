@@ -187,6 +187,26 @@ try {
     $installedConfig.listen = "127.0.0.1:$testPort"
     [IO.File]::WriteAllText($configPath, ($installedConfig | ConvertTo-Json -Depth 100) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
     $configHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+
+    $portOwner = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $testPort)
+    $portOwner.Start()
+    try {
+        $savedErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        $portFailure = (& powershell.exe -NoLogo -NoProfile -File (Join-Path $testApplication 'scripts\launch-Agent_b.ps1') -ApplicationDirectory $testApplication -DataDirectory $testData -ConfigPath $configPath -Detached -NoBrowser -NoPause -StartupTimeoutSeconds 5 2>&1 | Out-String)
+        $portFailureExit = $LASTEXITCODE
+        $ErrorActionPreference = $savedErrorAction
+    } finally {
+        $portOwner.Stop()
+    }
+    if ($portFailureExit -eq 0 -or $portFailure -notmatch [regex]::Escape("listen port $testPort is already in use") -or
+        $portFailure -notmatch 'Diagnostics:' -or $portFailure -notmatch 'startup-' -or $portFailure -notmatch '\.log') {
+        throw "Port-conflict launch did not name its cause and diagnostic files.`n$portFailure"
+    }
+    if ($launcherSource -notmatch 'Configuration error in' -or $launcherSource -notmatch 'Permission error') {
+        throw 'Installed launcher does not classify configuration and permission startup failures.'
+    }
+
     $credentialPath = Join-Path $testData '.agentb-shell-credential.dpapi'
     [IO.File]::WriteAllBytes($credentialPath, [byte[]](1, 2, 3, 4))
     $credentialHash = (Get-FileHash -LiteralPath $credentialPath -Algorithm SHA256).Hash

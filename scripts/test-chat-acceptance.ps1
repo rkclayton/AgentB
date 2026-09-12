@@ -7,7 +7,6 @@ param(
     [string]$ReplayApplicationDirectory,
     [string]$EvidenceDirectory,
     [string]$ExpectedCommit,
-    [ValidateSet('true', 'false')]
     [string]$ExpectedDirty,
     [switch]$SkipBuild,
     [switch]$ReplayOnly,
@@ -35,6 +34,9 @@ if ([string]::IsNullOrWhiteSpace($expectedCommit)) {
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($expectedCommit)) { throw 'Could not resolve the source commit.' }
 }
 $expectedDirty = $ExpectedDirty
+if (-not [string]::IsNullOrWhiteSpace($expectedDirty) -and $expectedDirty -notin @('true', 'false')) {
+    throw '-ExpectedDirty must be true or false when supplied.'
+}
 if ([string]::IsNullOrWhiteSpace($expectedDirty)) {
     $expectedDirty = if (@(& git -C $sourceRoot status --porcelain --untracked-files=normal).Count -gt 0) { 'true' } else { 'false' }
     if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the source dirty state.' }

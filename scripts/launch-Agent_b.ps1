@@ -46,7 +46,15 @@ function Get-AgentBUrl {
     if (-not (Test-Path -LiteralPath $configPath -PathType Leaf)) {
         return 'http://127.0.0.1:8790/'
     }
-    $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+    try {
+        $config = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+    } catch {
+        $detail = ($_.Exception.Message -replace '[\r\n]+', ' ').Trim()
+        if ($detail -match '(?i)access (?:is )?denied|permission denied|unauthorized') {
+            throw "Permission error reading configuration ${configPath}: $detail"
+        }
+        throw "Configuration error in ${configPath}: $detail"
+    }
     $listen = [string]$config.listen
     $separator = $listen.LastIndexOf(':')
     if ($separator -lt 0 -or $separator -eq $listen.Length - 1) {
@@ -129,6 +137,32 @@ function Wait-AgentBEndpoint {
     return 'timeout'
 }
 
+function New-AgentBStartupCapture {
+    $directory = Split-Path -Parent $launcherErrorLog
+    $null = New-Item -ItemType Directory -Path $directory -Force
+    $stamp = [DateTime]::Now.ToString('yyyyMMdd-HHmmss-fff') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+    return Join-Path $directory "startup-$stamp.log"
+}
+
+function Get-AgentBStartupFailure {
+    param([string]$StartupLogPath, [int]$Port)
+    $lines = @()
+    if ($StartupLogPath -and (Test-Path -LiteralPath $StartupLogPath -PathType Leaf)) {
+        $lines = @(Get-Content -LiteralPath $StartupLogPath -ErrorAction SilentlyContinue | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+    $detail = if ($lines.Count) { ([string]$lines[-1]).Trim() } else { 'the process produced no startup diagnostic' }
+    if ($detail -match '(?i)bind:|address already in use|only one usage of each socket address') {
+        return "listen port $Port is already in use: $detail"
+    }
+    if ($detail -match '(?i)access (?:is )?denied|permission denied|unauthorized') {
+        return "permission error: $detail"
+    }
+    if ($detail -match '(?i)config|json|unmarshal|invalid character') {
+        return "configuration error: $detail"
+    }
+    return "startup process error: $detail"
+}
+
 if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
     throw "Agent_b executable is missing: $executable"
 }
@@ -190,7 +224,11 @@ try {
     } else {
         Write-Host 'Starting Agent_b. Close this window or press Ctrl+C to stop it.'
     }
+    $startupCapture = if ($Detached) { New-AgentBStartupCapture } else { $null }
     $configArgument = '-config "' + $configPath.Replace('"', '\"') + '" -app-root "' + $applicationRoot.Replace('"', '\"') + '" -data-root "' + $dataRoot.Replace('"', '\"') + '"'
+    if ($startupCapture) {
+        $configArgument += ' -startup-log "' + $startupCapture.Replace('"', '\"') + '"'
+    }
     $start = @{
         FilePath = $executable
         ArgumentList = $configArgument
@@ -206,7 +244,8 @@ try {
     $state = Wait-AgentBEndpoint -Url $url -Process $process -Seconds $StartupTimeoutSeconds
     if ($state -eq 'exited') {
         $process.WaitForExit()
-        throw "Agent_b exited before its UI became ready (exit code $($process.ExitCode)). Review the startup output above."
+        $detail = Get-AgentBStartupFailure -StartupLogPath $startupCapture -Port ([Uri]$url).Port
+        throw "Agent_b failed to start: $detail (exit code $($process.ExitCode)). Diagnostics: $startupCapture"
     }
     if ($state -eq 'timeout') {
         Write-Warning "Agent_b process $($process.Id) is running, but $url did not become ready within $StartupTimeoutSeconds seconds. No browser was opened."

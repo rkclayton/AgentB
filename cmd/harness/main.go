@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -44,7 +45,15 @@ func main() {
 	applicationOverride := flag.String("app-root", "", "application root containing web, prompts, scripts, and harness.example.json")
 	dataOverride := flag.String("data-root", "", "operator data root containing configuration, credentials, logs, and memory")
 	replayPaths := flag.String("replay", "", "comma-separated session JSONL files to replay")
+	startupLog := flag.String("startup-log", "", "optional append-only startup diagnostic log")
 	flag.Parse()
+	if strings.TrimSpace(*startupLog) != "" {
+		file, openErr := os.OpenFile(filepath.Clean(*startupLog), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if openErr != nil {
+			log.Fatalf("open startup diagnostic log %s: %v", *startupLog, openErr)
+		}
+		log.SetOutput(io.MultiWriter(os.Stderr, file))
+	}
 	paths, err := resolveStartupPaths(*configOverride, *applicationOverride, *dataOverride)
 	if err != nil {
 		log.Fatal(err)
