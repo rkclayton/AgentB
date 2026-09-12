@@ -9,6 +9,7 @@ import { createApprovalCard } from "./approval.js";
 import { agentKey, lifetimeRows, ratio } from "./console-lifetime.js";
 import { renderStopState } from "./stop-state.js";
 import { navigationSurfaceReady } from "./navigation-telemetry.js";
+import { liveActivityText } from "./chat-activity.js";
 
 const requestedSession = new URLSearchParams(location.search).get("session");
 let initialSession = requestedSession;
@@ -102,7 +103,7 @@ function renderConsole() {
   liveContent.hidden = !hasSelectedChat;
   liveEmpty.hidden = hasSelectedChat;
   renderStopState(consoleStop, hasSelectedChat ? session : null, store.replay);
-  document.getElementById("console-live-state").textContent = !hasSelectedChat ? "no open chat" : session.pending_approval ? "waiting for you" : session.run?.status || "idle";
+  document.getElementById("console-live-state").textContent = !hasSelectedChat ? "no open chat" : session.pending_approval ? "waiting for you" : liveActivityText(session) || session.run?.status || "idle";
   if (hasSelectedChat) {
     renderRail(); renderFlow(); renderRack(); renderState(); renderTimeline(); placeDropLastMessage(); dropControl.render(); renderPendingApproval(session);
   }

@@ -124,7 +124,7 @@ const fakeHandler = async (request, response) => {
   if (user.includes("acceptance: live tool")) {
     if (!hasToolAfterLatestUser(body)) {
       await sleep(300);
-      const tool = { index: 0, id: "live-slow-shell", type: "function", function: { name: "shell", arguments: JSON.stringify({ command: "Start-Sleep -Milliseconds 3000; Write-Output slow-tool-complete" }) } };
+      const tool = { index: 0, id: "live-slow-shell", type: "function", function: { name: "shell", arguments: JSON.stringify({ command: "Start-Sleep -Milliseconds 5000; Write-Output slow-tool-complete" }) } };
       return stream(response, { tool_calls: [tool] }, "tool_calls");
     }
     return stream(response, { content: "LIVE TOOL COMPLETE" });
@@ -925,6 +925,11 @@ if (realModel) {
   assert.match(liveToolState.status, /^tool executing · shell(?: ·|$)/);
   assert.equal(liveToolState.carets, 0, JSON.stringify(liveToolState));
   await page.screenshot({ path: join(baselineDirectory, "chat-live-tool.png") });
+  await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
+  await browser.wait(`document.querySelector('#console-live-state')?.innerText.startsWith('tool executing · shell')`, "Console named slow tool activity");
+  await page.screenshot({ path: join(baselineDirectory, "console-live-tool.png") });
+  await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
+  await browser.wait(`document.querySelector('#chat-task')`, "Chat restored after live-tool Console proof");
   await waitProjectedChatText(sessionID, "LIVE TOOL COMPLETE", "live-tool final answer");
   record("live-stage-slow-tool-and-stream-caret-lifecycle");
 

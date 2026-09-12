@@ -56,6 +56,11 @@ test("Console pins the current approval and shows waiting for you in state colou
 	assert.match(flow, /classList\.toggle\("alarm"/);
 });
 
+test("Console live state uses the same named stage and tool readout as Chat", () => {
+	assert.match(script, /import \{ liveActivityText \} from "\.\/chat-activity\.js"/);
+	assert.match(script, /liveActivityText\(session\) \|\| session\.run\?\.status \|\| "idle"/);
+});
+
 test("Drop last message is relocated beside the latest History turn and Clear is absent", () => {
   assert.match(index, /id="drop-last-message"/);
   assert.match(script, /target\.append\(dropLastMessage\)/);
