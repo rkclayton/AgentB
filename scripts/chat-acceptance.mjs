@@ -444,7 +444,9 @@ if (realModel) {
     const boundary = await assertPageStyleBoundary(page, stylesheet);
     const robots = {};
     for (const state of agentStates) {
-      robots[state] = await page.locator(".agent-tab-robot").first().evaluate((robot, nextState) => {
+      robots[state] = await page.evaluate((nextState) => {
+        const robot = document.querySelector(".agent-tab-robot");
+        if (!robot?.isConnected) throw new Error("agent robot is not attached after tab rerender");
         robot.classList.remove("idle", "waiting", "running", "offline");
         robot.classList.add(nextState);
         const image = robot.querySelector("img");

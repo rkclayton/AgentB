@@ -1076,7 +1076,7 @@
     display: none;
   }
 }
-.tab.idle {
+#console-surface .tab.idle {
   position: relative;
   inset: auto;
   display: flex;

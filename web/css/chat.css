@@ -226,7 +226,7 @@
 .code-block {
   position: relative;
 }
-.chat-page .code-copy {
+.chat-page > :where(:not(.app-shell)) .code-copy {
   position: absolute;
   z-index: 1;
   top: 4px;
@@ -241,8 +241,8 @@
   font-size: 12px;
   user-select: none;
 }
-.chat-page .code-copy:hover,
-.chat-page .code-copy:focus-visible { color: var(--ink); opacity: 1; }
+.chat-page > :where(:not(.app-shell)) .code-copy:hover,
+.chat-page > :where(:not(.app-shell)) .code-copy:focus-visible { color: var(--ink); opacity: 1; }
 .collapse-arrow {
   position: sticky;
   z-index: 2;
@@ -659,8 +659,8 @@
   color: var(--mute);
 }
 .chat-nav { align-items: center; gap: 2px; }
-.chat-page .stop-sign { width: 24px; height: 24px; min-height: 24px; padding: 0; }
-.chat-page .chat-header-action {
+.chat-page > :where(:not(.app-shell)) .stop-sign { width: 24px; height: 24px; min-height: 24px; padding: 0; }
+.chat-page > :where(:not(.app-shell)) .chat-header-action {
   min-height: 26px;
   display: inline-flex;
   align-items: center;
@@ -669,14 +669,14 @@
   border-radius: 2px;
   text-decoration: none;
 }
-.chat-page .chat-header-action.selected,
-.chat-page .chat-header-action:disabled {
+.chat-page > :where(:not(.app-shell)) .chat-header-action.selected,
+.chat-page > :where(:not(.app-shell)) .chat-header-action:disabled {
   color: var(--ink);
   background: rgba(216, 221, 227, 0.16);
   cursor: default;
   opacity: 1;
 }
-.chat-page .chat-icon-button {
+.chat-page > :where(:not(.app-shell)) .chat-icon-button {
   width: 28px;
   min-height: 26px;
   display: inline-flex;
