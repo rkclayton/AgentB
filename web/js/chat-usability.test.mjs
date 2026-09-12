@@ -103,10 +103,14 @@ test("New chat uses the in-tab plus and history uses the agent right-click menu"
   assert.doesNotMatch(html + css, /chat-list|chat-list-toggle/);
   assert.doesNotMatch(html, /chat-clear-conversation|Clear conversation/);
   assert.match(shell, /source_session_id: source\.id, workspace/);
+  assert.match(shell, /createChat\(session\?\.workspace \|\| store\.config\.workspace, agentID\)/);
+  assert.match(shell, /button\("", chatName/);
   assert.match(shell, /Stop it before closing the chat/);
 });
 
-test("New chat binds a default, recent, or operator-picked directory", () => {
+test("workspace choice displaced from plus lives on Console because it is per-chat", () => {
+  assert.match(consoleHTML, /id="new-chat-workspace"[^>]*>New chat in workspace…<\/button>/);
+  assert.match(shell, /agentb:new-chat-workspace/);
   assert.match(shell, /menu\.hidden = true/);
   assert.match(shell, /api\("\/api\/pick-folder", undefined, "GET"\)/);
   assert.match(shell, /api\("\/api\/pick-folder", \{ default: choices\.default \}\)/);

@@ -302,6 +302,8 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		}
 	case events.SessionClosed:
 		next.Closed = true
+	case events.SessionReopened:
+		next.Closed = false
 		next.RunAsYou = false
 	case events.RunQueued:
 		next.Run.Status = "queued"

@@ -45,7 +45,7 @@ The operation applies and immediately verifies both controls:
 
 Select **Verify** at any time to detect missing or replaced ACL entries and firewall drift. Reapply after updating, rebuilding, or adding files to Agent_b because a newly created or replaced application file may not retain its explicit deny.
 
-The elevated installer preserves existing settings, state, workspace contents, and protected top-level ACLs during upgrades. After the first installed launch, use **Apply protection** for that installed layout even if a source checkout was already hardened; continue to Verify after upgrades because a release that adds a new application artifact still needs the recursive policy verified.
+The elevated installer preserves existing settings, retained chats, state, workspace contents, and protected top-level ACLs during upgrades. Retained chat journals live under `%LOCALAPPDATA%\Agent_b\chats`, outside the replaced Program Files application tree and outside operational-log retention. After the first installed launch, use **Apply protection** for that installed layout even if a source checkout was already hardened; continue to Verify after upgrades because a release that adds a new application artifact still needs the recursive policy verified.
 
 The network rule permits every loopback and Tailscale destination, not only the model server. It prevents ordinary public/LAN egress by this Windows identity; it is not a domain allowlist, protocol inspection, or protection against a kernel-level exploit.
 

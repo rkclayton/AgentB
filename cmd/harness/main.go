@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -220,16 +221,76 @@ func main() {
 		} else {
 			log.Printf("startup agent %s not runnable: %s; use Connections > Test", mainAgentID, reason)
 		}
-		mainSession, createErr := registry.Create("main", mainAgentID, cfg.Workspace)
-		if createErr != nil {
-			log.Fatal(createErr)
+		restored, restoreErr := restoreRetainedChats(writers, registry)
+		if restoreErr != nil {
+			log.Fatal(restoreErr)
 		}
-		runner.PublishBudget(context.Background(), mainSession)
+		open := false
+		for _, item := range restored {
+			if !item.IsClosed() {
+				open = true
+			}
+		}
+		if !open {
+			mainSession, createErr := registry.Create("main", mainAgentID, cfg.Workspace)
+			if createErr != nil {
+				log.Fatal(createErr)
+			}
+			restored = append(restored, mainSession)
+		}
+		registry.RefreshRunnable()
+		for _, item := range restored {
+			if !item.IsClosed() {
+				runner.PublishBudget(context.Background(), item)
+			}
+		}
 	}
 	publishPendingSigning(paths.Data, registry, bus)
 	if err := serve(cfg, web.Handler()); err != nil {
 		log.Fatal(err)
 	}
+}
+
+func restoreRetainedChats(writers *events.Writers, registry *session.Registry) ([]*session.Session, error) {
+	paths, err := writers.DurableChatPaths()
+	if err != nil {
+		return nil, err
+	}
+	if len(paths) == 0 {
+		paths, err = writers.LatestOperationalSessionPaths()
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(paths) == 0 {
+		return nil, nil
+	}
+	replay, err := projection.LoadReplay(paths)
+	if err != nil {
+		return nil, fmt.Errorf("load retained chats: %w", err)
+	}
+	ids := make([]string, 0, len(replay.Sessions))
+	for id := range replay.Sessions {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	result := make([]*session.Session, 0, len(ids))
+	for _, id := range ids {
+		encoded, marshalErr := json.Marshal(replay.Sessions[id])
+		if marshalErr != nil {
+			return nil, marshalErr
+		}
+		var saved session.Snapshot
+		if unmarshalErr := json.Unmarshal(encoded, &saved); unmarshalErr != nil {
+			return nil, unmarshalErr
+		}
+		item, restoreErr := registry.Restore(saved)
+		if restoreErr != nil {
+			return nil, restoreErr
+		}
+		result = append(result, item)
+	}
+	return result, nil
 }
 
 func publishPendingSigning(dataRoot string, registry *session.Registry, bus *events.Bus) {

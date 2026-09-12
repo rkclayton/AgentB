@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +64,77 @@ func (r *Registry) CreateLikeAt(sourceID, workspace string) (*Session, error) {
 		agentID = snapshot.ServerID
 	}
 	return r.create("", agentID, workspace, enabled)
+}
+
+// Restore rehydrates a retained chat into a fresh operational tape. The
+// retained transcript is the authority; the new session.created event seeds
+// this launch's discardable projector and log generation from that state.
+func (r *Registry) Restore(saved Snapshot) (*Session, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if saved.ID == "" {
+		return nil, fmt.Errorf("restore session: missing id")
+	}
+	if _, exists := r.sessions[saved.ID]; exists {
+		return nil, fmt.Errorf("restore session %s: duplicate id", saved.ID)
+	}
+	agent, ok := r.resolveAgent(saved.AgentID)
+	if !ok {
+		return nil, fmt.Errorf("restore session %s: unknown agent %s", saved.ID, saved.AgentID)
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, saved.CreatedAt)
+	if err != nil {
+		return nil, fmt.Errorf("restore session %s created_at: %w", saved.ID, err)
+	}
+	logPath, err := r.writers.OpenSession(saved.ID)
+	if err != nil {
+		return nil, err
+	}
+	run := saved.Run
+	if run.Status != "idle" {
+		run.Status, run.RunID, run.QueuePosition, run.Partial = "idle", "", 0, ""
+		run.LastStopReason = "aborted_mid_run"
+	}
+	tools, calls := map[string]bool{}, map[string]int{}
+	schemaTokens, marginalTokens := map[string]int{}, map[string]int{}
+	for _, tool := range saved.Tools {
+		tools[tool.Name], calls[tool.Name] = tool.Enabled, tool.Calls
+		schemaTokens[tool.Name], marginalTokens[tool.Name] = tool.SchemaTokens, tool.MarginalTokens
+	}
+	s := &Session{
+		ID: saved.ID, Label: saved.Label, AgentID: saved.AgentID, ServerID: saved.ServerID,
+		AgentName: saved.AgentName, BProfile: saved.BProfile, PromptAddendum: agent.PromptAddendum,
+		Workspace: firstNonempty(saved.WorkspaceDir, saved.Workspace), WorkspaceMissing: saved.WorkspaceMissing,
+		ProjectBlock: saved.ProjectContent, ProjectFiles: append([]string(nil), saved.ProjectFiles...), ProjectNotes: append([]string(nil), saved.ProjectNotes...),
+		PendingRepoPolicy: clonePolicyState(saved.PendingRepoPolicy), RepoPolicy: clonePolicyState(saved.RepoPolicy),
+		Run: run, ToolsEnabled: tools, ToolCalls: calls, LastSeen: map[string]time.Time{}, CreatedAt: createdAt,
+		Closed: saved.Closed, NamePinned: saved.NamePinned, Messages: append([]events.Message(nil), saved.Messages...), Budget: saved.Budget,
+		LogPath: logPath, Runnable: saved.Runnable, NotRunnableReason: saved.NotRunnableReason,
+		MemoryBlock: saved.MemoryContent, MemoryPath: saved.MemoryPath, AgentMemoryBlock: saved.AgentMemoryContent, AgentMemoryPath: saved.AgentMemoryPath,
+		SchemaTokens: schemaTokens, MarginalTokens: marginalTokens, queuedMessages: saved.QueuedMessages,
+		modelTurns: saved.ModelTurns, compactionCount: saved.CompactionCount, compactionTokenDelta: saved.CompactionTokenDelta,
+		compactionModelCalls: saved.CompactionModelCalls, compactionPrompt: saved.CompactionPrompt, compactionCompletion: saved.CompactionCompletion,
+	}
+	if r.workspaces != nil && !s.WorkspaceMissing {
+		s.ProjectTouch = r.projectTouch(s)
+	}
+	r.sessions[s.ID] = s
+	if strings.HasPrefix(s.ID, "s") {
+		if value, parseErr := strconv.Atoi(strings.TrimPrefix(s.ID, "s")); parseErr == nil && value >= r.next {
+			r.next = value + 1
+		}
+	}
+	r.bus.Publish(events.New(events.SessionCreated, s.ID, "", map[string]any{"workspace_dir": s.Workspace, "session": s.SnapshotUnlocked()}))
+	return s, nil
+}
+
+func firstNonempty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 func (r *Registry) create(label, agentID, workspace string, enabled map[string]bool) (*Session, error) {
 	r.mu.Lock()
@@ -675,6 +747,22 @@ func (r *Registry) Close(id string) error {
 		return err
 	}
 	r.bus.Publish(events.New(events.SessionClosed, id, "", map[string]any{"session_id": id}))
+	return nil
+}
+
+func (r *Registry) Reopen(id string) error {
+	s, ok := r.Get(id)
+	if !ok {
+		return fmt.Errorf("session not found")
+	}
+	s.mu.Lock()
+	if !s.Closed {
+		s.mu.Unlock()
+		return fmt.Errorf("session is already open")
+	}
+	s.Closed = false
+	s.mu.Unlock()
+	r.bus.Publish(events.New(events.SessionReopened, id, "", map[string]any{"session_id": id}))
 	return nil
 }
 

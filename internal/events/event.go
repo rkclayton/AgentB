@@ -21,6 +21,7 @@ const (
 	SessionUpdated        = "session.updated"
 	SessionReset          = "session.reset"
 	SessionClosed         = "session.closed"
+	SessionReopened       = "session.reopened"
 	ChatExported          = "chat.exported"
 	ServerProbed          = "server.probed"
 	ConfigChanged         = "config.changed"

@@ -47,6 +47,7 @@ agentServerSelect.addEventListener("change", () => void changeAgentServer());
 agentServerCancel.addEventListener("click", () => void cancelAgentServerChange());
 document.getElementById("clear-stats").addEventListener("click", () => void clearStats());
 document.getElementById("flush-memory").addEventListener("click", () => void flushMemory());
+document.getElementById("new-chat-workspace").addEventListener("click", () => window.dispatchEvent(new Event("agentb:new-chat-workspace")));
 document.getElementById("console-tools").addEventListener("change", (event) => void toggleTool(event));
 document.getElementById("console-tools-link").addEventListener("click", (event) => { event.preventDefault(); document.getElementById("console-tools-panel").scrollIntoView({block:"start"}); });
 consoleStop.addEventListener("click", () => { const id=store.selection.session_id; if(id&&!store.replay) void api("/api/stop",{session_id:id}); });

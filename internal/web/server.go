@@ -923,6 +923,18 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, 200, map[string]string{"log_path": path})
 		return
 	}
+	if len(parts) == 2 && parts[1] == "reopen" && r.Method == http.MethodPost {
+		if err := s.registry.Reopen(id); err != nil {
+			status := http.StatusConflict
+			if strings.Contains(err.Error(), "not found") {
+				status = http.StatusNotFound
+			}
+			writeError(w, status, err.Error(), "session")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"session_id": id})
+		return
+	}
 	if len(parts) == 2 && parts[1] == "delete" && r.Method == http.MethodPost {
 		if err := s.operatorRequest(r); err != nil {
 			writeError(w, http.StatusForbidden, "full chat deletion requires a verified local operator process", "session_id")

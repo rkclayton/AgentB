@@ -12,13 +12,14 @@ import (
 )
 
 type Writers struct {
-	mu         sync.Mutex
-	dir, start string
-	global     *os.File
-	sessions   map[string]*os.File
-	paths      map[string]string
-	sizes      map[string]int64
-	history    map[string]*historyIndex
+	mu                  sync.Mutex
+	dir, chatDir, start string
+	global              *os.File
+	sessions            map[string]*os.File
+	chats               map[string]*os.File
+	paths               map[string]string
+	sizes               map[string]int64
+	history             map[string]*historyIndex
 }
 
 // LogCursor identifies a complete record boundary in one JSONL generation.
@@ -47,12 +48,87 @@ func NewWriters(dir string) (*Writers, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	chatDir := filepath.Join(filepath.Dir(dir), "chats")
+	if err := os.MkdirAll(chatDir, 0o700); err != nil {
+		return nil, err
+	}
 	stamp := time.Now().UTC().Format("20060102T150405.000Z")
 	file, err := os.OpenFile(filepath.Join(dir, "Agent_b-"+stamp+".jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, err
 	}
-	return &Writers{dir: dir, start: stamp, global: file, sessions: map[string]*os.File{}, paths: map[string]string{}, sizes: map[string]int64{}, history: map[string]*historyIndex{}}, nil
+	return &Writers{dir: dir, chatDir: chatDir, start: stamp, global: file, sessions: map[string]*os.File{}, chats: map[string]*os.File{}, paths: map[string]string{}, sizes: map[string]int64{}, history: map[string]*historyIndex{}}, nil
+}
+
+// DurableChatPaths returns the retained chat journals. Unlike the operational
+// tapes in logs, these files are not subject to log retention.
+func (w *Writers) DurableChatPaths() ([]string, error) {
+	w.mu.Lock()
+	dir := w.chatDir
+	w.mu.Unlock()
+	paths, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// LatestOperationalSessionPaths supports the one-time upgrade from releases
+// that had only launch tapes. It selects the newest generation for each
+// recorded session ID; once retained journals exist startup no longer uses it.
+func (w *Writers) LatestOperationalSessionPaths() ([]string, error) {
+	w.mu.Lock()
+	dir := w.dir
+	w.mu.Unlock()
+	paths, err := filepath.Glob(filepath.Join(dir, "*.jsonl"))
+	if err != nil {
+		return nil, err
+	}
+	latest := map[string]string{}
+	for _, path := range paths {
+		file, openErr := os.Open(path)
+		if openErr != nil {
+			return nil, openErr
+		}
+		decoder := json.NewDecoder(file)
+		var event Event
+		decodeErr := decoder.Decode(&event)
+		closeErr := file.Close()
+		if decodeErr == io.EOF || event.SessionID == "" {
+			continue
+		}
+		if decodeErr != nil {
+			return nil, fmt.Errorf("inspect legacy chat %s: %w", path, decodeErr)
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		if previous := latest[event.SessionID]; previous == "" || filepath.Base(path) > filepath.Base(previous) {
+			latest[event.SessionID] = path
+		}
+	}
+	result := make([]string, 0, len(latest))
+	for _, path := range latest {
+		result = append(result, path)
+	}
+	sort.Strings(result)
+	return result, nil
+}
+
+func (w *Writers) durableChatLocked(id string) (*os.File, error) {
+	if filepath.Base(id) != id || id == "." || id == "" {
+		return nil, fmt.Errorf("invalid session id %q", id)
+	}
+	if file := w.chats[id]; file != nil {
+		return file, nil
+	}
+	file, err := os.OpenFile(filepath.Join(w.chatDir, id+".jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	w.chats[id] = file
+	return file, nil
 }
 func (w *Writers) OpenSession(id string) (string, error) {
 	path, _, err := w.RotateSession(id)
@@ -190,6 +266,19 @@ func (w *Writers) DeleteSession(id string) (SessionInventory, error) {
 			return SessionInventory{}, err
 		}
 	}
+	w.mu.Lock()
+	chat := w.chats[id]
+	delete(w.chats, id)
+	chatPath := filepath.Join(w.chatDir, id+".jsonl")
+	w.mu.Unlock()
+	if chat != nil {
+		if err := chat.Close(); err != nil {
+			return SessionInventory{}, err
+		}
+	}
+	if err := os.Remove(chatPath); err != nil && !os.IsNotExist(err) {
+		return SessionInventory{}, err
+	}
 	return inventory, nil
 }
 func (w *Writers) Write(event Event) error {
@@ -212,6 +301,13 @@ func (w *Writers) WriteRecord(event Event) (LogCursor, error) {
 		return LogCursor{}, err
 	}
 	line := append(data, '\n')
+	var chat *os.File
+	if event.SessionID != "" {
+		chat, err = w.durableChatLocked(event.SessionID)
+		if err != nil {
+			return LogCursor{}, err
+		}
+	}
 	offset := w.sizes[event.SessionID]
 	written, err := file.Write(line)
 	if err != nil {
@@ -219,6 +315,15 @@ func (w *Writers) WriteRecord(event Event) (LogCursor, error) {
 	}
 	if written != len(line) {
 		return LogCursor{}, io.ErrShortWrite
+	}
+	if chat != nil {
+		chatWritten, chatErr := chat.Write(line)
+		if chatErr != nil {
+			return LogCursor{}, chatErr
+		}
+		if chatWritten != len(line) {
+			return LogCursor{}, io.ErrShortWrite
+		}
 	}
 	if event.SessionID != "" && file == w.sessions[event.SessionID] {
 		w.sizes[event.SessionID] += int64(written)
@@ -229,6 +334,11 @@ func (w *Writers) WriteRecord(event Event) (LogCursor, error) {
 	if event.Type == "run.stopped" {
 		if err := file.Sync(); err != nil {
 			return LogCursor{}, err
+		}
+		if chat != nil {
+			if err := chat.Sync(); err != nil {
+				return LogCursor{}, err
+			}
 		}
 	}
 	if event.SessionID == "" || path == "" {
@@ -324,7 +434,9 @@ func (w *Writers) Close() error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	var first error
-	for _, file := range append([]*os.File{w.global}, mapFiles(w.sessions)...) {
+	files := append([]*os.File{w.global}, mapFiles(w.sessions)...)
+	files = append(files, mapFiles(w.chats)...)
+	for _, file := range files {
 		if file == nil {
 			continue
 		}

@@ -5,7 +5,136 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"harness/internal/config"
+	"harness/internal/events"
+	"harness/internal/session"
 )
+
+func TestRetainedChatsRestoreWithoutOperationalLogsAndDeleteExplicitly(t *testing.T) {
+	root, workspace := t.TempDir(), t.TempDir()
+	logs := filepath.Join(root, "logs")
+	cfg := config.Defaults(workspace)
+	profile := &cfg.Servers[0]
+	profiles := func(id string) (*config.Profile, bool) { return profile, id == profile.ID }
+
+	firstWriters, err := events.NewWriters(logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBus := events.NewBus()
+	firstBus.SetDurableSink(firstWriters.WriteRecord, nil, nil)
+	firstRegistry := session.NewRegistry(firstBus, firstWriters, profiles, 40, func() config.Config { return cfg })
+	item, err := firstRegistry.Create("main", cfg.DefaultAgentID(), workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := events.Message{ID: "m1", Role: "user", Category: "history", Content: "retained words"}
+	item.Append(message)
+	firstBus.Publish(events.New(events.MessageAppended, item.ID, "", map[string]any{"message": message}))
+	if err := firstRegistry.RenameBy(item.ID, "durable name", "c"); err != nil {
+		t.Fatal(err)
+	}
+	other, err := firstRegistry.CreateLike(item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherMessage := events.Message{ID: "m2", Role: "user", Category: "history", Content: "independent context"}
+	other.Append(otherMessage)
+	firstBus.Publish(events.New(events.MessageAppended, other.ID, "", map[string]any{"message": otherMessage}))
+	if err := firstWriters.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(logs); err != nil {
+		t.Fatal(err)
+	}
+
+	secondWriters, err := events.NewWriters(logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = secondWriters.Close() })
+	secondBus := events.NewBus()
+	secondBus.SetDurableSink(secondWriters.WriteRecord, nil, nil)
+	secondRegistry := session.NewRegistry(secondBus, secondWriters, profiles, 40, func() config.Config { return cfg })
+	restored, err := restoreRetainedChats(secondWriters, secondRegistry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 2 {
+		t.Fatalf("restored chats=%d", len(restored))
+	}
+	byID := map[string]session.Snapshot{}
+	for _, restoredChat := range restored {
+		byID[restoredChat.ID] = restoredChat.Snapshot()
+	}
+	if snapshot := byID[item.ID]; snapshot.Label != "durable name" || len(snapshot.Messages) != 1 || snapshot.Messages[0].Content != "retained words" {
+		t.Fatalf("restored first snapshot=%+v", snapshot)
+	}
+	if snapshot := byID[other.ID]; len(snapshot.Messages) != 1 || snapshot.Messages[0].Content != "independent context" {
+		t.Fatalf("restored second snapshot=%+v", snapshot)
+	}
+	for _, restoredChat := range restored {
+		if err := secondRegistry.Close(restoredChat.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := secondRegistry.Delete(restoredChat.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paths, err := secondWriters.DurableChatPaths()
+	if err != nil || len(paths) != 0 {
+		t.Fatalf("durable paths after explicit delete=%v err=%v", paths, err)
+	}
+}
+
+func TestRestoreRetainedChatsBootstrapsNewestLegacyOperationalGeneration(t *testing.T) {
+	root, workspace := t.TempDir(), t.TempDir()
+	logs := filepath.Join(root, "logs")
+	cfg := config.Defaults(workspace)
+	profile := &cfg.Servers[0]
+	profiles := func(id string) (*config.Profile, bool) { return profile, id == profile.ID }
+	firstWriters, err := events.NewWriters(logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBus := events.NewBus()
+	firstBus.SetDurableSink(firstWriters.WriteRecord, nil, nil)
+	firstRegistry := session.NewRegistry(firstBus, firstWriters, profiles, 40, func() config.Config { return cfg })
+	item, err := firstRegistry.Create("upgrade chat", cfg.DefaultAgentID(), workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	message := events.Message{ID: "legacy", Role: "user", Category: "history", Content: "before upgrade"}
+	item.Append(message)
+	firstBus.Publish(events.New(events.MessageAppended, item.ID, "", map[string]any{"message": message}))
+	if err := firstWriters.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "chats")); err != nil {
+		t.Fatal(err)
+	}
+
+	secondWriters, err := events.NewWriters(logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = secondWriters.Close() })
+	secondBus := events.NewBus()
+	secondBus.SetDurableSink(secondWriters.WriteRecord, nil, nil)
+	secondRegistry := session.NewRegistry(secondBus, secondWriters, profiles, 40, func() config.Config { return cfg })
+	restored, err := restoreRetainedChats(secondWriters, secondRegistry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(restored) != 1 || restored[0].Snapshot().Messages[0].Content != "before upgrade" {
+		t.Fatalf("legacy restore=%+v", restored)
+	}
+	paths, err := secondWriters.DurableChatPaths()
+	if err != nil || len(paths) != 1 {
+		t.Fatalf("seeded durable paths=%v err=%v", paths, err)
+	}
+}
 
 func TestReadServingFactsCompleteness(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "SERVING.md")

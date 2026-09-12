@@ -1,6 +1,5 @@
 import { api, reduce, setSelection, store, subscribe } from "./bus.js";
 import { chatRowText, closeConfirmText, firstUserLine, isRunning } from "./chat-lifecycle.js";
-import { agentTabLayout } from "./agent-tabs.js";
 import { installUIErrorRelay } from "./ui-error-relay.js";
 import { requestNavigation } from "./navigation-guard.js";
 import { beginNavigation } from "./navigation-telemetry.js";
@@ -31,7 +30,7 @@ export function initShell(options = {}) {
 
   const left = node("div", "shell-left");
   const tabs = node("nav", "agent-tabs");
-  tabs.setAttribute("aria-label", "Agents");
+  tabs.setAttribute("aria-label", "Chats");
   left.append(tabs);
 
   const right = node("div", "shell-right");
@@ -99,34 +98,44 @@ export function initShell(options = {}) {
     return "idle";
   }
 
+  function chatState(session) {
+    if (session?.model_unreachable) return "offline";
+    if (session?.pending_approval || session?.pending_repo_policy || session?.run?.status === "paused") return "waiting";
+    if (activeRunStates.has(session?.run?.status)) return "running";
+    return "idle";
+  }
+
   function renderTabs() {
     tabs.replaceChildren();
-    const agents = ["agent_b"];
-	const selected = store.sessions[store.selection.session_id];
-	if ((page === "chat" || page === "console") && store.selection.agent_id) rememberAgentSide(store.selection.agent_id, page);
-	const configured = (store.config.agents || []).find((agent) => agentKey(agent) === selected?.agent_id) || store.config.agents?.[0];
-	if (configured?.c) agents.push("agent_c");
-    if (configured?.d) agents.push("agent_d");
-    for (const agentID of agents) {
+    const agentID = "agent_b";
+    const open = sessionsFor(agentID, false);
+    if ((page === "chat" || page === "console") && store.selection.agent_id) rememberAgentSide(store.selection.agent_id, page);
+    const rendered = open.length ? open : [null];
+    for (const session of rendered) {
       const wrap = node("div", "agent-tab-wrap");
       wrap.dataset.agent = agentID;
-      const selected = store.selection.agent_id === agentID;
+      if (session) wrap.dataset.session = session.id;
+      const selected = !!session && store.selection.session_id === session.id;
       if (selected) wrap.classList.add("selected");
-      const tab = button("", `${agentID} · ${agentName(agentID)}`, `agent-tab ${selected ? "selected" : ""}`);
-      const glyphState = agentState(agentID);
+      const chatName = session?.label || agentName(agentID);
+      const tab = button("", chatName, `agent-tab ${selected ? "selected" : ""}`);
+      const glyphState = session ? chatState(session) : agentState(agentID);
       const side = selected && (page === "chat" || page === "console") ? page : rememberedAgentSide(agentID);
       tab.dataset.agent = agentID;
+      if (session) tab.dataset.session = session.id;
       tab.dataset.side = side;
-      tab.removeAttribute("title");
       tab.classList.add(`side-${side}`);
       wrap.classList.add(`side-${side}`);
-      tab.setAttribute("aria-label", `${agentID} · ${agentName(agentID)} · ${side}`);
+      tab.setAttribute("aria-label", `${agentID} chat · ${chatName} · ${side}`);
       const robot = agentID.slice(-1);
       tab.innerHTML = `<span class="agent-tab-robot agent-tab-robot-${robot} ${glyphState}" aria-hidden="true"><img src="/static/assets/agent.svg" alt=""><span class="agent-tab-eyes"></span></span><span>${escapeHTML(agentID)}</span>`;
       tab.onclick = () => {
-        const current = store.selection.session_id;
-        const owned = sessionsFor(agentID, false);
-        const targetSession = owned.some((item) => item.id === current) ? current : owned[0]?.id || "";
+        if (!session) return;
+        if (!selected) {
+          setSelection(agentID, session.id);
+          return;
+        }
+        const targetSession = session.id;
         const navigation = { kind: "flip", from: page, to: side === "chat" ? "console" : "chat", fullDocument: !options.switchView, chatID: targetSession, mutationToken: store.mutation_token };
         setSelection(agentID, targetSession);
         const next = side === "chat" ? "console" : "chat";
@@ -145,68 +154,23 @@ export function initShell(options = {}) {
         revealMenu(menu, tab);
       };
       wrap.append(tab);
-      if (agentID === "agent_b") {
+      if (session) {
+        const close = button("×", `Close ${chatName}`, "agent-tab-close");
+        close.disabled = store.replay || isRunning(session);
+        close.onclick = (event) => { event.stopPropagation(); void closeChat(session, menu, agentID); };
+        wrap.append(close);
+      }
+      if (selected || !session) {
         const add = button("+", `New chat with ${agentID}`, "agent-tab-new");
         add.disabled = store.replay || !(store.config.agents || []).length;
         add.onclick = (event) => {
           event.stopPropagation();
-          for (const other of tabs.querySelectorAll(".shell-menu")) if (other !== menu) other.hidden = true;
-          void showNewChatMenu(menu, agentID, add);
+          void createChat(session?.workspace || store.config.workspace, agentID);
         };
         wrap.append(add);
       }
       wrap.append(menu);
       tabs.append(wrap);
-    }
-    const overflowWrap = node("div", "agent-overflow-wrap");
-    const overflowButton = button("", "More agents", "agent-overflow");
-    const overflowMenu = node("div", "shell-menu agent-overflow-menu");
-    overflowMenu.hidden = true;
-    overflowButton.setAttribute("aria-haspopup", "menu");
-    overflowButton.onclick = (event) => {
-      event.stopPropagation();
-      for (const other of tabs.querySelectorAll(".shell-menu")) if (other !== overflowMenu) other.hidden = true;
-      if (!overflowMenu.hidden) {
-        overflowMenu.hidden = true;
-        return;
-      }
-      renderOverflowMenu(overflowMenu);
-      revealMenu(overflowMenu, overflowButton);
-    };
-    overflowWrap.append(overflowButton, overflowMenu);
-    tabs.append(overflowWrap);
-    queueMicrotask(layoutTabs);
-  }
-
-  function layoutTabs() {
-    const entries = [...tabs.querySelectorAll(".agent-tab-wrap")];
-    const overflowWrap = tabs.querySelector(".agent-overflow-wrap");
-    const overflowButton = tabs.querySelector(".agent-overflow");
-    if (!overflowWrap || !overflowButton) return;
-    for (const entry of entries) entry.hidden = false;
-    overflowWrap.hidden = true;
-    const reservedWidth = entries[0]?.getBoundingClientRect().width || 92;
-    const layout = agentTabLayout(entries.length, tabs.clientWidth, reservedWidth);
-    const visible = new Set(Array.from({ length: layout.visible }, (_, index) => index));
-    const selectedIndex = entries.findIndex((entry) => entry.dataset.agent === store.selection.agent_id);
-    if (layout.hidden && selectedIndex >= layout.visible) {
-      visible.delete(layout.visible - 1);
-      visible.add(selectedIndex);
-    }
-    entries.forEach((entry, index) => { entry.hidden = !visible.has(index); });
-    const hidden = entries.filter((entry) => entry.hidden);
-    overflowWrap.hidden = hidden.length === 0;
-    overflowButton.textContent = `+${hidden.length}`;
-    overflowButton.setAttribute("aria-label", `${hidden.length} more agents`);
-  }
-
-  function renderOverflowMenu(menu) {
-    menu.replaceChildren();
-    for (const entry of tabs.querySelectorAll(".agent-tab-wrap[hidden]")) {
-      const source = entry.querySelector(".agent-tab");
-      const choice = button(source?.textContent?.trim() || entry.dataset.agent, `Select ${entry.dataset.agent}`, "shell-new-choice");
-      choice.onclick = () => { source?.click(); menu.hidden = true; };
-      menu.append(choice);
     }
   }
 
@@ -230,8 +194,16 @@ export function initShell(options = {}) {
       summary.textContent = `${chatRowText(session)}${session.closed ? " · closed" : ""}`;
       summary.title = firstUserLine(session);
       const open = button("Open", `Open ${firstUserLine(session)}`, "agent-chat-open");
-      open.disabled = session.closed;
-      open.onclick = () => { setSelection(agentID, session.id); menu.hidden = true; };
+      open.textContent = session.closed ? "Reopen" : "Open";
+      open.onclick = async () => {
+        if (session.closed) {
+          try {
+            await api(`/api/sessions/${encodeURIComponent(session.id)}/reopen`, {});
+            reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
+          } catch (error) { return report(error.message); }
+        }
+        setSelection(agentID, session.id); menu.hidden = true;
+      };
       const rename = button("Rename", `Rename ${firstUserLine(session)}`, "agent-chat-rename");
       rename.onclick = () => showRename(row, session, menu, agentID);
       const close = button("×", `Close ${firstUserLine(session)}`, "agent-chat-close");
@@ -364,8 +336,11 @@ export function initShell(options = {}) {
   subscribe((_state, event) => {
     render();
   });
-  if (typeof ResizeObserver !== "undefined") new ResizeObserver(layoutTabs).observe(tabs);
-  else window.addEventListener("resize", layoutTabs);
+  window.addEventListener("agentb:new-chat-workspace", () => {
+    const menu = tabs.querySelector('.agent-tab-wrap.selected .shell-menu') || tabs.querySelector('.agent-tab-wrap[data-agent="agent_b"] .shell-menu');
+    const tab = menu?.closest(".agent-tab-wrap")?.querySelector(".agent-tab");
+    if (menu && tab) void showNewChatMenu(menu, "agent_b", tab);
+  });
   return {
     render,
     report,

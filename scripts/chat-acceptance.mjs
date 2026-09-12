@@ -26,7 +26,7 @@ let modelPort;
 let releaseQueue = null;
 let releaseBusy = null;
 let slowAccountingArmed = false;
-let slowAccountingSkips = 0;
+const slowAccountingTrace = [];
 const terminateChildren = () => {
   try { model?.closeAllConnections?.(); } catch {}
   for (const child of [...children].reverse()) { try { child.kill(); } catch {} }
@@ -63,7 +63,7 @@ const toolCountAfterLatestUser = (body) => {
 const fakeHandler = async (request, response) => {
   if (request.url === "/arm-slow-accounting") {
     slowAccountingArmed = true;
-    slowAccountingSkips = 1;
+    slowAccountingTrace.push({ action: "armed", at: Date.now() });
     return void response.end(JSON.stringify({ armed: true }));
   }
   if (request.url === "/props") return void response.end(JSON.stringify({ server: "agentb-fake", n_ctx: 32768 }));
@@ -72,13 +72,13 @@ const fakeHandler = async (request, response) => {
   for await (const chunk of request) raw += chunk;
   const body = raw ? JSON.parse(raw) : {};
   response.agentbPromptTokens = Math.max(1, Math.ceil(JSON.stringify(body.messages || []).length / 4));
-  if (slowAccountingArmed && (request.url === "/tokenize" || request.url === "/apply-template")) {
-    if (slowAccountingSkips > 0) {
-      slowAccountingSkips--;
-    } else {
-      slowAccountingArmed = false;
-      await sleep(4000);
-    }
+  // User submission tokenizes before the supervised run starts. Delay the
+  // run's template request instead so the connected-accounting fallback and
+  // model.busy event are exercised on every trial, independent of token-cost caches.
+  if (slowAccountingArmed && request.url === "/apply-template" && (body.messages || []).some((message) => String(message.content || "").includes("acceptance: slow accounting"))) {
+    slowAccountingArmed = false;
+    slowAccountingTrace.push({ action: "delayed", url: request.url, at: Date.now() });
+    await sleep(4000);
   }
   if (request.url === "/tokenize") {
     const content = String(body.content || body.prompt || "");
@@ -335,7 +335,6 @@ if (realModel) {
   record("real-model-answer");
 } else {
   await page.locator(".agent-tab-new").click();
-  await page.locator("button.shell-new-choice").filter({ hasText: /^Default ·/ }).click();
   let snapshot;
   await browser.wait(`new URLSearchParams(location.search).get('session')?.startsWith('s')`, "new session selected");
   record("agent-tab-new-chat-idle");
@@ -367,7 +366,7 @@ if (realModel) {
   assert.equal(await page.locator(".shell-settings").count(), 1);
   assert.equal(await page.locator("#chat-title").count(), 0);
   const captureAgentTabStyle = () => page.evaluate(() => {
-    const node = document.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab');
+    const node = document.querySelector('.agent-tab-wrap.selected .agent-tab');
     return { side: node.dataset.side, color: getComputedStyle(node).color, background: getComputedStyle(node.closest(".agent-tab-wrap")).backgroundColor };
   });
   const chatSide = await captureAgentTabStyle();
@@ -376,8 +375,8 @@ if (realModel) {
   const captureShellGeometry = () => page.evaluate(() => Object.fromEntries([
     ["shell", "#app-shell"],
     ["tabs", ".agent-tabs"],
-    ["wrap", '.agent-tab-wrap[data-agent="agent_b"]'],
-    ["tab", '.agent-tab[data-agent="agent_b"]'],
+    ["wrap", '.agent-tab-wrap.selected'],
+    ["tab", '.agent-tab-wrap.selected .agent-tab'],
     ["plus", ".agent-tab-new"],
     ["plan", ".shell-page"],
     ["settings", ".shell-settings"],
@@ -403,7 +402,7 @@ if (realModel) {
   const chatToConsoleStarted = performance.now();
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/" && url.searchParams.get("session") === sessionID),
-    page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click()
+    page.locator('.agent-tab-wrap.selected .agent-tab').click()
   ]);
   await page.locator("#console-lifetime").waitFor({ state: "visible" });
   await page.waitForFunction(() => window.__agentbLoadTiming?.snapshot !== null);
@@ -416,8 +415,8 @@ if (realModel) {
   const consoleGeometry = await captureShellGeometry();
   const consoleLoadTiming = await captureLoadTiming();
   assert.deepEqual(consoleGeometry, chatGeometry, JSON.stringify({ chatGeometry, consoleGeometry }));
-  await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click({ button: "right" });
-  const toggleMenu = page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-chat-menu');
+  await page.locator('.agent-tab-wrap.selected .agent-tab').click({ button: "right" });
+  const toggleMenu = page.locator('.agent-tab-wrap.selected .agent-chat-menu');
   await toggleMenu.waitFor({ state: "visible" });
   assert.ok(await toggleMenu.locator(".agent-chat-row").count() >= 2);
   assert.equal(await toggleMenu.locator(".agent-chat-close").count(), await toggleMenu.locator(".agent-chat-row").count());
@@ -426,12 +425,12 @@ if (realModel) {
   const consoleToChatStarted = performance.now();
   await Promise.all([
     page.waitForURL((url) => url.pathname === "/chat" && url.searchParams.get("session") === sessionID),
-    page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').click()
+    page.locator('.agent-tab-wrap.selected .agent-tab').click()
   ]);
   await page.locator("#chat-task").waitFor({ state: "visible" });
   await page.waitForFunction(() => window.__agentbLoadTiming?.snapshot !== null && document.querySelector(".chat-entry"));
   const consoleToChatMS = performance.now() - consoleToChatStarted;
-  assert.equal(await page.locator('.agent-tab-wrap[data-agent="agent_b"] .agent-tab').getAttribute("data-side"), "chat");
+  assert.equal(await page.locator('.agent-tab-wrap.selected .agent-tab').getAttribute("data-side"), "chat");
   const returnedChatGeometry = await captureShellGeometry();
   const chatLoadTiming = await captureLoadTiming();
   assert.deepEqual(returnedChatGeometry, chatGeometry, JSON.stringify({ chatGeometry, returnedChatGeometry }));
@@ -887,7 +886,7 @@ if (realModel) {
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('FIRST PROSE BLOCK')`, "prose fixture restored");
 
-  const geometry = await browser.evaluate(`(() => { const textarea=document.querySelector('#chat-task').getBoundingClientRect(); const row=document.querySelector('.chat-composer-row').getBoundingClientRect(); const expand=document.querySelector('#chat-expand').getBoundingClientRect(); const robot=document.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab-robot').getBoundingClientRect(); const tab=document.querySelector('.agent-tab-wrap[data-agent="agent_b"]').getBoundingClientRect(); const plus=document.querySelector('.agent-tab-new').getBoundingClientRect(); const send=document.querySelector('#chat-send').getBoundingClientRect(); const stop=document.querySelector('#chat-stop').getBoundingClientRect(); return {textarea:textarea.width,row:row.width,rowHeight:row.height,expandTop:expand.top-textarea.top,expandRight:textarea.right-expand.right,robot:robot.width,tab:tab.width,plus:{width:plus.width,height:plus.height},send:{width:send.width,height:send.height},stop:{width:stop.width,height:stop.height}}; })()`);
+  const geometry = await browser.evaluate(`(() => { const textarea=document.querySelector('#chat-task').getBoundingClientRect(); const row=document.querySelector('.chat-composer-row').getBoundingClientRect(); const expand=document.querySelector('#chat-expand').getBoundingClientRect(); const robot=document.querySelector('.agent-tab-wrap.selected .agent-tab-robot').getBoundingClientRect(); const tab=document.querySelector('.agent-tab-wrap.selected').getBoundingClientRect(); const plus=document.querySelector('.agent-tab-wrap.selected .agent-tab-new').getBoundingClientRect(); const send=document.querySelector('#chat-send').getBoundingClientRect(); const stop=document.querySelector('#chat-stop').getBoundingClientRect(); return {textarea:textarea.width,row:row.width,rowHeight:row.height,expandTop:expand.top-textarea.top,expandRight:textarea.right-expand.right,robot:robot.width,tab:tab.width,plus:{width:plus.width,height:plus.height},send:{width:send.width,height:send.height},stop:{width:stop.width,height:stop.height}}; })()`);
   assert.ok(geometry.textarea >= geometry.row - 50, JSON.stringify(geometry));
   assert.ok(geometry.expandTop >= 0 && geometry.expandTop <= 8 && geometry.expandRight >= 0 && geometry.expandRight <= 8, JSON.stringify(geometry));
   assert.ok(geometry.robot > 0, JSON.stringify(geometry));
@@ -1043,17 +1042,20 @@ if (realModel) {
   record("chat-reopen-preserves-screen-and-jsonl");
 
   events = await sessionEvents(sessionID);
-  const beforeSlowAccounting = events.at(-1)?.seq || 0;
+  const beforeSlowAccounting = Math.max(0, ...events.map((event) => event.seq || 0));
   await json(`${profileURL}/arm-slow-accounting`, { method: "POST" });
   await setTask(`acceptance: slow accounting ${"payload ".repeat(800)}`);
-  const estimatedBudget = await waitEvent(sessionID, (event) => event.type === "budget" && event.seq > beforeSlowAccounting && event.data?.estimated === true, "estimated slow-accounting budget", 12000);
+  const slowMessage = await waitEvent(sessionID, (event) => event.seq > beforeSlowAccounting && event.type === "message.appended" && event.data?.message?.content?.startsWith("acceptance: slow accounting"), "slow-accounting message", 12000);
+  const slowRun = await waitEvent(sessionID, (event) => event.seq > slowMessage.seq && event.type === "run.started" && event.data?.user_message_id === slowMessage.data.message.id, "slow-accounting run", 12000);
+  const estimatedBudget = await waitEvent(sessionID, (event) => event.run_id === slowRun.run_id && event.type === "budget" && event.data?.estimated === true, "estimated slow-accounting budget", 12000);
   await browser.wait(`document.querySelector('.chat-budget-tip')?.innerText.includes('estimated')`, "estimated occupancy label");
-  const slowStop = await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > estimatedBudget.seq, "slow-accounting run stopped", 20000);
+  const slowStop = await waitEvent(sessionID, (event) => event.run_id === slowRun.run_id && event.type === "run.stopped" && event.seq > estimatedBudget.seq, "slow-accounting run stopped", 20000);
   assert.equal(slowStop.data.reason, "done");
-  events = await sessionEvents(sessionID);
   await waitProjectedChatText(sessionID, "Slow accounting recovered with an estimate.", "slow-accounting answer", 20000);
-  assert.ok(events.some((event) => event.type === "model.busy" && event.seq > beforeSlowAccounting));
-  assert.ok(events.some((event) => event.type === "budget" && event.seq > estimatedBudget.seq && event.data?.estimated === false));
+  events = await sessionEvents(sessionID);
+  await writeFile(join(args.evidence, "slow-accounting-events.json"), JSON.stringify({ trace: slowAccountingTrace, events: events.filter((event) => event.seq > beforeSlowAccounting).map((event) => ({ seq: event.seq, type: event.type, data: event.data })) }, null, 2));
+  assert.ok(events.some((event) => event.run_id === slowRun.run_id && event.type === "model.busy"));
+  assert.ok(events.some((event) => event.run_id === slowRun.run_id && event.type === "budget" && event.seq > estimatedBudget.seq && event.data?.estimated === false));
   record("long-run-slow-accounting");
 
   await stopFake();
@@ -1078,7 +1080,7 @@ if (realModel) {
   assert.equal(unreachableRows.flat_notices, 1, JSON.stringify(unreachableRows));
   await page.screenshot({ path: join(args.evidence, "unreachable-no-empty-folds.png") });
   record("model-unreachable-no-empty-fold-groups");
-  await browser.wait(`document.querySelector('.agent-tab[data-agent="agent_b"] .agent-tab-robot')?.classList.contains('offline')`, "offline agent eyes");
+  await browser.wait(`document.querySelector('.agent-tab-wrap.selected .agent-tab-robot')?.classList.contains('offline')`, "offline agent eyes");
   assert.equal(await page.locator("#chat-task").isEnabled(), true);
   assert.equal(await page.locator("#chat-send").isEnabled(), true);
   const unreachableText = await browserText("#chat-status-strip");
@@ -1090,7 +1092,7 @@ if (realModel) {
   await page.locator("#chat-retry-model").click();
   await waitProjectedChatText(sessionID, "Recovered after Retry.", "Retry recovery", 20000);
   await waitEvent(sessionID, (event) => event.type === "model.reachable", "model.reachable");
-  await browser.wait(`!document.querySelector('.agent-tab[data-agent="agent_b"] .agent-tab-robot')?.classList.contains('offline')`, "recovered agent eyes");
+  await browser.wait(`!document.querySelector('.agent-tab-wrap.selected .agent-tab-robot')?.classList.contains('offline')`, "recovered agent eyes");
   record("model-unreachable-retry-release");
 
   events = await sessionEvents(sessionID);
@@ -1136,7 +1138,6 @@ if (realModel) {
   record("compaction-keeps-model-prefix-stable");
 
   await page.locator(".agent-tab-new").click();
-  await page.locator("button.shell-new-choice").filter({ hasText: /^Default ·/ }).click();
   await browser.wait(`new URLSearchParams(location.search).get('session') && new URLSearchParams(location.search).get('session') !== ${JSON.stringify(sessionID)}`, "isolated grant chat selected");
   const scriptSessionID = await browser.evaluate(`new URLSearchParams(location.search).get('session')`);
   events = await sessionEvents(scriptSessionID);
@@ -1217,6 +1218,36 @@ if (realModel) {
   }
   assert.equal((await state()).sessions[sessionID], undefined, "confirmed trash control must remove the session registry entry");
   record("agent-menu-inline-delete-keeps-memory-default");
+  for (let index = 0; index < 10; index++) {
+    const before = await page.locator(".agent-tab-wrap[data-session]").count();
+    await page.locator(".agent-tab-wrap.selected .agent-tab-new").click();
+    await page.waitForFunction((count) => document.querySelectorAll(".agent-tab-wrap[data-session]").length === count + 1, before);
+  }
+  const tabOverflow = await page.evaluate(() => {
+    const strip = document.querySelector(".agent-tabs");
+    const widths = [...document.querySelectorAll(".agent-tab-wrap[data-session]")].map((item) => item.getBoundingClientRect().width);
+    return { count: widths.length, minimum: Math.min(...widths), scroll: strip.scrollWidth - strip.clientWidth, document: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+  });
+  assert.ok(tabOverflow.count >= 10, JSON.stringify(tabOverflow));
+  assert.ok(tabOverflow.minimum >= 118, JSON.stringify(tabOverflow));
+  assert.ok(tabOverflow.scroll > 0, JSON.stringify(tabOverflow));
+  assert.equal(tabOverflow.document, 0, JSON.stringify(tabOverflow));
+  record("per-chat-tabs-scroll-without-shrinking-or-page-overflow");
+  const retainedBeforeRestart = Object.keys((await state()).sessions).length;
+  app.kill();
+  await waitForChildExit(app, 5000);
+  app = spawn(join(args.app, "Agent_b.exe"), ["-config", join(args.data, "harness.json"), "-app-root", args.app, "-data-root", args.data], { windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
+  children.push(app);
+  app.stdout.on("data", (chunk) => process.stdout.write(chunk));
+  app.stderr.on("data", (chunk) => process.stderr.write(chunk));
+  await waitHTTP(`http://127.0.0.1:${appPort}/api/state`);
+  await page.reload();
+  await browser.wait(`document.querySelectorAll('.agent-tab-wrap[data-session]').length === ${retainedBeforeRestart}`, "retained tabs after application restart");
+  const restartedState = await state();
+  assert.equal(Object.keys(restartedState.sessions).length, retainedBeforeRestart);
+  assert.ok(restartedState.sessions[scriptSessionID]?.messages?.some((message) => message.content?.includes("acceptance: run-script grant")));
+  assert.ok((await readdir(join(args.data, "chats"))).filter((name) => name.endsWith(".jsonl")).length >= retainedBeforeRestart);
+  record("chats-transcripts-and-names-survive-application-restart");
   record("fake-model-script-complete");
   await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID, shell_flip: shellFlipEvidence, shell_style_boundary: shellStyleBoundaryEvidence }, null, 2));
   const evidenceLogs = join(evidenceRun, "jsonl");
