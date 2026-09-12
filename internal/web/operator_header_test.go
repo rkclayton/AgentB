@@ -20,7 +20,7 @@ func TestSharedShellIsServedOnAllThreePages(t *testing.T) {
 	server := New(&cfg, filepath.Join(root, "harness.json"), webDir, RuntimeRoots{Application: webDir, Data: root, Workspace: cfg.Workspace}, events.NewBus())
 
 	for _, item := range []struct{ path, page string }{
-		{"/", "console"}, {"/chat", "chat"}, {"/plan", "plan"},
+		{"/", "console"}, {"/chat", "console"}, {"/plan", "plan"},
 	} {
 		request := httptest.NewRequest(http.MethodGet, item.path, nil)
 		response := httptest.NewRecorder()

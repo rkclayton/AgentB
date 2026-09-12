@@ -99,7 +99,7 @@ try {
         throw 'Source launcher does not hide by default with -Console opt-in and durable failure logging.'
     }
     $indexSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\index.html')
-    $chatSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\chat.html')
+    $chatSource = $indexSource
     $planSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\plan.html')
     $shellSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\shell.js')
     if ($indexSource -match 'target=' -or $chatSource -match 'target=' -or $planSource -match 'target=') {
@@ -110,7 +110,6 @@ try {
     }
     foreach ($page in @(
         @{ Source = $indexSource; Name = 'console' },
-        @{ Source = $chatSource; Name = 'chat' },
         @{ Source = $planSource; Name = 'plan' }
     )) {
         if ($page.Source -notmatch ('id="app-shell"[^>]+data-page="' + $page.Name + '"')) {

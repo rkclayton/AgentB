@@ -123,7 +123,7 @@ func TestNavigationStartWritesWithoutCompletionAndDeduplicates(t *testing.T) {
 func TestDocumentRequestRecordsServerPhasesAndConnection(t *testing.T) {
 	root := t.TempDir()
 	webDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(webDir, "chat.html"), []byte("hello"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(webDir, "index.html"), []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	writers, err := events.NewWriters(filepath.Join(root, "logs"))

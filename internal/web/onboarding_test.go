@@ -15,7 +15,7 @@ import (
 
 func TestFirstRunRoutesToSetupAndSkipRemainsAvailable(t *testing.T) {
 	webDir := t.TempDir()
-	for name, body := range map[string]string{"index.html": "console", "chat.html": "chat", "setup.html": "setup"} {
+	for name, body := range map[string]string{"index.html": "workspace", "setup.html": "setup"} {
 		if err := os.WriteFile(filepath.Join(webDir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -37,7 +37,7 @@ func TestFirstRunRoutesToSetupAndSkipRemainsAvailable(t *testing.T) {
 	}
 	skipped := httptest.NewRecorder()
 	server.Handler().ServeHTTP(skipped, httptest.NewRequest(http.MethodGet, "/chat?setup=skip", nil))
-	if skipped.Code != http.StatusOK || strings.TrimSpace(skipped.Body.String()) != "chat" {
+	if skipped.Code != http.StatusOK || strings.TrimSpace(skipped.Body.String()) != "workspace" {
 		t.Fatalf("skip response=%d %q", skipped.Code, skipped.Body.String())
 	}
 }

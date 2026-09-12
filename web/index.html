@@ -7,10 +7,42 @@
   <link rel="icon" href="/static/assets/Agent_b.ico" type="image/x-icon">
   <link rel="manifest" href="/static/app.webmanifest">
   <link rel="stylesheet" href="/static/css/tokens.css">
-  <link rel="stylesheet" href="/static/css/app.css">
+  <link id="console-styles" rel="stylesheet" href="/static/css/app.css">
+  <link id="chat-styles" rel="stylesheet" href="/static/css/chat.css">
 </head>
-<body>
+<body data-page="console">
   <header id="app-shell" class="app-shell window-titlebar" data-page="console"></header>
+  <div id="chat-budget" class="chat-budget" aria-label="Context budget" hidden><span class="chat-budget-fill"></span><span class="chat-budget-tip"></span></div>
+  <main id="chat-log" class="chat-log" tabindex="0" aria-live="polite" hidden></main>
+  <footer id="chat-composer" class="chat-composer" hidden>
+    <div id="chat-pending-approval" class="pending-approval" hidden></div>
+    <div id="chat-status-strip" class="chat-status-strip">
+      <span id="chat-notice" class="chat-notice" role="status"></span>
+      <button id="chat-retry-model" class="chat-retry" type="button" hidden>Retry</button>
+    </div>
+    <div class="chat-composer-row">
+      <input id="chat-file-picker" type="file" multiple hidden>
+      <div id="chat-attachments" class="chat-pending-attachments" aria-live="polite"></div>
+      <div class="chat-input-wrap">
+        <textarea id="chat-task" rows="5" aria-label="Task"></textarea>
+        <button id="chat-expand" type="button" aria-label="Expand composer">↥</button>
+        <span class="chat-input-actions">
+          <span class="chat-attach-wrap">
+            <button id="chat-attach" class="chat-attach" type="button" aria-label="Attach">📎</button>
+            <span id="chat-attach-menu" class="chat-attach-menu" hidden>
+              <button id="chat-attach-browse" type="button">Browse…</button>
+              <button id="chat-attach-exchange" type="button">From attachments</button>
+              <span id="chat-exchange-files" class="chat-exchange-files"></span>
+            </span>
+          </span>
+          <span class="chat-submit-actions">
+            <button id="chat-stop" class="stop-sign" type="button" aria-label="Stop"><span aria-hidden="true"></span></button>
+            <button id="chat-send" type="button" aria-label="Send" title="Send · Enter sends · Shift+Enter newline">↵</button>
+          </span>
+        </span>
+      </div>
+    </div>
+  </footer>
   <main id="console-surface" class="console-surface">
     <section class="console-group console-agent-group" aria-labelledby="console-agent-title">
       <header class="panel-caption"><span id="console-agent-title">Agent</span><span>profile bindings and selected chat</span></header>
@@ -37,6 +69,6 @@
     </section>
   </main>
   <section id="settings-page" class="settings-page" aria-label="Settings" aria-hidden="true" hidden></section>
-  <script type="module" src="/static/js/app.js"></script>
+  <script type="module" src="/static/js/workspace.js"></script>
 </body>
 </html>

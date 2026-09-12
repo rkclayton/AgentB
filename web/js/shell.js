@@ -26,7 +26,7 @@ export function initShell(options = {}) {
 	installUIErrorRelay({ token: () => store.mutation_token, sessionID: () => store.active });
   const root = document.getElementById("app-shell");
   if (!root) return null;
-  const page = options.page || root.dataset.page || "console";
+  let page = options.page || root.dataset.page || "console";
   root.replaceChildren();
 
   const left = node("div", "shell-left");
@@ -55,8 +55,9 @@ export function initShell(options = {}) {
   settings.setAttribute("aria-label", "Settings");
   settings.title = "Settings";
   settings.addEventListener("click", () => {
+    if (page === "chat" && options.switchView) options.switchView("console");
     const closing = settings.getAttribute("aria-expanded") === "true";
-    beginNavigation({ kind: "settings", from: closing ? "settings" : page, to: closing ? page : "settings", fullDocument: page !== "console", chatID: store.active, mutationToken: store.mutation_token });
+    beginNavigation({ kind: "settings", from: closing ? "settings" : page, to: closing ? page : "settings", fullDocument: false, chatID: store.active, mutationToken: store.mutation_token });
   });
   right.append(pages, settings);
   root.append(left, right);
@@ -126,13 +127,14 @@ export function initShell(options = {}) {
         const current = store.selection.session_id;
         const owned = sessionsFor(agentID, false);
         const targetSession = owned.some((item) => item.id === current) ? current : owned[0]?.id || "";
-        const navigation = { kind: "flip", from: page, to: side === "chat" ? "console" : "chat", fullDocument: true, chatID: targetSession, mutationToken: store.mutation_token };
+        const navigation = { kind: "flip", from: page, to: side === "chat" ? "console" : "chat", fullDocument: !options.switchView, chatID: targetSession, mutationToken: store.mutation_token };
         setSelection(agentID, targetSession);
         const next = side === "chat" ? "console" : "chat";
         rememberAgentSide(agentID, next);
         const sessionID = store.selection.session_id;
         const suffix = sessionID ? `?session=${encodeURIComponent(sessionID)}` : "";
-        requestNavigation(navigation, next === "chat" ? `/chat${suffix}` : `/${suffix}`);
+        if (options.switchView) options.switchView(next, navigation);
+        else requestNavigation(navigation, next === "chat" ? `/chat${suffix}` : `/${suffix}`);
       };
       const menu = node("div", "shell-menu agent-chat-menu");
       menu.hidden = true;
@@ -356,7 +358,7 @@ export function initShell(options = {}) {
     const suffix = query.size ? `?${query}` : "";
     for (const link of pages.children) link.href = link.dataset.page === "console" ? `/${suffix}` : `/${link.dataset.page}${suffix}`;
     settings.href = `/${suffix}#settings/servers`;
-    if (page === "chat") history.replaceState(null, "", `/chat${suffix}`);
+    options.syncLocation?.(page);
   }
 
   subscribe((_state, event) => {
@@ -367,6 +369,11 @@ export function initShell(options = {}) {
   return {
     render,
     report,
+    setPage(next) {
+      page = next;
+      root.dataset.page = next;
+      render();
+    },
     newChat() {
       const menu = tabs.querySelector('.agent-tab-wrap[data-agent="agent_b"] .shell-menu');
       const tab = tabs.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab');

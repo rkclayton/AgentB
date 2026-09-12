@@ -596,7 +596,7 @@ func (s *Server) pageContent(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/setup" {
 		name = "setup.html"
 	} else if r.URL.Path == "/chat" {
-		name = "chat.html"
+		name = "index.html"
 	} else if r.URL.Path == "/plan" {
 		name = "plan.html"
 	} else if r.URL.Path != "/" {

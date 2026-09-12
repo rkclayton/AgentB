@@ -9,11 +9,11 @@ const plan = await readFile(new URL("./plan.js", import.meta.url), "utf8");
 const tokens = await readFile(new URL("../css/tokens.css", import.meta.url), "utf8");
 const appCSS = await readFile(new URL("../css/app.css", import.meta.url), "utf8");
 const chatCSS = await readFile(new URL("../css/chat.css", import.meta.url), "utf8");
-const pages = await Promise.all(["index.html", "chat.html", "plan.html"].map(async (name) => [name, await readFile(new URL(`../${name}`, import.meta.url), "utf8")]));
+const pages = await Promise.all(["index.html", "plan.html"].map(async (name) => [name, await readFile(new URL(`../${name}`, import.meta.url), "utf8")]));
 
 test("shared shell slot order is identical on Chat Console and Plan", () => {
   for (const [name, html] of pages) {
-    assert.match(html, new RegExp(`id="app-shell"[^>]+data-page="${name === "index.html" ? "console" : name.slice(0, -5)}"`));
+    assert.match(html, new RegExp(`id="app-shell"[^>]+data-page="${name === "index.html" ? "console" : "plan"}"`));
     assert.doesNotMatch(html, /id="(?:shell-stop|shell-state|shell-operator-status)"/);
   }
   assert.match(shell, /root\.append\(left, right\)/);
@@ -41,7 +41,7 @@ test("agent tabs are ordered and expose state through per-letter robot eyes", ()
   assert.match(tokens, /--agent-tab-width:92px/);
   assert.match(tokens, /\.agent-tab-wrap\{[^}]*flex:0 0 var\(--agent-tab-width\)/);
   assert.match(tokens, /\.agent-tab\{[^}]*flex:0 0 69px;[^}]*width:69px/);
-  assert.match(shell, /requestNavigation\(navigation, next === "chat" \? `\/chat\$\{suffix\}` : `\/\$\{suffix\}`\)/);
+  assert.match(shell, /if \(options\.switchView\) options\.switchView\(next, navigation\)/);
   assert.match(shell, /agentb\.side\.\$\{agentID\}/);
   assert.match(tokens, /\.agent-tab\.side-chat\{color:var\(--ink\)\}/);
   assert.match(tokens, /\.agent-tab\.side-console\{color:var\(--ink\)\}/);

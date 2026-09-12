@@ -1,5 +1,4 @@
 import { api, reduce, setSelection, store, subscribe } from "./bus.js";
-import { initShell } from "./shell.js";
 import { renderMarkdown } from "./markdown.js";
 import { operatorLogEntry } from "./operator-log.js";
 import { createThinkingRenderer } from "./reasoning.js";
@@ -45,6 +44,8 @@ let queuedAttachments = [];
 let composerExpanded = false;
 const attachmentQueues = new Map();
 let lastRender = 0;
+let mounted = false;
+let shell = null;
 const renderIntervalMS = 50;
 const thinkingRenderer = createThinkingRenderer({
   document,
@@ -77,12 +78,6 @@ jumpButton.onclick = () => {
   page = 0;
   renderLog(store.sessions[selectedID()]);
 };
-const shell = initShell({ page: "chat", reportError: (message) => {
-  localNotice = message;
-  localAlarm = true;
-  renderComposer(store.sessions[selectedID()]);
-} });
-
 subscribe((_state, event) => {
   if (event.type === "snapshot") {
     const open = newestOpenSessions();
@@ -95,6 +90,7 @@ subscribe((_state, event) => {
 });
 
 function schedule() {
+  if (!mounted) return;
   if (frame || renderTimer) return;
   const delay = Math.max(0, renderIntervalMS - (performance.now() - lastRender));
   renderTimer = setTimeout(() => {
@@ -108,11 +104,28 @@ function schedule() {
 }
 
 function render() {
+  if (!mounted) return;
   const session = store.sessions[selectedID()];
   renderBudget(session);
   renderLog(session);
   renderComposer(session);
   navigationSurfaceReady("chat", store);
+}
+
+export function mountChat(shellController) {
+  shell = shellController;
+  mounted = true;
+  schedule();
+}
+
+export function unmountChat() {
+  mounted = false;
+  if (frame) cancelAnimationFrame(frame);
+  if (renderTimer) clearTimeout(renderTimer);
+  frame = 0;
+  renderTimer = 0;
+  dragDepth = 0;
+  document.body.classList.remove("drop-target");
 }
 
 function newestOpenSessions() {
@@ -932,14 +945,14 @@ filePicker.addEventListener("change", () => {
   filePicker.value = "";
 });
 document.body.addEventListener("dragenter", (event) => {
-  if (!store.replay && event.dataTransfer?.types?.includes("Files")) {
+  if (mounted && !store.replay && event.dataTransfer?.types?.includes("Files")) {
     event.preventDefault();
     dragDepth++;
     document.body.classList.add("drop-target");
   }
 });
 document.body.addEventListener("dragover", (event) => {
-  if (!store.replay && event.dataTransfer?.types?.includes("Files")) event.preventDefault();
+  if (mounted && !store.replay && event.dataTransfer?.types?.includes("Files")) event.preventDefault();
 });
 document.body.addEventListener("dragleave", () => {
   dragDepth = Math.max(0, dragDepth - 1);
@@ -948,7 +961,7 @@ document.body.addEventListener("dragleave", () => {
 document.body.addEventListener("drop", (event) => {
   dragDepth = 0;
   document.body.classList.remove("drop-target");
-  if (!store.replay && event.dataTransfer?.files?.length) {
+  if (mounted && !store.replay && event.dataTransfer?.files?.length) {
     event.preventDefault();
     void queueFiles([...event.dataTransfer.files]);
   }
@@ -978,6 +991,7 @@ log.addEventListener("scroll", () => {
   follow = log.scrollHeight - log.clientHeight - log.scrollTop <= 24;
 });
 document.addEventListener("keydown", (event) => {
+  if (!mounted) return;
   if (event.ctrlKey && event.key === ".") {
     event.preventDefault();
     document.getElementById("shell-stop")?.click();

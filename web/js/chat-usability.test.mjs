@@ -4,7 +4,7 @@ import test from "node:test";
 
 const chat = await readFile(new URL("./chat.js", import.meta.url), "utf8");
 const css = await readFile(new URL("../css/chat.css", import.meta.url), "utf8");
-const html = await readFile(new URL("../chat.html", import.meta.url), "utf8");
+const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const shell = await readFile(new URL("./shell.js", import.meta.url), "utf8");
 const tokens = await readFile(new URL("../css/tokens.css", import.meta.url), "utf8");
 const settings = await readFile(new URL("./settings.js", import.meta.url), "utf8");
@@ -89,7 +89,7 @@ test("No-agent and blank Plan wells are explicit and Console links to active too
 });
 
 test("New chat uses the in-tab plus and history uses the agent right-click menu", () => {
-  assert.match(html, /id="app-shell"[^>]+data-page="chat"/);
+  assert.match(html, /id="app-shell"[^>]+data-page="console"/);
   assert.match(shell, /button\("\+", `New chat with \$\{agentID\}`, "agent-tab-new"\)/);
   assert.match(shell, /oncontextmenu/);
   assert.match(shell, /agent-chat-rename/);

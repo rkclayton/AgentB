@@ -1,11 +1,9 @@
 import { api, reduce, setActive, store, subscribe } from "./bus.js";
-import { initShell } from "./shell.js";
 import { renderRail } from "./rail.js";
 import { renderFlow } from "./flow.js";
 import { renderRack } from "./rack.js";
 import { renderState } from "./state.js";
 import { renderTimeline } from "./timeline.js";
-import { initSettings } from "./settings.js";
 import { createMessageDropController } from "./message-drop.js";
 import { createApprovalCard } from "./approval.js";
 import { agentKey, lifetimeRows, ratio } from "./console-lifetime.js";
@@ -17,6 +15,7 @@ let initialSession = requestedSession;
 let selectedAgent = "";
 let ledger = null;
 let renderFrame = 0;
+let mounted = false;
 const liveContent = document.getElementById("console-live-content");
 const liveEmpty = document.getElementById("console-live-empty");
 const dropLastMessage = document.getElementById("drop-last-message");
@@ -27,8 +26,6 @@ const agentServerCancel = document.getElementById("console-agent-server-cancel")
 const feedback = document.getElementById("console-feedback");
 const consoleStop = document.getElementById("console-stop");
 
-initShell({ page: "console", reportError: showError });
-initSettings();
 const dropControl = createMessageDropController(dropLastMessage, {
   session: () => store.sessions[store.active], interactive: () => !store.replay,
   confirmDrop: (message) => window.confirm(message),
@@ -62,19 +59,22 @@ subscribe((_state, event) => {
     if (!liveContent.hidden) scheduleFlowRender();
     return;
   }
-  if (["snapshot", "config.changed"].includes(event.type) || (event.type === "projection.patch" && patchEndedRun(event.data))) void refreshLedger(false);
+  if (mounted && (["snapshot", "config.changed"].includes(event.type) || (event.type === "projection.patch" && patchEndedRun(event.data)))) void refreshLedger(false);
   scheduleRender();
 });
 
 function scheduleRender() {
+  if (!mounted) return;
   if (!renderFrame) renderFrame = requestAnimationFrame(renderConsole);
 }
 let flowFrame = 0;
 function scheduleFlowRender() {
+  if (!mounted) return;
   if (flowFrame) return;
   flowFrame = requestAnimationFrame(() => { flowFrame = 0; renderFlow(); });
 }
 setInterval(() => {
+  if (!mounted) return;
   const session = store.sessions[store.active];
   if (!liveContent.hidden && session?.run?.status === "running" && session.activity?.stage === "call_model") scheduleFlowRender();
 }, 1000);
@@ -88,6 +88,7 @@ async function refreshLedger(render = true) {
 
 function renderConsole() {
   renderFrame = 0;
+  if (!mounted) return;
   const agents = store.config.agents || [];
   if (!agents.some((agent) => agentKey(agent) === selectedAgent)) selectedAgent = agentKey(agents[0]);
   agentSelect.replaceChildren(...agents.map((agent) => option(agentKey(agent), agent.name, agentKey(agent) === selectedAgent)));
@@ -106,6 +107,20 @@ function renderConsole() {
     renderRail(); renderFlow(); renderRack(); renderState(); renderTimeline(); placeDropLastMessage(); dropControl.render(); renderPendingApproval(session);
   }
   navigationSurfaceReady("console", store);
+}
+
+export function mountConsole() {
+  mounted = true;
+  void refreshLedger(false);
+  scheduleRender();
+}
+
+export function unmountConsole() {
+  mounted = false;
+  if (renderFrame) cancelAnimationFrame(renderFrame);
+  if (flowFrame) cancelAnimationFrame(flowFrame);
+  renderFrame = 0;
+  flowFrame = 0;
 }
 
 function renderAgentServer(agent) {

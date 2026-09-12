@@ -21,6 +21,7 @@ const operatorReconciler = createOperatorReconciler({
   applyIdentity: (identity) => reduce({ type: "shell.identity", data: identity }),
 });
 export function subscribe(fn) { listeners.add(fn); fn(store, { type: "init" }); return () => listeners.delete(fn); }
+export function subscriberCount() { return listeners.size; }
 function notify(event) { for (const fn of listeners) fn(store, event); }
 
 // Session state is server-authored. This client applies versioned projection
