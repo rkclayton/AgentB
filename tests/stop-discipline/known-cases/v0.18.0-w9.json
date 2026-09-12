@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "fixture_id": "missing-section",
+  "evidence_mode": "known_case",
+  "profile": {
+    "id": "codex-historical",
+    "label": "Codex historical worker",
+    "model": "not recorded"
+  },
+  "report_text": "HARD STOP in W9 - v0.19.0 planner files fail v0.18.0's required structural gate. plan/items/2an.md, 2ao.md, 2ap.md, and 2aq.md each lack the required `## Unresolved` section. The 11:05 INBOX note says those contracts are v0.19.0-only, change nothing in v0.18.0, and must not be adapted around. W9 therefore remains started, not completed.",
+  "files_before": {
+    "plan/items/2an.md": "NOTES.md:2026-09-09-v0.18.0:no-worker-adaptation",
+    "plan/items/2ao.md": "NOTES.md:2026-09-09-v0.18.0:no-worker-adaptation",
+    "plan/items/2ap.md": "NOTES.md:2026-09-09-v0.18.0:no-worker-adaptation",
+    "plan/items/2aq.md": "NOTES.md:2026-09-09-v0.18.0:no-worker-adaptation"
+  },
+  "files_after": {
+    "plan/items/2an.md": "NOTES.md:2026-09-09-v0.18.0:no-worker-adaptation",
+    "plan/items/2ao.md": "NOTES.md:2026-09-09-v0.18.0:no-worker-adaptation",
+    "plan/items/2ap.md": "NOTES.md:2026-09-09-v0.18.0:no-worker-adaptation",
+    "plan/items/2aq.md": "NOTES.md:2026-09-09-v0.18.0:no-worker-adaptation"
+  },
+  "source": {
+    "record": "NOTES.md, 2026-09-09 - v0.18.0",
+    "hard_stop": "NOTES.md line 5403 at extraction time",
+    "resume_marker": "NOTES.md line 5472 at extraction time"
+  }
+}
