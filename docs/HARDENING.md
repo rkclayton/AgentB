@@ -8,6 +8,12 @@ For a deliberate temporary capability override, Settings → Security offers **R
 
 The installer uses a same-user UAC prompt to write the application under Program Files and refuses over-the-shoulder elevation by another administrator. The installed Agent_b process itself must still start normally from Explorer with a UAC-filtered token. Agent_b refuses to run from **Run as administrator** or an elevated terminal, before it reads configuration or opens its listener. Later Windows elevation is reserved for the narrowly scoped account and hardening helpers. Passwords are write-only, encrypted with user-scoped DPAPI, and never placed in process arguments, responses, or logs.
 
+## Recover an absent production baseline
+
+An absent listener is not automatically a crash and an empty event query is not proof of a clean shutdown. Before any recovery start, preserve and inspect `%LOCALAPPDATA%\Agent_b\logs\launcher-errors.log`, the newest `installer-*.log`, and Application Error / Windows Error Reporting events naming `Agent_b.exe`. Installer transcripts explicitly record `STOPPING` and `STOPPED`; foreground launcher failures record their nonzero exit, while detached launcher stderr is not durable.
+
+If any source positively reports abnormal termination, stop and diagnose it. Otherwise a routine but unexplained absence permits one start through the installed `Agent_b.cmd` launcher. Verify the new PID and the build reported by `/api/state`. If that process exits or never becomes ready, preserve its exit code and diagnostics and stop—never start it again automatically. Even when the one start succeeds, keep the prior absence classified as unexplained unless positive evidence identified its cause. This procedure never permits stopping a running instance and never applies to alpha.
+
 ## 1. Configure the model first
 
 For an installed copy, open **Agent_b** from Start. For a source checkout, double-click `start-Agent_b.cmd`. In Settings → Connections, configure and test the model endpoint, then select the ready profile for the session. Host protection accepts only a numeric address inside `127.0.0.0/8`, `100.64.0.0/10`, or IPv6 loopback because every other destination will be blocked for the service identity.

@@ -23,6 +23,12 @@
 - Alpha shares the service account and host firewall rule with production. Do not create a second set, and treat any change touching them as affecting both.
 - Alpha is deployed by the operator from a chosen commit. Its state is not evidence about `origin/main`.
 
+## Absent production baseline recovery
+- If production is absent at W0, preserve and inspect diagnostics before starting anything: `launcher-errors.log`, the newest installer transcript, and Application Error / Windows Error Reporting events for `Agent_b.exe`. Detached launcher stderr is not persisted and absence of an event is not proof of a clean stop.
+- Positive abnormal-termination evidence is a hard stop. A completed installer transcript with `STOPPING` / `STOPPED` identifies an installer-initiated stop. If no source explains the absence and no source contradicts a routine stop, record it as unexplained and permit exactly one start through the normal installed launcher.
+- After that one start, verify the actual process, build identity, and `/api/state`. If it exits again or never becomes ready, capture its exit code and available diagnostics, report, and stop; never start it a second time. A successful start does not explain the earlier absence.
+- This recovery never authorizes stopping or restarting a running production process, touching alpha, bypassing UAC, or weakening any other hard stop.
+
 ## Do not lose NOTES.md
 - Never delete, move, rename, truncate, or overwrite `NOTES.md`. It is gitignored, so git holds no copy and any loss is permanent.
 - Append new prompt sections. Never rewrite existing ones.
