@@ -790,7 +790,8 @@ function renderComposer(session) {
     const row = document.createElement("span");
     row.className = "chat-pending-file";
     const label = document.createElement("span");
-    label.textContent = `${file.path.split("/").pop()} · ${format(file.bytes)} B${file.reused ? " · reused" : ""}`;
+    const sidecar = file.sidecar ? ` · ${file.tier === "ocr" ? "OCR" : "extracted"}: ${file.sidecar.split("/").pop()}` : "";
+    label.textContent = `${file.path.split("/").pop()} · ${format(file.bytes)} B${file.reused ? " · reused" : ""}${sidecar}`;
     row.append(label);
     const warning = attachmentReadability(session, store.servers, file);
     if (warning) {

@@ -7,7 +7,7 @@ import { chromium } from "playwright";
 
 const argv = process.argv.slice(2);
 const args = Object.fromEntries(Array.from({ length: Math.floor(argv.length / 2) }, (_, index) => [argv[index * 2].replace(/^--/, ""), argv[index * 2 + 1]]));
-for (const name of ["baseline-exe", "baseline-root", "candidate-exe", "candidate-root", "data", "evidence", "candidate-commit"]) assert.ok(args[name], `missing --${name}`);
+for (const name of ["baseline-exe", "baseline-root", "baseline-commit", "candidate-exe", "candidate-root", "data", "evidence", "candidate-commit"]) assert.ok(args[name], `missing --${name}`);
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 async function freePort() {
@@ -66,8 +66,8 @@ async function capture(name, exe, appRoot, expected) {
 }
 
 await mkdir(resolve(args.evidence), { recursive: true });
-const baseline = await capture("before-v0280", args["baseline-exe"], args["baseline-root"], "d8f34df52c4731076834bf99134c486d8675d5bb");
-const candidate = await capture("after-v0290", args["candidate-exe"], args["candidate-root"], args["candidate-commit"]);
+const baseline = await capture("baseline", args["baseline-exe"], args["baseline-root"], args["baseline-commit"]);
+const candidate = await capture("candidate", args["candidate-exe"], args["candidate-root"], args["candidate-commit"]);
 const output = { schema: 1, measured_at: new Date().toISOString(), baseline, candidate };
 await writeFile(resolve(args.evidence, "captures.json"), JSON.stringify(output, null, 2));
 process.stdout.write(`${JSON.stringify(output, null, 2)}\n`);

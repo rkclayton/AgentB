@@ -979,20 +979,32 @@ if (realModel) {
   record("operator-attachments-paperclip-source");
   record("attachment-screen-jsonl");
 
-  await page.locator("#chat-task").evaluate((node) => {
+  await page.locator("#chat-task").evaluate(async (node) => {
     const clipboard = new DataTransfer();
-    clipboard.items.add(new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "pasted-unreadable.png", { type: "image/png" }));
+    const canvas = document.createElement("canvas");
+    canvas.width = 900;
+    canvas.height = 220;
+    const context = canvas.getContext("2d");
+    context.fillStyle = "white";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "black";
+    context.font = "32px Consolas";
+    context.fillText("AgentB OCR acceptance", 40, 80);
+    context.fillText("ERROR 42 sample stack trace", 40, 140);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    clipboard.items.add(new File([blob], "pasted-ocr.png", { type: "image/png" }));
     node.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: clipboard }));
   });
-  const unreadableAttachment = page.locator(".chat-pending-file").filter({ hasText: "pasted-unreadable.png" });
-  await unreadableAttachment.waitFor({ state: "visible" });
-  assert.match(await unreadableAttachment.innerText(), /This profile cannot read images · probe found no image input/);
-  await page.screenshot({ path: join(baselineDirectory, "chat-unreadable-attachment-before-send.png") });
-  await setTask("acceptance: attachment unreadable");
-  await waitProjectedChatText(sessionID, "Attachment received and rendered.", "unreadable attachment answer");
-  const unreadableMessage = await waitEvent(sessionID, (event) => event.type === "message.appended" && event.data.message?.attachments?.some((item) => item.path.endsWith("pasted-unreadable.png")), "unreadable attachment retained in JSONL");
-  assert.equal(unreadableMessage.data.message.attachments.length, 1);
-  record("pasted-unreadable-attachment-marked-before-send-and-retained");
+  const ocrAttachment = page.locator(".chat-pending-file").filter({ hasText: "pasted-ocr.png" });
+  await ocrAttachment.waitFor({ state: "visible" });
+  assert.match(await ocrAttachment.innerText(), /OCR: pasted-ocr\.png\.txt/);
+  assert.doesNotMatch(await ocrAttachment.innerText(), /cannot read images/);
+  await page.screenshot({ path: join(baselineDirectory, "chat-ocr-sidecar-before-send.png") });
+  await setTask("acceptance: attachment OCR");
+  await waitProjectedChatText(sessionID, "Attachment received and rendered.", "OCR attachment answer");
+  const ocrMessage = await waitEvent(sessionID, (event) => event.type === "message.appended" && event.data.message?.attachments?.some((item) => item.path.endsWith("pasted-ocr.png")), "OCR attachment retained in JSONL");
+  assert.equal(ocrMessage.data.message.attachments.length, 1);
+  record("pasted-image-ocr-sidecar-before-send-and-retained");
 
   const beforeReload = (await browserText("#chat-log")).slice(0, 120);
   await page.reload();
