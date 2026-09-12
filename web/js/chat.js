@@ -10,8 +10,9 @@ import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, 
 import { attachmentReadability } from "./attachment-readability.js";
 import { agentAuthor, isRunning, openSessions } from "./chat-lifecycle.js";
 import { renderStopState } from "./stop-state.js";
-import { groupResponseRows, hasVisibleChatContent, itemFailed, responseBlocks, responseSummary } from "./chat-response-groups.js";
+import { groupResponseRows, hasVisibleChatContent, isIdenticalSingleStepFold, itemFailed, responseBlocks, responseSummary } from "./chat-response-groups.js";
 import { navigationSurfaceReady } from "./navigation-telemetry.js";
+import { liveActivityText, showsStreamCaret } from "./chat-activity.js";
 
 const budget = document.getElementById("chat-budget");
 const log = document.getElementById("chat-log");
@@ -337,10 +338,13 @@ function renderResponse(session, entry) {
   const totals = responseSummary(entry.items);
   const active = isRunning(session) && entry.items.some((item) => item?.run_id && item.run_id === session.run?.run_id);
   const blocks = responseBlocks(entry.items);
+  const singleIdenticalFold = isIdenticalSingleStepFold(entry.items, blocks);
   view.stepKeys = blocks.filter((block) => block.steps.length).map((block) => block.key);
   const open = active || (view.stepKeys.length > 0 && view.stepKeys.every((key) => expanded.has(key)));
+  view.summary.hidden = singleIdenticalFold;
   setAttribute(view.summary, "aria-expanded", String(open));
-  setText(view.summary, `${open ? "▾" : "▸"} ${responseSummaryText(totals, entry.items.length)}`);
+  setText(view.summary, `${open ? "▾" : "▸"} Response · ${responseSummaryText(totals, entry.items.length)}`);
+  view.row.classList.toggle("single-step-response", singleIdenticalFold);
   view.row.classList.toggle("alarm", totals.failed > 0);
   const usedBlocks = new Set(blocks.map((block) => block.key));
   reconcileChildren(view.rows, blocks.map((block) => renderResponseBlock(session, view, block, active)));
@@ -374,7 +378,7 @@ function renderResponseProse(view, item) {
   if (view.proseText !== item.text) renderMarkdown(view.answer, item.text);
   view.proseText = item.text;
   const nodes = [view.answer];
-  if (!item.done) {
+  if (showsStreamCaret(item)) {
     if (!view.proseCaret) {
       view.proseCaret = document.createElement("span");
       view.proseCaret.className = "stream-caret";
@@ -404,7 +408,7 @@ function renderResponseStepFold(session, view, block, active) {
   const open = active || expanded.has(block.key);
   view.fold.classList.toggle("alarm", totals.failed > 0);
   setAttribute(view.head, "aria-expanded", String(open));
-  setText(view.head, `${open ? "▾" : "▸"} ${responseSummaryText(totals, block.steps.length)}`);
+  setText(view.head, `${open ? "▾" : "▸"} Steps · ${responseSummaryText(totals, block.steps.length)}`);
   const usedItems = new Set(block.steps.map((item, index) => item?.key || `invalid:${index}`));
   const nodes = [];
   if (open) {
@@ -517,7 +521,7 @@ function renderResponseItem(session, view, item, key, forceToolOpen = false) {
         itemView.answerText = item.text;
         stepNodes.push(itemView.answer);
       }
-      if (!item.done) {
+      if (showsStreamCaret(item)) {
         if (!itemView.caret) {
           itemView.caret = document.createElement("span");
           itemView.caret.className = "stream-caret";
@@ -783,7 +787,11 @@ function renderComposer(session) {
   const busy = session?.model_busy;
   const operatorUntil = store.shell_identity?.operator_context ? `operator mode · until ${shortTime(store.shell_identity.operator_context_expires_at)}` : "";
   const queueText = queued ? `queued (${queued})${unreachable ? " · waiting for model" : ""}` : "";
-  const message = [localNotice || (session && !session.runnable ? session.not_runnable_reason : unreachable ? `model unreachable · ${unreachable.host || "model"}` : busy ? `model busy · ${busy.host || "model"}` : state), queueText, operatorUntil].filter(Boolean).join(" · ");
+  const activity = liveActivityText(session);
+  const unavailable = unreachable ? `model unreachable · ${unreachable.host || "model"}` : "";
+  const occupied = busy ? `model busy · ${busy.host || "model"}` : "";
+  const primary = session && !session.runnable ? session.not_runnable_reason : activity || unavailable || occupied || state;
+  const message = [localNotice || primary, activity && unavailable ? unavailable : "", activity && occupied ? occupied : "", queueText, operatorUntil].filter(Boolean).join(" · ");
   notice.textContent = message;
   notice.className = `chat-notice ${localAlarm || unreachable || (session && !session.runnable) ? "alarm" : ""}`;
 	pendingFiles.replaceChildren(...queuedAttachments.map((file) => {

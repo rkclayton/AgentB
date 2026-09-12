@@ -35,7 +35,7 @@ test("thinking renderer preserves its DOM and never opens to an empty body", () 
     expanded,
     rerender: () => {},
     format: String,
-    formatDuration: () => "1.2",
+    formatDuration: (value) => value === undefined || value === null ? "" : "1.2",
   });
   const active = { key: "turn:r1:1", reasoning: "", done: false, thinkingMS: null };
 
@@ -59,7 +59,12 @@ test("thinking renderer preserves its DOM and never opens to an empty body", () 
   const completed = renderer.render({ ...active, reasoning: "streamed thought", done: true, thinkingMS: 1200 }, 4);
   renderer.end();
   assert.equal(completed, first);
-  assert.equal(completed.children[0].children[2].textContent, "Thought 1.2 seconds (4 tokens)");
+  assert.equal(completed.children[0].children[2].textContent, "Thought 1.2 (4 tokens)");
+
+  renderer.begin();
+  const noDuration = renderer.render({ ...active, reasoning: "streamed thought", done: true, thinkingMS: null }, 4);
+  renderer.end();
+  assert.equal(noDuration.children[0].children[2].textContent, "Thought (4 tokens)");
 
   renderer.begin();
   const unavailable = renderer.render({ ...active, done: true, thinkingMS: 1200 }, 4);

@@ -72,6 +72,11 @@ export function responseSummary(items = []) {
   return { tools, thoughts, answers, failed, duration };
 }
 
+export function isIdenticalSingleStepFold(items = [], blocks = []) {
+  if (blocks.length !== 1 || blocks[0].prose || blocks[0].steps.length !== items.length) return false;
+  return blocks[0].steps.every((item, index) => item === items[index] || item?.key === items[index]?.key);
+}
+
 export function itemFailed(item) {
   return item?.type === "tool" && item.result?.ok === false;
 }

@@ -121,6 +121,14 @@ const fakeHandler = async (request, response) => {
     }
     return stream(response, { content: "Menu stream completed." });
   }
+  if (user.includes("acceptance: live tool")) {
+    if (!hasToolAfterLatestUser(body)) {
+      await sleep(300);
+      const tool = { index: 0, id: "live-slow-shell", type: "function", function: { name: "shell", arguments: JSON.stringify({ command: "Start-Sleep -Milliseconds 3000; Write-Output slow-tool-complete" }) } };
+      return stream(response, { tool_calls: [tool] }, "tool_calls");
+    }
+    return stream(response, { content: "LIVE TOOL COMPLETE" });
+  }
   if (user.includes("acceptance: run-script grant")) {
     const count = toolCountAfterLatestUser(body);
     if (count === 0) return stream(response, { tool_calls: [{ index: 0, id: "grant-script-powershell", type: "function", function: { name: "run_script", arguments: JSON.stringify({ language: "powershell", source: "Write-Output first-granted-script" }) } }] }, "tool_calls");
@@ -344,11 +352,13 @@ if (realModel) {
   const partialProse = await browser.evaluate(`(() => ({
     text: document.querySelector('.chat-response-prose')?.innerText || '',
     turnExpanded: document.querySelector('.chat-response-summary')?.getAttribute('aria-expanded'),
-    caret: document.querySelector('.chat-response-prose .stream-caret')?.isConnected || false
+    caret: document.querySelector('.chat-response-prose .stream-caret')?.isConnected || false,
+    status: document.querySelector('#chat-notice')?.innerText || ''
   }))()`);
   assert.match(partialProse.text, /VISIBLE PARTIAL/);
   assert.equal(partialProse.turnExpanded, "true");
   assert.equal(partialProse.caret, true);
+  assert.match(partialProse.status, /^model producing(?: ·|$)/);
   await waitProjectedChatText(sessionID, "VISIBLE PARTIAL COMPLETE", "completed prose stream");
   record("mid-stream-prose-visible-without-expansion");
 
@@ -523,7 +533,7 @@ if (realModel) {
   await page.locator("#chat-send").click();
   const lifecycleRunStarted = await waitEvent(sessionID, (event) => event.type === "run.started", "tool-tick lifecycle run started");
   await waitProjectedChatText(sessionID, "menu-stream-0", "first projected lifecycle tool");
-  const lifecycleTurn = page.locator(".chat-response-summary").last();
+  const lifecycleTurn = page.locator(".chat-step-summary").last();
   await lifecycleTurn.waitFor({ state: "visible" });
   if (await lifecycleTurn.getAttribute("aria-expanded") !== "true") await lifecycleTurn.click();
   const completedTurnSummary = page.locator(".chat-response-summary").first();
@@ -906,6 +916,18 @@ if (realModel) {
   assert.ok(speakerHeads.agent > 0 && speakerHeads.user === 0, JSON.stringify(speakerHeads));
   record("bind-run-as-you-tool-answer-72px-robot-rail");
 
+  const beforeLiveTool = (await sessionEvents(sessionID)).at(-1)?.seq || 0;
+  await setTask("acceptance: live tool");
+  await waitEvent(sessionID, (event) => event.seq > beforeLiveTool && event.type === "tool.call" && event.data?.name === "shell", "slow live shell call");
+  await waitEvent(sessionID, (event) => event.seq > beforeLiveTool && event.type === "stage" && event.data?.stage === "execute" && event.data?.state === "enter", "slow live shell execute stage");
+  await sleep(200);
+  const liveToolState = await browser.evaluate(`({ status: document.querySelector('#chat-notice')?.innerText || '', carets: document.querySelectorAll('.stream-caret').length, text: document.querySelector('#chat-log')?.innerText || '' })`);
+  assert.match(liveToolState.status, /^tool executing · shell(?: ·|$)/);
+  assert.equal(liveToolState.carets, 0, JSON.stringify(liveToolState));
+  await page.screenshot({ path: join(baselineDirectory, "chat-live-tool.png") });
+  await waitProjectedChatText(sessionID, "LIVE TOOL COMPLETE", "live-tool final answer");
+  record("live-stage-slow-tool-and-stream-caret-lifecycle");
+
   await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
   await browser.wait(`location.pathname==='/' && document.querySelector('#settings-page') && document.querySelector('.shell-settings')?.getAttribute('href')`, "Console settings control");
   await page.locator(".shell-settings").click();
@@ -1064,10 +1086,12 @@ if (realModel) {
   await browser.wait(`!document.querySelector('.agent-tab[data-agent="agent_b"] .agent-tab-robot')?.classList.contains('offline')`, "recovered agent eyes");
   record("model-unreachable-retry-release");
 
+  events = await sessionEvents(sessionID);
+  const beforeBusy = events.at(-1)?.seq || 0;
   await setTask("acceptance: busy");
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('model busy')`, "busy strip", 6000);
   events = await sessionEvents(sessionID);
-  const busyEvent = events.findLast((event) => event.type === "model.busy");
+  const busyEvent = events.findLast((event) => event.seq > beforeBusy && event.type === "model.busy");
   assert.ok(busyEvent);
   assert.equal(events.slice(events.indexOf(busyEvent)).some((event) => event.type === "run.stopped"), false);
   releaseBusy?.();

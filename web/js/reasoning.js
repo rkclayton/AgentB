@@ -63,7 +63,8 @@ function updateView(view, entry, tokens, options) {
   view.summary.hidden = !entry.done;
   if (entry.done) {
     const duration = options.formatDuration(entry.thinkingMS);
-    setText(view.summary, `Thought ${entry.thinkingEstimated && duration ? "~" : ""}${duration || "—"} seconds (${entry.reasoningTokensEstimated || entry.thinkingEstimated ? "~" : ""}${options.format(tokens)} tokens)`);
+    const elapsed = duration ? ` ${entry.thinkingEstimated ? "~" : ""}${duration}` : "";
+    setText(view.summary, `Thought${elapsed} (${entry.reasoningTokensEstimated || entry.thinkingEstimated ? "~" : ""}${options.format(tokens)} tokens)`);
   }
   view.body.hidden = !open;
   view.collapse.hidden = !open;

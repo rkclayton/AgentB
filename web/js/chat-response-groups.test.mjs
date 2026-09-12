@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { groupResponseRows, hasVisibleChatContent, isThinThought, responseBlocks, responseSummary, thinThoughtTokenLimit } from "./chat-response-groups.js";
+import { groupResponseRows, hasVisibleChatContent, isIdenticalSingleStepFold, isThinThought, responseBlocks, responseSummary, thinThoughtTokenLimit } from "./chat-response-groups.js";
 
 const tool = (key, name, ok = true, ms = 1) => ({ type: "tool", key, name, args: {}, result: { ok, ms } });
 const thought = (key, tokens, text = "") => ({ type: "agent", key, reasoning: "x", reasoningTokens: tokens, text, done: true, thinkingMS: 2 });
@@ -58,10 +58,23 @@ test("response blocks keep prose visible and assign only their following steps",
 });
 
 test("tool-only responses create no empty prose region", () => {
-  const blocks = responseBlocks([tool("only", "recall")]);
+  const items = [tool("only", "recall")];
+  const blocks = responseBlocks(items);
   assert.equal(blocks.length, 1);
   assert.equal(blocks[0].prose, null);
   assert.deepEqual(blocks[0].steps.map((item) => item.key), ["only"]);
+  assert.equal(isIdenticalSingleStepFold(items, blocks), true);
+});
+
+test("distinct response and step record sets keep both folds", () => {
+  const items = [
+    { type: "agent", key: "answer", text: "progress", reasoning: "why", reasoningTokens: 5, done: true },
+    tool("after", "read_file"),
+  ];
+  const blocks = responseBlocks(items);
+  assert.equal(isIdenticalSingleStepFold(items, blocks), false);
+  assert.deepEqual(responseSummary(items), { tools: 1, thoughts: 1, answers: 1, failed: 0, duration: 1 });
+  assert.deepEqual(responseSummary(blocks[0].steps), { tools: 1, thoughts: 1, answers: 0, failed: 0, duration: 1 });
 });
 
 test("only completed agent entries with no content are omitted from Chat", () => {
