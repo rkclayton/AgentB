@@ -56,14 +56,14 @@ function createView(document, key, expanded, rerender) {
 
 function updateView(view, entry, tokens, options) {
   const open = options.expanded.has(entry.key);
-  view.button.className = `thinking-line ${entry.done ? "thought-line" : "thinking-active"}`;
-  view.button.setAttribute("aria-expanded", String(open));
-  view.caret.textContent = open ? "▾" : "▸";
+  setAttribute(view.button, "class", `thinking-line ${entry.done ? "thought-line" : "thinking-active"}`);
+  setAttribute(view.button, "aria-expanded", String(open));
+  setText(view.caret, open ? "▾" : "▸");
   view.active.hidden = entry.done;
   view.summary.hidden = !entry.done;
   if (entry.done) {
     const duration = options.formatDuration(entry.thinkingMS);
-    view.summary.textContent = `Thought ${entry.thinkingEstimated && duration ? "~" : ""}${duration || "—"} seconds (${entry.reasoningTokensEstimated || entry.thinkingEstimated ? "~" : ""}${options.format(tokens)} tokens)`;
+    setText(view.summary, `Thought ${entry.thinkingEstimated && duration ? "~" : ""}${duration || "—"} seconds (${entry.reasoningTokensEstimated || entry.thinkingEstimated ? "~" : ""}${options.format(tokens)} tokens)`);
   }
   view.body.hidden = !open;
   view.collapse.hidden = !open;
@@ -71,4 +71,12 @@ function updateView(view, entry, tokens, options) {
     ? "Reasoning text is unavailable in this recording."
     : "Waiting for reasoning text…");
   if (view.body.textContent !== body) view.body.textContent = body;
+}
+
+function setText(node, value) {
+  if (node.textContent !== value) node.textContent = value;
+}
+
+function setAttribute(node, name, value) {
+  if (node.getAttribute(name) !== value) node.setAttribute(name, value);
 }

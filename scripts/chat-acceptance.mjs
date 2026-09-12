@@ -231,6 +231,8 @@ await mkdir(bound, { recursive: true });
 spawnSync("git.exe", ["init", "--quiet", bound], { stdio: "inherit" });
 const attachment = join(args.workspace, "acceptance-attachment.txt");
 await writeFile(attachment, "attachment acceptance bytes\n");
+await mkdir(join(args.workspace, "reports"), { recursive: true });
+await writeFile(join(args.workspace, "reports", "final.txt"), "delivered file\n");
 await mkdir(join(args.data, "attachments"), { recursive: true });
 await writeFile(join(args.data, "attachments", "phone-note.txt"), "operator attachment bytes\n");
 await writeFile(join(bound, "AGENTS.md"), "Use the acceptance rules.\n");
@@ -524,6 +526,12 @@ if (realModel) {
   const lifecycleTurn = page.locator(".chat-response-summary").last();
   await lifecycleTurn.waitFor({ state: "visible" });
   if (await lifecycleTurn.getAttribute("aria-expanded") !== "true") await lifecycleTurn.click();
+  const completedTurnSummary = page.locator(".chat-response-summary").first();
+  await completedTurnSummary.evaluate((node) => {
+    node.__agentbMutationCount = 0;
+    node.__agentbMutationObserver = new MutationObserver((records) => { node.__agentbMutationCount += records.length; });
+    node.__agentbMutationObserver.observe(node, { attributes: true, childList: true, characterData: true, subtree: true });
+  });
   assert.equal(await page.locator(".chat-tool-group-head").count(), 0, "active responses must not regroup live tool nodes");
   await page.locator("button.tool-tick").first().waitFor({ state: "visible" });
   const toolButton = page.locator("button.tool-tick").first();
@@ -532,10 +540,17 @@ if (realModel) {
   const toolButtonHandle = await toolButton.elementHandle();
   assert.ok(toolButtonHandle, "tool-tick must have an actionable node");
   assert.equal(await toolButtonHandle.evaluate((node) => node.matches(":hover")), true, "tool-tick must be hovered before the event stream advances");
+  await toolButtonHandle.evaluate((node) => {
+    node.__agentbMutationCount = 0;
+    node.__agentbMutationObserver = new MutationObserver((records) => { node.__agentbMutationCount += records.length; });
+    node.__agentbMutationObserver.observe(node, { attributes: true, childList: true, characterData: true, subtree: true });
+  });
   await page.waitForTimeout(250);
   const toolButtonAfterBeat = await toolButtonHandle.evaluate((node) => ({ attached: node.isConnected, hovered: node.matches(":hover") }));
   assert.equal(toolButtonAfterBeat.attached, true, "tool-tick node changed during the active event stream");
   assert.equal(toolButtonAfterBeat.hovered, true, "tool-tick lost :hover during the active event stream");
+  assert.equal(await completedTurnSummary.evaluate((node) => node.__agentbMutationCount), 0, "completed collapsed response mutated during the active event stream");
+  assert.equal(await toolButtonHandle.evaluate((node) => node.__agentbMutationCount), 0, "expanded tool button mutated during the active event stream");
   await toolButtonHandle.click();
   assert.equal(await toolButtonHandle.getAttribute("aria-expanded"), "true", "tool-tick did not expand from a trusted mid-stream click");
   const toolRoot = page.locator("button.tool-tick").first().locator("..");
@@ -690,6 +705,81 @@ if (realModel) {
   record("three-level-chat-fold-adjacent-thin-failure-complete");
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('TWO COMPLETE FAILURE')`, "grouping fixture restored");
+
+  const twoArrowFixture = await browser.evaluate(`(async () => {
+    const bus = await import('/static/js/bus.js');
+    const session = bus.store.sessions[${JSON.stringify(sessionID)}];
+    session.run = { ...session.run, status: 'idle' };
+    session.chat = [
+      { type: 'user', key: 'arrows:user', text: 'two independent sections' },
+      { type: 'tool', key: 'arrows:read', name: 'read_file', args: { path: 'one.txt' }, content: 'one', result: { ok: true } },
+      { type: 'tool', key: 'arrows:shell', name: 'shell', args: { command: 'echo two' }, content: 'two', result: { ok: true } }
+    ];
+    bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
+    await new Promise(resolve => setTimeout(resolve, 120));
+    document.querySelector('.chat-response-summary')?.click();
+    await new Promise(resolve => setTimeout(resolve, 80));
+    document.querySelectorAll('.tool-tick').forEach(node => node.click());
+    await new Promise(resolve => setTimeout(resolve, 80));
+    const nodes = [...document.querySelectorAll('button.collapse-arrow')].filter(node => !node.hidden);
+    return {
+      arrows: nodes.map(node => ({
+        arrow: node.getBoundingClientRect().toJSON(),
+        section: node.parentElement.getBoundingClientRect().toJSON(),
+        position: getComputedStyle(node).position,
+        opacity: getComputedStyle(node).opacity
+      })),
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    };
+  })()`);
+  assert.equal(twoArrowFixture.arrows.length, 2, JSON.stringify(twoArrowFixture));
+  for (const band of twoArrowFixture.arrows) {
+    assert.equal(band.position, "sticky");
+    assert.equal(band.opacity, "0.35");
+    assert.ok(band.arrow.top >= band.section.top && band.arrow.bottom <= band.section.bottom, `collapse arrow escaped its section band: ${JSON.stringify(band)}`);
+  }
+  assert.equal(twoArrowFixture.horizontalOverflow, false);
+  await page.screenshot({ path: join(baselineDirectory, "chat-two-expanded-arrows.png") });
+  record("two-expanded-sections-two-bounded-arrows");
+  await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
+  await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('two independent sections')`, "two-arrow fixture restored");
+
+  const deliveredChip = await browser.evaluate(`(async () => {
+    const bus = await import('/static/js/bus.js');
+    const session = bus.store.sessions[${JSON.stringify(sessionID)}];
+    session.run = { ...session.run, status: 'idle' };
+    session.chat = [
+      { type: 'user', key: 'chip:user', text: 'show delivered file' },
+      { type: 'agent', key: 'chip:agent', run_id: 'chip-run', text: 'DELIVERY READY', toolCallIDs: ['chip-write'], done: true },
+      { type: 'tool', key: 'chip:tool', callID: 'chip-write', name: 'write_file', args: { path: 'reports/final.txt' }, result: { ok: true, file: { path: 'reports/final.txt', bytes: 15 } } }
+    ];
+    bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
+    await new Promise(resolve => setTimeout(resolve, 120));
+    document.querySelector('.chat-response-summary')?.click();
+    await new Promise(resolve => setTimeout(resolve, 120));
+    for (let attempt = 0; attempt < 50 && !document.querySelector('.file-chip a'); attempt++) await new Promise(resolve => setTimeout(resolve, 50));
+    const chip = document.querySelector('.file-chip');
+    return {
+      text: chip?.innerText || '',
+      links: chip?.querySelectorAll('a').length || 0,
+      buttons: chip?.querySelectorAll('button').length || 0,
+      downloadLinks: chip?.querySelectorAll('a[download]').length || 0,
+      linkText: chip?.querySelector('a')?.innerText || '',
+      gap: chip ? getComputedStyle(chip).gap : '',
+      horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
+    };
+  })()`);
+  assert.match(deliveredChip.text, /final\.txt/);
+  assert.equal(deliveredChip.links, 1);
+  assert.equal(deliveredChip.buttons, 0);
+  assert.equal(deliveredChip.downloadLinks, 0);
+  assert.equal(deliveredChip.linkText, "folder");
+  assert.equal(deliveredChip.gap, "8px");
+  assert.equal(deliveredChip.horizontalOverflow, false);
+  await page.screenshot({ path: join(baselineDirectory, "chat-delivered-folder-link.png") });
+  record("delivered-file-chip-folder-link-only");
+  await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
+  await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('DELIVERY READY')`, "delivery fixture restored");
 
   const proseBlocksFixture = await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
@@ -888,6 +978,21 @@ if (realModel) {
   await waitEvent(sessionID, (event) => event.type === "message.appended" && event.data.message?.attachments?.length === 1, "attachment JSONL");
   record("operator-attachments-paperclip-source");
   record("attachment-screen-jsonl");
+
+  await page.locator("#chat-task").evaluate((node) => {
+    const clipboard = new DataTransfer();
+    clipboard.items.add(new File([new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10])], "pasted-unreadable.png", { type: "image/png" }));
+    node.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: clipboard }));
+  });
+  const unreadableAttachment = page.locator(".chat-pending-file").filter({ hasText: "pasted-unreadable.png" });
+  await unreadableAttachment.waitFor({ state: "visible" });
+  assert.match(await unreadableAttachment.innerText(), /This profile cannot read images · probe found no image input/);
+  await page.screenshot({ path: join(baselineDirectory, "chat-unreadable-attachment-before-send.png") });
+  await setTask("acceptance: attachment unreadable");
+  await waitProjectedChatText(sessionID, "Attachment received and rendered.", "unreadable attachment answer");
+  const unreadableMessage = await waitEvent(sessionID, (event) => event.type === "message.appended" && event.data.message?.attachments?.some((item) => item.path.endsWith("pasted-unreadable.png")), "unreadable attachment retained in JSONL");
+  assert.equal(unreadableMessage.data.message.attachments.length, 1);
+  record("pasted-unreadable-attachment-marked-before-send-and-retained");
 
   const beforeReload = (await browserText("#chat-log")).slice(0, 120);
   await page.reload();

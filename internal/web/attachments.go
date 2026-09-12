@@ -24,6 +24,7 @@ import (
 
 type attachmentResponse struct {
 	events.Attachment
+	Kind    attachmentfile.Kind `json:"kind"`
 	Reused  bool   `json:"reused,omitempty"`
 	Tier    string `json:"tier,omitempty"`
 	Sidecar string `json:"sidecar,omitempty"`
@@ -117,6 +118,7 @@ func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error(), "file")
 		return
 	}
+	result.Kind = kind
 	reuseNote := result.Note
 	result.Tier, result.Note, result.Sidecar, err = s.extractAttachment(r.Context(), *profile, resolved, result.Path, kind, maxBytes)
 	if err != nil {

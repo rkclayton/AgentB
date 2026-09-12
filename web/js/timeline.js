@@ -369,7 +369,6 @@ function timelineAttachmentChip(session, attachment) {
     });
   }
   return createFileChip(document, attachment, state, {
-    downloadURL: fileURL(session.id, attachment.path),
     openFolder: () => api("/api/open-folder", { session_id: session.id, path: attachment.path, scope: "workspace" }),
   });
 }

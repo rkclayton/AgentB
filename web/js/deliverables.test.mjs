@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { createFileChip, fileURL, filesFromResponse, probeFile } from "./deliverables.js";
+import { createFileChip, filesFromResponse, probeFile } from "./deliverables.js";
 
 class FakeNode {
   constructor(tagName) {
@@ -29,12 +29,12 @@ test("file chips derive only successful writes from a canned projected response"
     { path: "reports/final.txt", bytes: 1536, callID: "write", runID: "r7", openScope: "workspace", openPath: "reports/final.txt" },
     { path: "legacy.md", bytes: null, callID: "edit", runID: "r7", openScope: "workspace", openPath: "legacy.md" },
   ]);
-  const chip = createFileChip(document, files[0], { state: "ready", bytes: 1536 }, { downloadURL: fileURL("main", files[0].path), openFolder() {} });
+  const chip = createFileChip(document, files[0], { state: "ready", bytes: 1536 }, { openFolder() {} });
   assert.equal(chip.children[0].textContent, "final.txt");
   assert.equal(chip.children[1].textContent, "1.5 KiB");
-  assert.equal(chip.children[2].textContent, "download");
-  assert.equal(chip.children[3].textContent, "open folder");
-  assert.equal(chip.children[2].href, "/api/files/reports/final.txt?session=main");
+  assert.equal(chip.children[2].tagName, "a");
+  assert.equal(chip.children[2].textContent, "folder");
+  assert.equal(chip.children.some((child) => child.textContent === "download" || child.textContent === "open folder"), false);
 });
 
 test("both mode points open-folder at the durable exchange copy", () => {
@@ -50,12 +50,12 @@ test("both mode points open-folder at the durable exchange copy", () => {
 
 test("a replay file absent from the workspace renders missing", async () => {
   const status = await probeFile("/api/files/gone.txt?session=main", async () => ({ ok: false, headers: new Map() }));
-  const chip = createFileChip(document, { path: "gone.txt", bytes: 12 }, status, { downloadURL: "unused", openFolder() {} });
+  const chip = createFileChip(document, { path: "gone.txt", bytes: 12 }, status, { openFolder() {} });
   assert.deepEqual(status, { state: "missing", bytes: null });
   assert.equal(chip.className, "file-chip missing");
   assert.equal(chip.children[1].textContent, "missing");
   assert.equal(chip.children.some((child) => child.textContent === "download"), false);
-  assert.equal(chip.children.at(-1).disabled, true);
+  assert.equal(chip.children.some((child) => child.textContent === "folder"), false);
 });
 
 test("a malformed write entry cannot abort deliverable discovery for its neighbors", () => {

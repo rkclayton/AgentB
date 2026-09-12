@@ -26,6 +26,9 @@ func TestAttachmentsCollisionNumericSuffixAndSHA256Dedupe(t *testing.T) {
 	if first.Path != "attachments/report.txt" || second.Path != "attachments/report (2).txt" {
 		t.Fatalf("collision paths: first=%q second=%q", first.Path, second.Path)
 	}
+	if first.Kind != "text" || second.Kind != "text" || reused.Kind != "text" {
+		t.Fatalf("classification missing from upload response: first=%q second=%q reused=%q", first.Kind, second.Kind, reused.Kind)
+	}
 	if reused.Path != second.Path || !reused.Reused || !strings.Contains(reused.Note, "identical attachment reused") {
 		t.Fatalf("dedupe=%+v", reused)
 	}

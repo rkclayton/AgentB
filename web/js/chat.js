@@ -7,6 +7,7 @@ import { createFileChip, fileURL, filesFromResponse, probeFile } from "./deliver
 import { createApprovalCard } from "./approval.js";
 import { callServiceKey, callServiceStatus } from "./call-service-display.js";
 import { attachmentChipFile, attachmentMetadata, exchangeFiles, exchangeUpload, uploadAttachment } from "./attachment-upload.js";
+import { attachmentReadability } from "./attachment-readability.js";
 import { agentAuthor, isRunning, openSessions } from "./chat-lifecycle.js";
 import { renderStopState } from "./stop-state.js";
 import { groupResponseRows, hasVisibleChatContent, itemFailed, responseBlocks, responseSummary } from "./chat-response-groups.js";
@@ -332,14 +333,14 @@ function renderResponse(session, entry) {
     entryViews.set(entry.key, view);
   }
   usedEntryViews.add(entry.key);
-  view.author.lastElementChild.textContent = agentAuthor(session);
+  setText(view.author.lastElementChild, agentAuthor(session));
   const totals = responseSummary(entry.items);
   const active = isRunning(session) && entry.items.some((item) => item?.run_id && item.run_id === session.run?.run_id);
   const blocks = responseBlocks(entry.items);
   view.stepKeys = blocks.filter((block) => block.steps.length).map((block) => block.key);
   const open = active || (view.stepKeys.length > 0 && view.stepKeys.every((key) => expanded.has(key)));
-  view.summary.setAttribute("aria-expanded", String(open));
-  view.summary.textContent = `${open ? "▾" : "▸"} ${responseSummaryText(totals, entry.items.length)}`;
+  setAttribute(view.summary, "aria-expanded", String(open));
+  setText(view.summary, `${open ? "▾" : "▸"} ${responseSummaryText(totals, entry.items.length)}`);
   view.row.classList.toggle("alarm", totals.failed > 0);
   const usedBlocks = new Set(blocks.map((block) => block.key));
   reconcileChildren(view.rows, blocks.map((block) => renderResponseBlock(session, view, block, active)));
@@ -402,8 +403,8 @@ function renderResponseStepFold(session, view, block, active) {
   const totals = responseSummary(block.steps);
   const open = active || expanded.has(block.key);
   view.fold.classList.toggle("alarm", totals.failed > 0);
-  view.head.setAttribute("aria-expanded", String(open));
-  view.head.textContent = `${open ? "▾" : "▸"} ${responseSummaryText(totals, block.steps.length)}`;
+  setAttribute(view.head, "aria-expanded", String(open));
+  setText(view.head, `${open ? "▾" : "▸"} ${responseSummaryText(totals, block.steps.length)}`);
   const usedItems = new Set(block.steps.map((item, index) => item?.key || `invalid:${index}`));
   const nodes = [];
   if (open) {
@@ -471,8 +472,8 @@ function renderResponseToolGroup(session, view, group) {
   if (group.failed) parts.push(`${group.failed} failed`);
   if (group.duration) parts.push(formatDuration(group.duration));
   groupView.root.classList.toggle("alarm", group.failed > 0);
-  groupView.head.setAttribute("aria-expanded", String(open));
-  groupView.head.textContent = `${open ? "▾" : "▸"} ${parts.join(" · ")}`;
+  setAttribute(groupView.head, "aria-expanded", String(open));
+  setText(groupView.head, `${open ? "▾" : "▸"} ${parts.join(" · ")}`);
   const children = open ? group.items.map((item, index) => {
     try {
       if (item?.type === "agent" && item.reasoning) expanded.add(item.key);
@@ -593,7 +594,6 @@ function renderFileChip(session, file) {
   let view = fileViews.get(key);
   if (view?.fingerprint === fingerprint) return view.node;
   const node = createFileChip(document, file, state, {
-    downloadURL: fileURL(session.id, file.path),
     openFolder: async () => {
       try {
         await api("/api/open-folder", { session_id: session.id, path: file.openPath, scope: file.openScope });
@@ -654,12 +654,12 @@ function toolTick(entry, forceOpen = false) {
     toolViews.set(entry.key, view);
   }
   const open = forceOpen || expanded.has(entry.key);
-  view.button.setAttribute("aria-expanded", String(open));
+  setAttribute(view.button, "aria-expanded", String(open));
   const state = entry.result && typeof entry.result.ok === "boolean" ? (entry.result.ok ? "ok" : "error") : "";
   setText(view.button.children[0], `${open ? "▾" : "▸"} ${entry.name}`);
   setText(view.button.children[1], keyArgument(entry.args));
   setText(view.button.children[2], callServiceStatus(entry.name, entry.result) || state);
-  view.button.children[2].className = `tool-state ${state === "error" ? "error" : ""}`;
+  setAttribute(view.button.children[2], "class", `tool-state ${state === "error" ? "error" : ""}`);
   setText(view.button.children[3], formatDuration(entry.result?.ms));
   if (open) {
     if (!view.pre.textContent || view.args !== entry.args || view.result !== entry.result || view.content !== entry.content) {
@@ -679,6 +679,10 @@ function toolTick(entry, forceOpen = false) {
 
 function setText(node, value) {
   if (node.textContent !== value) node.textContent = value;
+}
+
+function setAttribute(node, name, value) {
+  if (node.getAttribute(name) !== value) node.setAttribute(name, value);
 }
 
 function formatThoughtSeconds(milliseconds) {
@@ -785,7 +789,16 @@ function renderComposer(session) {
 	pendingFiles.replaceChildren(...queuedAttachments.map((file) => {
     const row = document.createElement("span");
     row.className = "chat-pending-file";
-    row.textContent = `${file.path.split("/").pop()} · ${format(file.bytes)} B${file.reused ? " · reused" : ""}`;
+    const label = document.createElement("span");
+    label.textContent = `${file.path.split("/").pop()} · ${format(file.bytes)} B${file.reused ? " · reused" : ""}`;
+    row.append(label);
+    const warning = attachmentReadability(session, store.servers, file);
+    if (warning) {
+      const reason = document.createElement("span");
+      reason.className = "chat-attachment-warning";
+      reason.textContent = warning;
+      row.append(reason);
+    }
     return row;
 	}));
 	pendingApproval.hidden = !(session?.pending_approval || session?.pending_repo_policy || session?.pending_bind);

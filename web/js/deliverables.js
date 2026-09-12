@@ -81,18 +81,15 @@ export function createFileChip(document, file, status, actions) {
   size.textContent = status?.state === "missing" ? "missing" : formatBytes(status?.bytes ?? file.bytes);
   root.append(name, size);
   if (status?.state !== "missing") {
-    const download = document.createElement("a");
-    download.textContent = "download";
-    download.href = actions.downloadURL;
-    download.download = name.textContent;
-    root.append(download);
+    const folder = document.createElement("a");
+    folder.textContent = "folder";
+    folder.href = "#";
+    folder.onclick = (event) => {
+      event.preventDefault();
+      return actions.openFolder();
+    };
+    root.append(folder);
   }
-  const open = document.createElement("button");
-  open.type = "button";
-  open.textContent = "open folder";
-  open.disabled = status?.state === "missing";
-  open.onclick = actions.openFolder;
-  root.append(open);
   return root;
 }
 
