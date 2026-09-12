@@ -267,6 +267,8 @@ function profileFields(profile, reason) {
 	return `<div class="profile-fieldset profile-identity"><h4>Connection</h4>${text(`${p}.label`, "label", profile.label)}
     ${text(`${p}.base_url`, "base_url", profile.base_url)}
 	${text(`${p}.extract_url`, "extract_url", profile.extract_url || "")}
+	${choices(`${p}.attachment_handling`, "attachment handling", ["auto", "native", "extract"], profile.attachment_handling || "auto")}
+	<p class="settings-note">auto follows probed capability; native always sends supported attachment kinds; extract keeps their binary local</p>
     ${text(`${p}.model`, "model", profile.model)}
 	${text(`${p}.credential`, "credential ref", profile.credential || "")}
     ${secret(`${p}.api_key`, "api_key", profile.api_key, id)}

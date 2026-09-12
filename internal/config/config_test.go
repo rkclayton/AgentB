@@ -35,6 +35,25 @@ func writeConfigFixture(t *testing.T, path, mode string, stamped bool) {
 	}
 }
 
+func TestAttachmentHandlingDefaultsAndValidation(t *testing.T) {
+	cfg := Defaults(t.TempDir())
+	if cfg.Servers[0].AttachmentHandling != "auto" {
+		t.Fatalf("attachment handling=%q", cfg.Servers[0].AttachmentHandling)
+	}
+	for _, value := range []string{"auto", "native", "extract"} {
+		candidate := cfg
+		candidate.Servers = append([]Profile(nil), cfg.Servers...)
+		candidate.Servers[0].AttachmentHandling = value
+		if err := candidate.Validate(); err != nil {
+			t.Fatalf("%s: %v", value, err)
+		}
+	}
+	cfg.Servers[0].AttachmentHandling = "surprise"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "attachment_handling") {
+		t.Fatalf("invalid attachment handling: %v", err)
+	}
+}
+
 func TestLoadCreatesConfigFromExample(t *testing.T) {
 	dir := t.TempDir()
 	examplePath := filepath.Join(dir, "harness.example.json")

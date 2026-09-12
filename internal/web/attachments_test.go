@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 
 	"harness/internal/config"
 	"harness/internal/events"
+	"harness/internal/ocr"
 	"harness/internal/session"
 )
 
@@ -106,6 +108,57 @@ func TestAttachmentsPDFExtractionEndpointStoresUntrustedSidecar(t *testing.T) {
 	text, err := os.ReadFile(filepath.Join(workspace, "attachments", "paper.pdf.txt"))
 	if err != nil || !strings.Contains(string(text), "untrusted: true") || !strings.Contains(string(text), "extracted PDF text") {
 		t.Fatalf("sidecar=%q, %v", text, err)
+	}
+}
+
+func TestAttachmentsImageOCRCreatesLabeledSidecar(t *testing.T) {
+	server, workspace := attachmentTestServer(t, nil)
+	server.ocrExtract = func(string) (string, error) { return "AgentB OCR words", nil }
+	result := postAttachment(t, server, "screen.png", []byte("image bytes"))
+	if result.Tier != "ocr" || result.Sidecar != "attachments/screen.png.txt" || !strings.Contains(result.Note, "layout not preserved") {
+		t.Fatalf("result=%+v", result)
+	}
+	text, err := os.ReadFile(filepath.Join(workspace, "attachments", "screen.png.txt"))
+	if err != nil || !strings.Contains(string(text), "UNTRUSTED ATTACHMENT OCR") || !strings.Contains(string(text), "layout was not preserved") || !strings.Contains(string(text), "AgentB OCR words") {
+		t.Fatalf("sidecar=%q, %v", text, err)
+	}
+}
+
+func TestAttachmentsImageOCRNoTextIsNotSuccessfulExtraction(t *testing.T) {
+	server, workspace := attachmentTestServer(t, nil)
+	server.ocrExtract = func(string) (string, error) { return "", ocr.ErrNoText }
+	result := postAttachment(t, server, "scene.png", []byte("image bytes"))
+	if result.Tier != "binary" || result.Sidecar != "" || !strings.Contains(result.Note, "OCR found no text") {
+		t.Fatalf("result=%+v", result)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, "attachments", "scene.png.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("unexpected sidecar: %v", err)
+	}
+}
+
+func TestAttachmentHandlingRoutesImageAgainstProbe(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		handling   string
+		capability bool
+		wantTier   string
+	}{
+		{"auto text-only extracts", "auto", false, "ocr"},
+		{"auto vision stays native", "auto", true, "native"},
+		{"native overrides absent capability", "native", false, "native"},
+		{"extract overrides present capability", "extract", true, "ocr"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			server, _ := attachmentTestServer(t, func(cfg *config.Config) {
+				cfg.Servers[0].AttachmentHandling = test.handling
+				cfg.Servers[0].Capabilities.ImageInput = test.capability
+			})
+			server.ocrExtract = func(string) (string, error) { return "words", nil }
+			result := postAttachment(t, server, "screen.png", []byte("image bytes"))
+			if result.Tier != test.wantTier {
+				t.Fatalf("tier=%q, want %q; result=%+v", result.Tier, test.wantTier, result)
+			}
+		})
 	}
 }
 

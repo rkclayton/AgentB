@@ -38,6 +38,46 @@ func TestAttachmentRequestKeepsStoredTextAndNativeBytesOutOfDiagnosticBody(t *te
 	}
 }
 
+func TestAttachmentNativeOverrideSendsImageWhenProbeSaysAbsent(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workspace, "attachments"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "attachments", "pixel.png"), []byte("PNG-BYTES"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile := config.Defaults(workspace).Servers[0]
+	profile.Capabilities.ImageInput = false
+	profile.AttachmentHandling = "native"
+	message := events.Message{Role: "user", Attachments: []events.Attachment{{Path: "attachments/pixel.png", Bytes: 9}}}
+	converted := requestMessage(&profile, &session.Session{Workspace: workspace}, message)
+	parts, ok := converted.Content.([]any)
+	if !ok || len(parts) != 2 {
+		t.Fatalf("native override did not send image: %#v", converted.Content)
+	}
+}
+
+func TestAttachmentExtractOverrideNeverSendsImageWhenProbeSaysPresent(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.Mkdir(filepath.Join(workspace, "attachments"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "attachments", "pixel.png.txt"), []byte("OCR"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	profile := config.Defaults(workspace).Servers[0]
+	profile.Capabilities.ImageInput = true
+	profile.AttachmentHandling = "extract"
+	message := events.Message{Role: "user", Attachments: []events.Attachment{{Path: "attachments/pixel.png", Bytes: 9}}}
+	converted := requestMessage(&profile, &session.Session{Workspace: workspace}, message)
+	if _, ok := converted.Content.([]any); ok {
+		t.Fatalf("extract override sent native content: %#v", converted.Content)
+	}
+	if text, ok := converted.Content.(string); !ok || !strings.Contains(text, "OCR text") {
+		t.Fatalf("extracted content=%#v", converted.Content)
+	}
+}
+
 func TestAttachmentHarnessLinesNameSidecarAndBinaryTier(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workspace, "attachments"), 0o700); err != nil {
@@ -70,11 +110,14 @@ func TestAttachmentsDoNotChangeSystemPromptBytes(t *testing.T) {
 }
 
 func TestReadOfExtractedPDFSidecarIsUntrusted(t *testing.T) {
-	s := &session.Session{Messages: []events.Message{{Attachments: []events.Attachment{{Path: "attachments/paper.pdf"}}}}}
+	s := &session.Session{Messages: []events.Message{{Attachments: []events.Attachment{{Path: "attachments/paper.pdf"}, {Path: "attachments/screen.png"}}}}}
 	if !untrustedAttachmentRead(s, map[string]any{"path": "attachments/paper.pdf.txt"}) {
 		t.Fatal("PDF extraction sidecar was not classified untrusted")
 	}
 	if untrustedAttachmentRead(s, map[string]any{"path": "attachments/paper.docx.txt"}) {
 		t.Fatal("local Office extraction was classified as external")
+	}
+	if !untrustedAttachmentRead(s, map[string]any{"path": "attachments/screen.png.txt"}) {
+		t.Fatal("OCR sidecar was not classified untrusted")
 	}
 }

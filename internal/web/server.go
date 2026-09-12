@@ -24,6 +24,7 @@ import (
 	"harness/internal/events"
 	"harness/internal/hardening"
 	"harness/internal/memory"
+	"harness/internal/ocr"
 	"harness/internal/operatorfiles"
 	"harness/internal/probe"
 	"harness/internal/projection"
@@ -72,6 +73,7 @@ type Server struct {
 	operatorAfter    func(time.Duration, func()) operatorTimer
 	openFolder       func(string) error
 	extractClient    *http.Client
+	ocrExtract       func(string) (string, error)
 	detectLocal      func(context.Context, string) (any, error)
 	workspaceState   *workspaceinfo.Manager
 	memoryState      *memory.Manager
@@ -122,6 +124,7 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 		navigationIDs: map[string]time.Time{},
 		agentServers:  map[string]pendingAgentServer{},
 		extractClient: &http.Client{},
+		ocrExtract:    ocr.Extract,
 		detectLocal: func(ctx context.Context, account string) (any, error) {
 			return detection.Local(ctx, filepath.Join(roots.Application, "scripts", "detect-local-capabilities.ps1"), account)
 		},

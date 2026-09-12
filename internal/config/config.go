@@ -84,6 +84,7 @@ type Profile struct {
 	Label                string       `json:"label"`
 	BaseURL              string       `json:"base_url"`
 	ExtractURL           string       `json:"extract_url"`
+	AttachmentHandling   string       `json:"attachment_handling"`
 	Model                string       `json:"model"`
 	Credential           string       `json:"credential"`
 	APIKey               string       `json:"api_key,omitempty"`
@@ -108,8 +109,9 @@ type Service struct {
 
 func defaultProfile() Profile {
 	return Profile{
-		RequestTimeoutS: 900,
-		ProbeMode:       "full",
+		RequestTimeoutS:    900,
+		ProbeMode:          "full",
+		AttachmentHandling: "auto",
 		Sampling: SamplingPair{
 			Thinking:    Sampling{Temperature: .6, TopP: .95, TopK: 20, RepeatPenalty: 1},
 			Nonthinking: Sampling{Temperature: .7, TopP: .8, TopK: 20, PresencePenalty: 1.5, RepeatPenalty: 1},
@@ -119,6 +121,14 @@ func defaultProfile() Profile {
 		Capabilities: Capabilities{ValidEfforts: []string{}, Findings: []string{}},
 		initialized:  true,
 	}
+}
+
+func (p Profile) NativeImageInput() bool {
+	return p.AttachmentHandling == "native" || (p.AttachmentHandling == "auto" && p.Capabilities.ImageInput)
+}
+
+func (p Profile) NativeDocumentInput() bool {
+	return p.AttachmentHandling == "native" || (p.AttachmentHandling == "auto" && p.Capabilities.DocumentInput)
 }
 
 func (p *Profile) UnmarshalJSON(data []byte) error {
@@ -557,6 +567,9 @@ func (c Config) Validate() error {
 		}
 		if p.ProbeMode != "full" && p.ProbeMode != "minimal" && p.ProbeMode != "off" {
 			return fmt.Errorf("%s.probe_mode: invalid", prefix)
+		}
+		if !oneOf(p.AttachmentHandling, "auto", "native", "extract") {
+			return fmt.Errorf("%s.attachment_handling: invalid", prefix)
 		}
 		if p.RequestTimeoutS < 1 {
 			return fmt.Errorf("%s.request_timeout_s: must be positive", prefix)

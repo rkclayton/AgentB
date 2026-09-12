@@ -29,9 +29,11 @@ func renderedUserText(profile *config.Profile, s *session.Session, message event
 			lines = append(lines, fmt.Sprintf("attached: %s (%d bytes) — extracted text: %s — read it with read_file", item.Path, item.Bytes, sidecar))
 		case kind == attachmentfile.PDF && hasSidecar:
 			lines = append(lines, fmt.Sprintf("attached: %s (%d bytes) — extracted text: %s (untrusted:true) — read it with read_file", item.Path, item.Bytes, sidecar))
-		case kind == attachmentfile.PDF && profile.Capabilities.DocumentInput:
+		case kind == attachmentfile.Image && hasSidecar:
+			lines = append(lines, fmt.Sprintf("attached: %s (%d bytes) — OCR text: %s (untrusted:true; layout not preserved) — read it with read_file", item.Path, item.Bytes, sidecar))
+		case kind == attachmentfile.PDF && profile.NativeDocumentInput():
 			lines = append(lines, fmt.Sprintf("attached: %s (%d bytes) — read it with read_file", item.Path, item.Bytes))
-		case kind == attachmentfile.Image && profile.Capabilities.ImageInput:
+		case kind == attachmentfile.Image && profile.NativeImageInput():
 			lines = append(lines, fmt.Sprintf("attached: %s (%d bytes) — read it with read_file", item.Path, item.Bytes))
 		case kind == attachmentfile.Text:
 			lines = append(lines, fmt.Sprintf("attached: %s (%d bytes) — read it with read_file", item.Path, item.Bytes))
@@ -47,7 +49,7 @@ func requestMessage(profile *config.Profile, s *session.Session, message events.
 	parts := []any{}
 	for _, item := range message.Attachments {
 		kind := attachmentfile.Classify(item.Path)
-		if (kind != attachmentfile.PDF || !profile.Capabilities.DocumentInput) && (kind != attachmentfile.Image || !profile.Capabilities.ImageInput) {
+		if (kind != attachmentfile.PDF || !profile.NativeDocumentInput()) && (kind != attachmentfile.Image || !profile.NativeImageInput()) {
 			continue
 		}
 		resolved, err := tools.Resolve(s.Workspace, item.Path)
@@ -92,7 +94,8 @@ func untrustedAttachmentRead(s *session.Session, args map[string]any) bool {
 	path = strings.ToLower(filepath.ToSlash(filepath.Clean(filepath.FromSlash(path))))
 	for _, message := range s.MessagesCopy() {
 		for _, item := range message.Attachments {
-			if attachmentfile.Classify(item.Path) == attachmentfile.PDF && path == strings.ToLower(attachmentfile.SidecarPath(item.Path)) {
+			kind := attachmentfile.Classify(item.Path)
+			if (kind == attachmentfile.PDF || kind == attachmentfile.Image) && path == strings.ToLower(attachmentfile.SidecarPath(item.Path)) {
 				return true
 			}
 		}
