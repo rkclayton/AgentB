@@ -58,6 +58,9 @@ func TestLoadCreatesConfigFromExample(t *testing.T) {
 	if reason := ProfileSetupReason(&got.Servers[0]); reason != "model is empty; set it in Servers" {
 		t.Fatalf("setup reason = %q", reason)
 	}
+	if got.Run.MaxTurns != DefaultMaxTurns {
+		t.Fatalf("fresh config max_turns=%d, want %d", got.Run.MaxTurns, DefaultMaxTurns)
+	}
 	written, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +75,27 @@ func TestLoadCreatesConfigFromExample(t *testing.T) {
 	}
 	if created {
 		t.Fatal("existing config reported as created")
+	}
+}
+
+func TestLoadRejectsExplicitZeroMaxTurns(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "harness.json")
+	cfg := Defaults(t.TempDir())
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(data, &document); err != nil {
+		t.Fatal(err)
+	}
+	document["run"].(map[string]any)["max_turns"] = float64(0)
+	data, _ = json.Marshal(document)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := Load(path); err == nil || !strings.Contains(err.Error(), "zero is not unlimited") || !strings.Contains(err.Error(), fmt.Sprint(DefaultMaxTurns)) {
+		t.Fatalf("explicit zero error=%v", err)
 	}
 }
 
@@ -258,7 +282,8 @@ func TestHarnessExampleShipsBoundaryOnlyIndependentlyOfDefaults(t *testing.T) {
 		Approval      struct {
 			Mode string `json:"mode"`
 		} `json:"approval"`
-		Deliver Deliver `json:"deliver"`
+		Deliver Deliver   `json:"deliver"`
+		Run     RunConfig `json:"run"`
 		Shell   struct {
 			OperatorContextIdleTimeoutMinutes int `json:"operator_context_idle_timeout_minutes"`
 		} `json:"shell"`
@@ -282,6 +307,9 @@ func TestHarnessExampleShipsBoundaryOnlyIndependentlyOfDefaults(t *testing.T) {
 	}
 	if document.Approval.Mode != "boundary-only" {
 		t.Fatalf("template approval mode=%q, want literal boundary-only", document.Approval.Mode)
+	}
+	if document.Run.MaxTurns != DefaultMaxTurns {
+		t.Fatalf("template max_turns=%d, want %d", document.Run.MaxTurns, DefaultMaxTurns)
 	}
 	if document.Deliver.Mode != DeliverModeBoth || document.Deliver.ExchangeFolder != `%USERPROFILE%\Agent_b` {
 		t.Fatalf("template delivery=%+v", document.Deliver)

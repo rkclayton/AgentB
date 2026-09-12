@@ -34,7 +34,7 @@ type Runner struct {
 	budget             *Budgeter
 	compact            *contextmgr.Compactor
 	toolActivity       func(string)
-	deliver            func(*session.Session, string, []delivery.Source)
+	deliver            func(*session.Session, string, []delivery.Source) delivery.Result
 	shellGrantMu       sync.Mutex
 	shellGrants        map[string][]shellRunGrant
 	shellSessionGrants map[string][]shellSessionGrant
@@ -69,7 +69,7 @@ func (r *Runner) Configure(cfg config.Config) {
 }
 func (r *Runner) Gate() *Gate                     { return r.gate }
 func (r *Runner) SetToolActivity(fn func(string)) { r.toolActivity = fn }
-func (r *Runner) SetDeliverer(fn func(*session.Session, string, []delivery.Source)) {
+func (r *Runner) SetDeliverer(fn func(*session.Session, string, []delivery.Source) delivery.Result) {
 	r.deliver = fn
 }
 func (r *Runner) SetSessionRenamer(fn func(string, string, string) error) { r.renameSession = fn }
@@ -106,13 +106,17 @@ func (r *Runner) AppendUser(s *session.Session, message events.Message) {
 	r.bus.Publish(events.New(events.MessageAppended, s.ID, "", map[string]any{"message": message}))
 }
 
-func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (string, string, int) {
+func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (reason string, detail string, turns int) {
 	r.beginFlight(s.ID, runID)
 	defer r.endFlight(s.ID, runID)
 	produced := map[string]delivery.Source{}
 	defer func() {
+		result := delivery.Result{}
 		if r.deliver != nil {
-			r.deliver(s, runID, delivery.SortedSources(produced))
+			result = r.deliver(s, runID, delivery.SortedSources(produced))
+		}
+		if reason == "turn_ceiling" {
+			detail = turnCeilingDetail(turns, result)
 		}
 	}()
 	defer r.lapseShellGrants(s, runID)
@@ -397,7 +401,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 				item.ms = time.Since(start).Milliseconds()
 				resultTokens := r.textTokens(ctx, profile, item.content)
 				item.content, item.ok, item.metadata, resultTokens = r.fitWindowResult(
-					ctx, profile, item.call.Name, item.args, item.content, item.ok, item.metadata, resultTokens, remainingResultTokens,
+					ctx, s, profile, item.call.Name, item.args, item.content, item.ok, item.metadata, resultTokens, remainingResultTokens, item.operatorContext,
 				)
 				remainingResultTokens = max(0, remainingResultTokens-resultTokens)
 				data := toolResultEventData(turn, item.call.ID, item.call.Name, item.content, item.ok, item.operatorContext, item.untrusted, item.ms, resultTokens, item.metadata)
@@ -454,6 +458,22 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (str
 		}
 		r.compactAfterTurn(ctx, s, runID, turn, profile, currentReasoning)
 	}
+}
+
+func turnCeilingDetail(turns int, result delivery.Result) string {
+	delivered := "no files"
+	if len(result.Items) > 0 {
+		items := make([]string, 0, len(result.Items))
+		for _, item := range result.Items {
+			value := item.SourcePath + " " + item.Status
+			if item.DeliveredPath != "" {
+				value += " to " + item.DeliveredPath
+			}
+			items = append(items, value)
+		}
+		delivered = strings.Join(items, ", ")
+	}
+	return fmt.Sprintf("completed %d turns; delivery: %s; continue: send Continue in this chat; the session history and delivered work are retained", turns, delivered)
 }
 
 func (r *Runner) applyMailboxBoundary(ctx context.Context, s *session.Session, runID string, approvalPending bool) (bool, string) {

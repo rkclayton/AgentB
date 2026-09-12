@@ -144,8 +144,8 @@ func TestDeliveryLiveServiceSplit(t *testing.T) {
 	}
 	runner := agent.NewRunner(bus, toolRegistry, renderer, server.Profile, server.ConfigSnapshot)
 	deliveryManager := delivery.New(bus, server.ConfigSnapshot)
-	runner.SetDeliverer(func(item *session.Session, runID string, files []delivery.Source) {
-		deliveryManager.Deliver(item, runID, files)
+	runner.SetDeliverer(func(item *session.Session, runID string, files []delivery.Source) delivery.Result {
+		return deliveryManager.Deliver(item, runID, files)
 	})
 	scheduler := agent.NewScheduler(runner, registry, bus, server.ConfigSnapshot)
 	server.SetRuntime(scheduler, runner, renderer)

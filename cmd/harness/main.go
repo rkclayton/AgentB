@@ -194,8 +194,8 @@ func main() {
 	runner := agent.NewRunner(bus, toolRegistry, renderer, web.Profile, web.ConfigSnapshot)
 	runner.SetSessionRenamer(registry.RenameBy)
 	deliveryManager := delivery.New(bus, web.ConfigSnapshot)
-	runner.SetDeliverer(func(item *session.Session, runID string, files []delivery.Source) {
-		deliveryManager.Deliver(item, runID, files)
+	runner.SetDeliverer(func(item *session.Session, runID string, files []delivery.Source) delivery.Result {
+		return deliveryManager.Deliver(item, runID, files)
 	})
 	scheduler := agent.NewScheduler(runner, registry, bus, web.ConfigSnapshot)
 	runner.SetMailboxBoundary(func(_ context.Context, sessionID string, approvalPending bool) agent.BoundaryAction {

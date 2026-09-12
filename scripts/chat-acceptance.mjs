@@ -971,7 +971,20 @@ if (realModel) {
   const requests = events.filter((event) => event.type === "model.request" && event.body && event.seq > beforeCompactionSequence);
   const prefix = (event) => JSON.stringify({ system: event.body.messages?.[0], tools: event.body.tools });
   assert.equal(prefix(requests[0]), prefix(requests.at(-1)));
+  const summaryEvent = events.findLast((event) => event.type === "message.appended" && event.data?.message?.category === "summary");
+  assert.ok(summaryEvent, "compaction did not append a summary message");
+  assert.equal(summaryEvent.data.message.role, "system");
+  const requestAfterSummary = requests.find((event) => event.seq > summaryEvent.seq);
+  assert.ok(requestAfterSummary, "compaction summary was not followed by a model request");
+  assert.ok(requestAfterSummary.body.messages.some((message) => message.role === "system" && message.content === summaryEvent.data.message.content), "model request did not retain the complete system summary");
   assert.ok((await browserText("#chat-log")).includes("acceptance: compaction"));
+  const summaryRow = page.locator(".chat-summary").last();
+  await summaryRow.waitFor({ state: "visible" });
+  assert.equal((await summaryRow.locator(".chat-speaker").innerText()).trim(), "summary");
+  const presentedSummary = await summaryRow.innerText();
+  assert.doesNotMatch(presentedSummary, /Progress note \(auto-summary of earlier turns\):|\[BEGIN COMPACTION EVIDENCE\]/);
+  await summaryRow.scrollIntoViewIfNeeded();
+  await page.screenshot({ path: join(args.evidence, "compaction-summary.png") });
   record("compaction-keeps-model-prefix-stable");
 
   await page.locator(".agent-tab-new").click();

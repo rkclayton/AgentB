@@ -28,7 +28,7 @@ export function renderFlow() {
 	count.classList.toggle("alarm", !store.replay && !!session.pending_approval);
 	count.textContent = store.replay ? "replay" : session.pending_approval ? "waiting for you" :
 		session.run.status === "running" || session.run.status === "paused"
-      ? `${session.run.turn}/${session.run.max_turns}`
+		? `turn ${session.run.turn}`
       : session.run.status;
 }
 

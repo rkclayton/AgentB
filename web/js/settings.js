@@ -402,7 +402,6 @@ function context(active) {
 function run() {
   const cfg = store.config;
   return `${toggle("chat.auto_rename", "auto-name chats every 20 turns", cfg.chat?.auto_rename !== false)}
-    ${number("run.max_turns", "max turns", cfg.run?.max_turns)}
     ${number("run.cycle_window", "cycle window", cfg.run?.cycle_window)}
     <p class="settings-note">0 = off</p>
     ${number("run.max_consecutive_tool_errors", "max tool errors", cfg.run?.max_consecutive_tool_errors)}

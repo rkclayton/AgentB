@@ -219,9 +219,9 @@ function groupResponses(entries) {
   let response = null;
   let boundary = "orphan";
   for (const entry of entries) {
-    if (entry?.type === "user") {
+    if (entry?.type === "user" || entry?.type === "summary") {
       grouped.push(entry);
-      boundary = entry.key || `user:${grouped.length}`;
+      boundary = entry.key || `${entry.type}:${grouped.length}`;
       response = null;
       continue;
     }
@@ -263,15 +263,15 @@ function renderEntry(session, entry) {
     row.tabIndex = 0;
     const content = document.createElement("div");
     content.className = "chat-content";
-    const author = speaker(entry.type === "user" ? "you" : agentAuthor(session, entry.agentRole), entry.type !== "user");
+    const author = speaker(entry.type === "user" ? "you" : entry.type === "summary" ? "summary" : agentAuthor(session, entry.agentRole), entry.type !== "user" && entry.type !== "summary");
     row.append(author, content);
     view = { row, author, content, text: "" };
     entryViews.set(entry.key, view);
   }
   usedEntryViews.add(entry.key);
   view.row.dataset.entryKey = entry.key;
-  view.author.lastElementChild.textContent = entry.type === "user" ? "you" : agentAuthor(session, entry.agentRole);
-  view.row.className = `chat-entry ${entry.type === "user" ? "chat-user" : entry.type === "tool" ? "tool-entry" : "chat-agent"}`;
+  view.author.lastElementChild.textContent = entry.type === "user" ? "you" : entry.type === "summary" ? "summary" : agentAuthor(session, entry.agentRole);
+  view.row.className = `chat-entry ${entry.type === "user" ? "chat-user" : entry.type === "summary" ? "chat-summary" : entry.type === "tool" ? "tool-entry" : "chat-agent"}`;
   const content = view.content;
   if (entry.type === "user") {
     const nodes = [];
@@ -285,6 +285,10 @@ function renderEntry(session, entry) {
     }
     reconcileChildren(content, nodes);
     view.text = entry.text;
+  }
+  else if (entry.type === "summary") {
+    if (view.text !== entry.text) content.textContent = entry.text || "";
+    view.text = entry.text || "";
   }
   else throw new Error(`unsupported top-level entry type ${String(entry.type || "(missing)")}`);
   return view.row;
@@ -689,7 +693,7 @@ function noticeContent(session, entry, actionable) {
     const reason = (data.reason || "").replaceAll("_", " ");
 		if (data.reason === "model_unreachable") {
 			const line=document.createElement("span"); line.textContent=`model unreachable · ${entry.text || session.model_unreachable?.host || "model"}`; if(data.detail) line.title=data.detail; content.append(line);
-		} else content.textContent = `stopped: ${reason}${data.reason === "turn_ceiling" ? ` (${data.turns || session?.run?.max_turns || 0})` : data.detail ? `, ${data.detail}` : ""}`;
+		} else content.textContent = `stopped: ${reason}${data.detail ? ` · ${data.detail}` : ""}`;
     if (data.reason !== "done") content.classList.add("alarm");
   } else if (event.type === "files.delivered") {
     const items = data.items || [];

@@ -462,7 +462,9 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 			next.Messages = append(next.Messages, wrapper.Message)
 		}
 		next.Chat = cloneChat(next.Chat)
-		if wrapper.Message.Role == "user" {
+		if wrapper.Message.Category == "summary" {
+			next.Chat = append(next.Chat, ChatEntry{Type: "summary", Key: "message:" + wrapper.Message.ID, Text: summaryTranscript(wrapper.Message.Content)})
+		} else if wrapper.Message.Role == "user" {
 			next.Chat = append(next.Chat, ChatEntry{Type: "user", Key: "message:" + wrapper.Message.ID, Text: wrapper.Message.Content, Attachments: append([]events.Attachment(nil), wrapper.Message.Attachments...)})
 		}
 		if wrapper.Message.Role == "assistant" {
@@ -521,7 +523,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		}
 		next.Messages = kept
 		next.Chat = cloneChat(next.Chat)
-		if removed.Role == "user" {
+		if removed.Category == "summary" || removed.Role == "user" {
 			next.Chat = removeChatKey(next.Chat, "message:"+removed.ID)
 		} else if removed.Role == "tool" {
 			next.Chat = removeChatKey(next.Chat, "tool:"+removed.ToolCallID)
@@ -639,6 +641,14 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 
 	next.Cursor = record.Cursor
 	return next, diff(before, next), nil
+}
+
+func summaryTranscript(content string) string {
+	content = strings.TrimPrefix(content, "Progress note (auto-summary of earlier turns):\n")
+	if index := strings.Index(content, "\n\n[BEGIN COMPACTION EVIDENCE]"); index >= 0 {
+		content = content[:index]
+	}
+	return strings.TrimSpace(content)
 }
 
 func touchStream(current *StreamTelemetry, event events.Event, data map[string]any, delta bool) *StreamTelemetry {

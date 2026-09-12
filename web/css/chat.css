@@ -185,6 +185,13 @@
   user-select: text;
   overflow-wrap: anywhere;
 }
+.chat-summary .chat-speaker {
+  color: var(--trace);
+}
+.chat-summary .chat-content {
+  color: var(--mute);
+  font-size: 13px;
+}
 .chat-content p {
   margin: 0 0 8px;
 }

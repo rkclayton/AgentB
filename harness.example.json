@@ -7,7 +7,7 @@
   "services": {},
   "agents": [],
   "chat": { "auto_rename": true },
-  "run": { "max_turns": 40, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },
+  "run": { "max_turns": 10000, "cycle_window": 8, "max_consecutive_tool_errors": 3, "max_concurrent": 2, "queue_depth": 0 },
   "approval": { "mode": "boundary-only" },
   "deliver": { "mode": "both", "exchange_folder": "%USERPROFILE%\\Agent_b" },
   "operator_files": { "allow_mailbox_approvals": false, "log_retention_days": 30 },

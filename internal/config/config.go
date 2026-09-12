@@ -201,6 +201,9 @@ type RunConfig struct {
 	MaxConcurrent            int `json:"max_concurrent"`
 	QueueDepth               int `json:"queue_depth"`
 }
+
+const DefaultMaxTurns = 10000
+
 type Approval struct {
 	Mode string `json:"mode"`
 }
@@ -343,7 +346,7 @@ func Defaults(workspace string) Config {
 		Listen:        "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
 		Servers: []Profile{profile}, Agents: []Agent{{Name: profile.Label, B: "local", Toolset: FullToolset()}}, Chat: defaultChat(),
 		Services: map[string]Service{},
-		Run:      RunConfig{MaxTurns: 40, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(), OperatorFiles: OperatorFiles{LogRetentionDays: 30},
+		Run:      RunConfig{MaxTurns: DefaultMaxTurns, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(), OperatorFiles: OperatorFiles{LogRetentionDays: 30},
 		Tools:   Tools{ReadFile: ReadFileTool{DefaultLimit: 16 << 10, MaxLimit: 64 << 10}, Attachments: AttachmentTool{MaxBytes: 8 << 20}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Shell: ShellTool{OperatorCommands: []string{"git"}}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, DenyDomains: []string{"ipinfo.io", "ipapi.co", "ip-api.com", "ifconfig.me", "ipify.org", "geojs.io", "ipgeolocation.io", "icanhazip.com"}, AllowInternalHosts: []string{}}, FindFiles: FindFilesTool{SkipRoots: []string{"Windows", "$Recycle.Bin", "System Volume Information", `ProgramData\Microsoft\Windows Defender*`, `Program Files\Windows Defender*`}}},
 		Shell:   Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextIdleTimeoutMinutes: 20, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
 		Signing: Signing{TimestampURL: "http://timestamp.digicert.com"},
@@ -384,12 +387,18 @@ func LoadWithRoots(path, examplePath, dataRoot string) (*Config, bool, bool, err
 	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
 	var metadata struct {
 		ConfigVersion *int `json:"config_version"`
-		Approval      struct {
+		Run           struct {
+			MaxTurns *int `json:"max_turns"`
+		} `json:"run"`
+		Approval struct {
 			Mode string `json:"mode"`
 		} `json:"approval"`
 	}
 	if err := json.Unmarshal(data, &metadata); err != nil {
 		return nil, false, created, err
+	}
+	if metadata.Run.MaxTurns != nil && *metadata.Run.MaxTurns == 0 {
+		return nil, false, created, fmt.Errorf("run.max_turns: zero is not unlimited; omit it for the default %d or use a positive pathological-case backstop", DefaultMaxTurns)
 	}
 	unstamped := metadata.ConfigVersion == nil
 	if !unstamped && *metadata.ConfigVersion != 2 && *metadata.ConfigVersion != 3 && *metadata.ConfigVersion != 4 && *metadata.ConfigVersion != 5 && *metadata.ConfigVersion != CurrentConfigVersion {
@@ -653,7 +662,7 @@ func (c Config) Validate() error {
 		}
 	}
 	if c.Run.MaxTurns < 1 {
-		return fmt.Errorf("run.max_turns: must be positive")
+		return fmt.Errorf("run.max_turns: must be positive; zero is not unlimited (omit it for the default %d)", DefaultMaxTurns)
 	}
 	if c.Run.MaxConcurrent < 1 {
 		return fmt.Errorf("run.max_concurrent: must be positive")

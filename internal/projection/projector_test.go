@@ -54,6 +54,24 @@ func TestMessageAttachmentProjectsIntoChatEntry(t *testing.T) {
 	}
 }
 
+func TestCompactionSummaryProjectsAsSummaryWithoutMachineryMarkers(t *testing.T) {
+	state := seeded(t)
+	content := "Progress note (auto-summary of earlier turns):\nKept the operator task.\n\n[BEGIN COMPACTION EVIDENCE]\n{\"excerpt\":\"internal\"}\n[END COMPACTION EVIDENCE]"
+	next, _, err := Next(state, Record{Cursor: Cursor{Generation: "summary.events", Offset: 200}, Event: events.Event{
+		SessionID: "main", Type: events.MessageAppended,
+		Data: map[string]any{"message": events.Message{ID: "m-summary", Role: "system", Content: content, Category: "summary"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(next.Chat) != 1 || next.Chat[0].Type != "summary" || next.Chat[0].Text != "Kept the operator task." {
+		t.Fatalf("chat=%+v", next.Chat)
+	}
+	if len(next.Messages) != 1 || next.Messages[0].Role != "system" || next.Messages[0].Content != content {
+		t.Fatalf("messages=%+v", next.Messages)
+	}
+}
+
 func TestEmptyToolArgumentsRemainAnObjectInProjectedJSON(t *testing.T) {
 	state := seeded(t)
 	next, _, err := Next(state, Record{Cursor: Cursor{Generation: "empty-args.events", Offset: 200}, Event: events.Event{

@@ -438,6 +438,10 @@ func (m *Manager) ExportChat(snapshot session.Snapshot) (string, error) {
 		return "", err
 	}
 	for _, message := range messages {
+		if message.Category == "summary" {
+			fmt.Fprintf(&body, "\n### Summary\n\n%s\n", summaryExportContent(message.Content))
+			continue
+		}
 		switch message.Role {
 		case "tool":
 			status := "ok"
@@ -463,6 +467,14 @@ func (m *Manager) ExportChat(snapshot session.Snapshot) (string, error) {
 		return "", err
 	}
 	return path, nil
+}
+
+func summaryExportContent(content string) string {
+	content = strings.TrimPrefix(content, "Progress note (auto-summary of earlier turns):\n")
+	if index := strings.Index(content, "\n\n[BEGIN COMPACTION EVIDENCE]"); index >= 0 {
+		content = content[:index]
+	}
+	return strings.TrimSpace(content)
 }
 
 // exportMessages reads the current JSONL generation when available so close

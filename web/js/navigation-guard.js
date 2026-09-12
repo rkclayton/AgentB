@@ -8,12 +8,6 @@ export function createNavigationGuard(runtime) {
 
   return {
     request(details, target) {
-      if (!runtime.enabled) {
-        const navigationID = runtime.begin(details);
-        const destination = runtime.decorate(target, navigationID);
-        runtime.assign(destination);
-        return true;
-      }
       if (claimed) {
         runtime.suppress(details);
         return false;
@@ -35,15 +29,12 @@ export function createNavigationGuard(runtime) {
 
 function browserRuntime() {
   if (typeof window === "undefined") return null;
-  const enabled = new URLSearchParams(location.search).get("navigation_guard") === "1";
   return {
-    enabled,
     begin: beginNavigation,
     assign: (target) => location.assign(target),
     decorate(target, navigationID) {
       const url = new URL(target, location.href);
       if (navigationID) url.searchParams.set("navigation_id", navigationID);
-      if (enabled) url.searchParams.set("navigation_guard", "1");
       return `${url.pathname}${url.search}${url.hash}`;
     },
     onPageShow: (listener) => window.addEventListener("pageshow", listener),

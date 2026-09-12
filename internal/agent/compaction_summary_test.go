@@ -105,6 +105,19 @@ func TestCompactionAuxUnsetUsesOneMainCall(t *testing.T) {
 	if snapshot.CompactionModelCalls != 1 || snapshot.CompactionPrompt != 111 || snapshot.CompactionCompletion != 22 {
 		t.Fatalf("ledger=%+v", snapshot)
 	}
+	var summary events.Message
+	for _, message := range snapshot.Messages {
+		if message.Category == "summary" {
+			summary = message
+			break
+		}
+	}
+	if summary.Role != "system" {
+		t.Fatalf("compaction summary attribution=%+v", snapshot.Messages)
+	}
+	if converted := requestMessage(profileForRunner(runner, "main"), item, summary); converted.Role != "system" || converted.Content != summary.Content {
+		t.Fatalf("model request summary=%+v", converted)
+	}
 }
 
 func TestCompactionUsesFittingAuxProfile(t *testing.T) {
