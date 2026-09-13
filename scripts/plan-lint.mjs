@@ -120,6 +120,11 @@ function unresolvedEntries(value) {
   return entries;
 }
 
+function namesDistinguishingMeasurement(body) {
+  const section = String(body).match(/^### Distinguishing measurement\s*$\n([\s\S]*?)(?=^### |^## |$(?![\s\S]))/mi);
+  return Boolean(section?.[1].trim());
+}
+
 /** Validate an exact plan proposal without writing it to the repository. */
 export function validateProposal({ planText, orderBody = null, itemContents, structuralOnly = false, inputErrors = [] }) {
   const errors = [...inputErrors];
@@ -182,6 +187,12 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
     const lines = lineCount(text);
     if (lines > 100) warnings.push(`${relative}: long item (${lines} lines)`);
     const unresolvedText = unresolved ? unresolved[1].trim() : null;
+    const contract = body.match(/^## Contract\s*$\n([\s\S]*?)(?=^## |$(?![\s\S]))/mi)?.[1] ?? "";
+    const causalClaim = /\[causal\]/i.test(contract);
+    const repairScope = kind === "defect" && /^@change\b/im.test(contract);
+    if (repairScope && causalClaim && !namesDistinguishingMeasurement(body)) {
+      warnings.push(`CAUSAL GATE: repair item ${id} has a [causal] contract claim and @change but names no non-empty ### Distinguishing measurement`);
+    }
     items.set(id, { id, state, milestone, kind: kind ?? "", surfaces, rawSurfaces: rawSurfaces ?? "", relative, title: heading[2], lines, unresolved: unresolvedText, unresolvedEntries: unresolvedEntries(unresolvedText), metadata });
   }
 

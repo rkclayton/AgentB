@@ -297,4 +297,23 @@ function prepare(root) {
   assert.deepEqual(proposed.errors, publishedResult.errors, "proposed and published inputs must report the same validation errors");
 }
 
+{
+  const causalRepair = item("2a")
+    .replace("kind: feature", "kind: defect")
+    .replace("Fixture body.", "## Contract\n\n@fn      stale state causes the visible defect [causal]\n@change  clear the stale state before rendering");
+  const root = makeFixture("\n- W1 **2a causal repair.**", [{ id: "2a", where: "items", text: causalRepair }]);
+  prepare(root);
+  const validation = validateProposal(loadPublishedProposal(root));
+  assert.equal(validation.errors.length, 0, validation.errors.join("\n"));
+  assert.match(validation.warnings.join("\n"), /CAUSAL GATE: repair item 2a/);
+
+  const measured = causalRepair.replace("## Unresolved", "## Discovery\n\n### Observation\nThe stale state is visible after the round trip.\n\n### Candidate explanations\nInference A is stale state; inference B is a style leak.\n\n### Distinguishing measurement\nInspect hidden and computed-style state after the same round trip.\n\n### What each result changes\nHidden false admits the state repair; hidden true rejects it.\n\n### Exit condition\nOne candidate survives, or none of these is recorded.\n\n## Unresolved");
+  const accepted = validateProposal({ ...loadPublishedProposal(root), itemContents: loadPublishedProposal(root).itemContents.map((entry) => entry.relative === "plan/items/2a.md" ? { ...entry, text: measured } : entry) });
+  assert.doesNotMatch(accepted.warnings.join("\n"), /CAUSAL GATE/);
+
+  const obviousRepair = causalRepair.replace(" [causal]", " [read]");
+  const obvious = validateProposal({ ...loadPublishedProposal(root), itemContents: loadPublishedProposal(root).itemContents.map((entry) => entry.relative === "plan/items/2a.md" ? { ...entry, text: obviousRepair } : entry) });
+  assert.doesNotMatch(obvious.warnings.join("\n"), /CAUSAL GATE/);
+}
+
 process.stdout.write("plan-lint fixtures passed\n");
