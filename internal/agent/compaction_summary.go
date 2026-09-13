@@ -116,7 +116,12 @@ func (r *Runner) summaryMessages(profile *config.Profile, s *session.Session) []
 	messages := []llm.Message{{Role: "system", Content: r.prompt.Render(profile, s, r.tools.Names(s.EnabledTools()), s.MemoryBlock)}}
 	records := s.MessagesCopy()
 	for _, message := range records {
-		if message.Elided {
+		if !message.Elided && isHarnessAbortRecord(message) {
+			messages = append(messages, llm.Message{Role: message.Role, Content: summaryHistoryContent(message)})
+		}
+	}
+	for _, message := range records {
+		if message.Elided || isHarnessAbortRecord(message) {
 			continue
 		}
 		switch message.Category {

@@ -246,6 +246,30 @@ func TestCompactionSummaryIncludesRetainedToolResultsAndState(t *testing.T) {
 	}
 }
 
+func TestCompactionSummaryKeepsAbortRecordInLeadingSystemBlock(t *testing.T) {
+	mainServer := newSummaryServer(t, "short summary")
+	runner, item, _, _ := compactionRunner(t, mainServer, nil, 32768)
+	item.Append(events.Message{ID: "before", Role: "user", Category: "history", Content: "before abort"})
+	abortContent := harnessAbortRecordPrefix + "\n{\"reason\":\"aborted_mid_model\"}"
+	item.Append(events.Message{ID: "abort", Role: "system", Category: "history", Content: abortContent})
+	item.Append(events.Message{ID: "after", Role: "user", Category: "history", Content: "after abort"})
+
+	messages := runner.summaryMessages(profileForRunner(runner, "main"), item)
+	if len(messages) < 4 || messages[0].Role != "system" || messages[1].Role != "system" || messages[1].Content != abortContent {
+		t.Fatalf("abort record is not byte-identical in the leading system block: %+v", messages)
+	}
+	historyStarted := false
+	for index, message := range messages {
+		system := message.Role == "system" || message.Role == "developer"
+		if index > 0 && system && historyStarted {
+			t.Fatalf("in-position system message: %+v", message)
+		}
+		if !system {
+			historyStarted = true
+		}
+	}
+}
+
 func TestSummaryEvidenceAppendixCarriesGroundedSamples(t *testing.T) {
 	ok := true
 	records := []events.Message{{Role: "assistant", ToolCalls: []events.ToolCall{{ID: "read-1", Name: "read_file", Arguments: `{"path":"web/css/app.css","offset":1,"limit":3000}`}}}, {Role: "tool", Category: "files", Name: "read_file", ToolCallID: "read-1", Turn: 1, OK: &ok, Content: "[byte window: offset=1 bytes=3000 total=38384 more=true next_offset=3001 start_line=1]\n.header {\n  display: flex;\n}"}}
