@@ -64,7 +64,10 @@ function updateView(view, entry, tokens, options) {
   if (entry.done) {
     const duration = options.formatDuration(entry.thinkingMS);
     const elapsed = duration ? ` ${entry.thinkingEstimated ? "~" : ""}${duration}` : "";
-    setText(view.summary, `Thought${elapsed} (${entry.reasoningTokensEstimated || entry.thinkingEstimated ? "~" : ""}${options.format(tokens)} tokens)`);
+    const count = options.uncounted?.(entry)
+      ? "thoughts uncounted"
+      : `${entry.reasoningTokensEstimated || entry.thinkingEstimated ? "~" : ""}${options.format(tokens)} tokens`;
+    setText(view.summary, `Thought${elapsed} (${count})`);
   }
   view.body.hidden = !open;
   view.collapse.hidden = !open;

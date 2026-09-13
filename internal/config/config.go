@@ -199,6 +199,7 @@ type Capabilities struct {
 	DocumentInput      bool     `json:"document_input"`
 	ImageInput         bool     `json:"image_input"`
 	ReasoningControl   string   `json:"reasoning_control"`
+	ReasoningEmission  string   `json:"reasoning_emission,omitempty"`
 	ValidEfforts       []string `json:"valid_efforts"`
 	OverflowBehavior   string   `json:"overflow_behavior"`
 	ProbedAt           string   `json:"probed_at"`

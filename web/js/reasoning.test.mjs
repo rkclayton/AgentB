@@ -66,6 +66,19 @@ test("thinking renderer preserves its DOM and never opens to an empty body", () 
   renderer.end();
   assert.equal(noDuration.children[0].children[2].textContent, "Thought (4 tokens)");
 
+  const inlineRenderer = createThinkingRenderer({
+    document: fakeDocument,
+    expanded: new Set(),
+    rerender: () => {},
+    format: String,
+    formatDuration: () => "1.2",
+    uncounted: () => true,
+  });
+  inlineRenderer.begin();
+  const inline = inlineRenderer.render({ ...active, reasoning: "fragment", done: true, thinkingMS: 1200 }, 4);
+  inlineRenderer.end();
+  assert.equal(inline.children[0].children[2].textContent, "Thought 1.2 (thoughts uncounted)");
+
   renderer.begin();
   const unavailable = renderer.render({ ...active, done: true, thinkingMS: 1200 }, 4);
   renderer.end();

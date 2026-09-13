@@ -154,38 +154,50 @@ func probeContentPart(ctx context.Context, client *llm.Client, part map[string]a
 }
 
 func probeReasoning(ctx context.Context, client *llm.Client, profile *config.Profile, caps *config.Capabilities, findings *[]string) {
-	present := func(body map[string]any) (bool, int) {
+	emission := func(body map[string]any) (string, int) {
 		check, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
 		raw, status, err := client.DoJSON(check, http.MethodPost, "/v1/chat/completions", body)
 		if err != nil {
-			return false, 0
+			return "none", 0
 		}
 		var parsed struct {
 			Choices []struct {
 				Message struct {
 					ReasoningContent string `json:"reasoning_content"`
 					Reasoning        string `json:"reasoning"`
+					Content          string `json:"content"`
 				} `json:"message"`
 			} `json:"choices"`
 		}
 		_ = json.Unmarshal(raw, &parsed)
-		return len(parsed.Choices) > 0 && (parsed.Choices[0].Message.ReasoningContent != "" || parsed.Choices[0].Message.Reasoning != ""), status
+		if len(parsed.Choices) == 0 {
+			return "none", status
+		}
+		message := parsed.Choices[0].Message
+		if message.ReasoningContent != "" || message.Reasoning != "" {
+			return "structured", status
+		}
+		if strings.HasPrefix(strings.TrimSpace(message.Content), "<think>") {
+			return "inline", status
+		}
+		return "none", status
 	}
 	base := map[string]any{"model": profile.Model, "messages": []any{map[string]any{"role": "user", "content": "What is 17×23? Think briefly."}}, "max_tokens": 256, "temperature": .6, "stream": false}
-	a, _ := present(clone(base))
+	shape, _ := emission(clone(base))
+	caps.ReasoningEmission = shape
 	disabled := clone(base)
 	disabled["chat_template_kwargs"] = map[string]any{"enable_thinking": false}
-	b, _ := present(disabled)
-	if a && !b {
+	disabledShape, _ := emission(disabled)
+	if shape == "structured" && disabledShape != "structured" {
 		caps.ReasoningControl = "chat_template_kwargs"
 	} else {
 		top := clone(base)
 		top["reasoning_effort"] = "low"
-		_, status := present(top)
-		if a && status == 200 {
+		_, status := emission(top)
+		if shape == "structured" && status == 200 {
 			caps.ReasoningControl = "top_level"
-		} else if a {
+		} else if shape == "structured" {
 			caps.ReasoningControl = "server_flag"
 		}
 	}
@@ -193,7 +205,7 @@ func probeReasoning(ctx context.Context, client *llm.Client, profile *config.Pro
 		for _, effort := range []string{"low", "medium", "high", "xhigh"} {
 			body := clone(base)
 			body["chat_template_kwargs"] = map[string]any{"enable_thinking": true, "reasoning_effort": effort}
-			_, status := present(body)
+			_, status := emission(body)
 			// This template silently maps the unsupported "high" spelling instead of
 			// rejecting it, so only the model's documented discrete efforts are valid.
 			if status == 200 && effort != "high" {
@@ -204,13 +216,17 @@ func probeReasoning(ctx context.Context, client *llm.Client, profile *config.Pro
 		for _, effort := range []string{"minimal", "low", "medium", "high"} {
 			body := clone(base)
 			body["reasoning_effort"] = effort
-			_, status := present(body)
+			_, status := emission(body)
 			if status == 200 {
 				caps.ValidEfforts = append(caps.ValidEfforts, effort)
 			}
 		}
 	}
-	*findings = append(*findings, "reasoning control: "+caps.ReasoningControl, "valid efforts: "+strings.Join(caps.ValidEfforts, ", "))
+	emissionFinding := "reasoning emission: " + shape
+	if shape == "inline" {
+		emissionFinding += "; server fix: set llama-server --reasoning-format deepseek so thoughts are returned as reasoning_content"
+	}
+	*findings = append(*findings, emissionFinding, "reasoning control: "+caps.ReasoningControl, "valid efforts: "+strings.Join(caps.ValidEfforts, ", "))
 }
 
 func probeOverflow(ctx context.Context, client *llm.Client, profile *config.Profile, caps *config.Capabilities, findings *[]string) {

@@ -55,6 +55,11 @@ const thinkingRenderer = createThinkingRenderer({
   rerender: () => render(),
   format,
   formatDuration: formatThoughtSeconds,
+  uncounted: () => {
+    const session = store.sessions[selectedID()];
+    const profile = store.servers.find((value) => value.id === (session?.server_id || session?.b_profile));
+    return profile?.capabilities?.reasoning_emission === "inline";
+  },
 });
 const entryViews = new Map();
 const fileStates = new Map();
