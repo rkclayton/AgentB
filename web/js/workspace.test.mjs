@@ -7,7 +7,7 @@ const workspace = await readFile(new URL("./workspace.js", import.meta.url), "ut
 const bus = await readFile(new URL("./bus.js", import.meta.url), "utf8");
 const chat = await readFile(new URL("./chat.js", import.meta.url), "utf8");
 const consoleApp = await readFile(new URL("./app.js", import.meta.url), "utf8");
-const server = await readFile(new URL("../../internal/web/server.go", import.meta.url), "utf8");
+const server = await readFile(new URL("../../internal/web/server_state.go", import.meta.url), "utf8");
 
 test("Chat and Console share one served document and switch without document navigation", () => {
   assert.match(html, /id="chat-log"/);
