@@ -11,9 +11,17 @@ test("live activity names model production and the executing tool without invent
   assert.equal(liveActivityText(running({ stage: "execute", stage_state: "enter" })), "tool executing · unknown");
 });
 
-test("live activity does not repeat an exited or unrecognized stage", () => {
-  assert.equal(liveActivityText(running({ stage: "call_model", stage_state: "exit" })), "waiting · state unknown");
+test("live activity names the known wait after an exited stage without retaining that stage", () => {
+  assert.equal(liveActivityText(running({ stage: "assemble", stage_state: "exit" })), "waiting for model");
+  assert.equal(liveActivityText(running({ stage: "call_model", stage_state: "exit" })), "waiting for response parsing");
+  assert.equal(liveActivityText(running({ stage: "parse", stage_state: "exit" })), "waiting for next action");
+  assert.equal(liveActivityText(running({ stage: "dispatch", stage_state: "exit" })), "waiting for tool execution");
+  assert.equal(liveActivityText(running({ stage: "execute", stage_state: "exit" })), "waiting for result recording");
+  assert.equal(liveActivityText(running({ stage: "append", stage_state: "exit" })), "waiting for context check");
+  assert.equal(liveActivityText(running({ stage: "compact", stage_state: "exit" })), "waiting for next turn");
+  assert.equal(liveActivityText(running({ stage: "wait_user", stage_state: "exit" })), "waiting to resume");
   assert.equal(liveActivityText(running({ stage: "future_stage", stage_state: "enter" })), "waiting · state unknown");
+  assert.equal(liveActivityText(running({ stage: "future_stage", stage_state: "exit" })), "waiting · state unknown");
   assert.equal(liveActivityText({ run: { status: "idle" }, activity: {} }), "");
 });
 

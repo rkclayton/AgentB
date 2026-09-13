@@ -3,7 +3,10 @@ package tools
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"go/parser"
+	"go/token"
 	"math"
 	"os"
 	"path/filepath"
@@ -17,7 +20,7 @@ type EditFile struct{ coordinator *FileCoordinator }
 func NewEditFile(c *FileCoordinator) *EditFile { return &EditFile{coordinator: c} }
 func (*EditFile) Name() string                 { return "edit_file" }
 func (*EditFile) Description() string {
-	return "Replace one exact, unique old_string in path with new_string. Unlike write_file, it avoids reproducing the whole file."
+	return "Replace one unique old_string in path with new_string using ordered exact, whitespace-normalized, then block-anchor matching. Preserves line endings, returns a unified diff, and runs an available syntax checker."
 }
 func (*EditFile) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "old_string": map[string]any{"type": "string"}, "new_string": map[string]any{"type": "string"}}, "required": []string{"path", "old_string", "new_string"}}
@@ -44,6 +47,10 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 	resolved, err := resolveForTool(ctx, s.Workspace, path)
 	if err != nil {
 		return "", err
+	}
+	displayPath := cleanRel(path)
+	if relative, relativeErr := filepath.Rel(s.Workspace, resolved); relativeErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		displayPath = cleanRel(relative)
 	}
 	prefix, err := e.coordinator.check(s, path, resolved)
 	if err != nil {
@@ -91,6 +98,12 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 		}
 	}
 	if !matched {
+		updated, start, end, note, matched, err = blockAnchorTier(text, old, replacement)
+		if err != nil {
+			return fail(err)
+		}
+	}
+	if !matched {
 		if replacement != "" && strings.Count(text, replacement) == 1 {
 			line := lineAt(text, strings.Index(text, replacement))
 			last := line + strings.Count(replacement, "\n")
@@ -125,16 +138,25 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 		return fail(err)
 	}
 	e.coordinator.record(s, resolved)
+	newLines := 0
 	if replacement == "" {
-		return prefix + fmt.Sprintf("ok: deleted lines %d–%d", start, end), nil
+		newLines = 0
+	} else {
+		newLines = strings.Count(replacement, "\n") + 1
 	}
-	newLines := strings.Count(replacement, "\n") + 1
 	delta := newLines - (end - start + 1)
 	result := fmt.Sprintf("ok: replaced lines %d–%d with %d lines (%+d)", start, end, newLines, delta)
+	if replacement == "" {
+		result = fmt.Sprintf("ok: deleted lines %d–%d", start, end)
+	}
 	if note != "" {
 		result += "; " + note
 	}
-	return prefix + result + "\n\n" + contextRegion(updated, start, newLines), nil
+	result += "\n\n" + unifiedDiff(displayPath, text, updated)
+	if check := syntaxCheck(resolved, displayPath); check != "" {
+		result += "\n\n" + check
+	}
+	return prefix + result, nil
 }
 
 func normalizeLF(value string) string {
@@ -149,7 +171,7 @@ func exactTier(text, old, replacement string) (string, int, int, string, bool, e
 	if count == 1 {
 		index := strings.Index(text, old)
 		start := lineAt(text, index)
-		return strings.Replace(text, old, replacement, 1), start, start + strings.Count(old, "\n"), "", true, nil
+		return strings.Replace(text, old, replacement, 1), start, start + strings.Count(old, "\n"), "strategy: exact", true, nil
 	}
 	return text, 0, 0, "", false, nil
 }
@@ -167,14 +189,14 @@ func whitespaceTier(text, old, replacement string, indent bool) (string, int, in
 			fileIndent := commonIndent(window)
 			fileIndents[i] = fileIndent
 			for j := range oldLines {
-				if indentCompare(stripIndent(window[j], fileIndent)) != indentCompare(stripIndent(oldLines[j], oldIndent)) {
+				if normalizedCompare(stripIndent(window[j], fileIndent), true) != normalizedCompare(stripIndent(oldLines[j], oldIndent), true) {
 					equal = false
 					break
 				}
 			}
 		} else {
 			for j := range oldLines {
-				if strings.TrimRight(window[j], " \t") != strings.TrimRight(oldLines[j], " \t") {
+				if normalizedCompare(window[j], false) != normalizedCompare(oldLines[j], false) {
 					equal = false
 					break
 				}
@@ -196,10 +218,13 @@ func whitespaceTier(text, old, replacement string, indent bool) (string, int, in
 	}
 	index := matches[0]
 	newText := replacement
-	note := "applied with trailing-whitespace normalization"
+	note := "strategy: whitespace-normalized (trailing whitespace or Unicode punctuation)"
 	if indent {
 		fileIndent := fileIndents[index]
-		newLines := strings.Split(replacement, "\n")
+		newLines := []string{}
+		if replacement != "" {
+			newLines = strings.Split(replacement, "\n")
+		}
 		for i, line := range newLines {
 			if strings.TrimSpace(line) != "" {
 				relative := stripIndent(line, oldIndent)
@@ -210,12 +235,61 @@ func whitespaceTier(text, old, replacement string, indent bool) (string, int, in
 			}
 		}
 		newText = strings.Join(newLines, "\n")
-		note = "applied; indentation adjusted (" + indentDelta(oldIndent, fileIndent) + ")"
+		note = "strategy: whitespace-normalized; indentation adjusted (" + indentDelta(oldIndent, fileIndent) + ")"
 	}
 	out := append([]string{}, fileLines[:index]...)
-	out = append(out, strings.Split(newText, "\n")...)
+	if replacement != "" {
+		out = append(out, strings.Split(newText, "\n")...)
+	}
 	out = append(out, fileLines[index+len(oldLines):]...)
 	return strings.Join(out, "\n"), index + 1, index + len(oldLines), note, true, nil
+}
+
+func blockAnchorTier(text, old, replacement string) (string, int, int, string, bool, error) {
+	fileLines := strings.Split(text, "\n")
+	oldLines := strings.Split(old, "\n")
+	if len(oldLines) < 3 || len(oldLines) > len(fileLines) {
+		return text, 0, 0, "", false, nil
+	}
+	first := collapse(oldLines[0])
+	last := collapse(oldLines[len(oldLines)-1])
+	matches := []int{}
+	for i := 0; i+len(oldLines) <= len(fileLines); i++ {
+		if collapse(fileLines[i]) == first && collapse(fileLines[i+len(oldLines)-1]) == last {
+			matches = append(matches, i)
+		}
+	}
+	if len(matches) > 1 {
+		lines := make([]int, 0, min(5, len(matches)))
+		for _, i := range matches[:min(5, len(matches))] {
+			lines = append(lines, i+1)
+		}
+		return text, 0, 0, "", false, fmt.Errorf("block anchors match %d places (lines %s); include unique first and last lines", len(matches), strings.Trim(strings.Join(strings.Fields(fmt.Sprint(lines)), ", "), "[]"))
+	}
+	if len(matches) != 1 {
+		return text, 0, 0, "", false, nil
+	}
+	index := matches[0]
+	oldIndent := commonIndent(oldLines)
+	fileIndent := commonIndent(fileLines[index : index+len(oldLines)])
+	newLines := []string{}
+	if replacement != "" {
+		newLines = strings.Split(replacement, "\n")
+	}
+	for i, line := range newLines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		relative := stripIndent(line, oldIndent)
+		if strings.Contains(fileIndent, "\t") {
+			relative = spacesToTabs(relative)
+		}
+		newLines[i] = fileIndent + relative
+	}
+	out := append([]string{}, fileLines[:index]...)
+	out = append(out, newLines...)
+	out = append(out, fileLines[index+len(oldLines):]...)
+	return strings.Join(out, "\n"), index + 1, index + len(oldLines), "strategy: block-anchor; loose middle accepted", true, nil
 }
 
 func multipleError(count int, lines []int) string {
@@ -265,7 +339,20 @@ func stripIndent(line, indent string) string {
 	}
 	return strings.TrimLeft(line, " \t")
 }
-func trimCompare(value string) string { return strings.TrimRight(value, " \t") }
+
+var punctuationNormalizer = strings.NewReplacer(
+	"\u2018", "'", "\u2019", "'", "\u201c", "\"", "\u201d", "\"",
+	"\u2013", "-", "\u2014", "-",
+)
+
+func normalizedCompare(value string, indent bool) string {
+	value = punctuationNormalizer.Replace(strings.TrimRight(value, " \t"))
+	if indent {
+		return indentCompare(value)
+	}
+	return value
+}
+
 func indentCompare(value string) string {
 	value = strings.TrimRight(value, " \t")
 	leading := value[:len(value)-len(strings.TrimLeft(value, " \t"))]
@@ -290,15 +377,70 @@ func indentDelta(old, file string) string {
 	delta := len(file) - len(old)
 	return fmt.Sprintf("%+d spaces", delta)
 }
-func contextRegion(text string, start, count int) string {
-	lines := strings.Split(text, "\n")
-	from := max(0, start-3)
-	to := min(len(lines), start-1+count+2)
-	selected := lines[from:to]
-	if len(selected) > 40 {
-		selected = append(append([]string{}, selected[:20]...), append([]string{"[… cut …]"}, selected[len(selected)-20:]...)...)
+func unifiedDiff(path, before, after string) string {
+	beforeLines := strings.Split(before, "\n")
+	afterLines := strings.Split(after, "\n")
+	prefix := 0
+	for prefix < len(beforeLines) && prefix < len(afterLines) && beforeLines[prefix] == afterLines[prefix] {
+		prefix++
 	}
-	return strings.Join(selected, "\n")
+	beforeEnd, afterEnd := len(beforeLines), len(afterLines)
+	for beforeEnd > prefix && afterEnd > prefix && beforeLines[beforeEnd-1] == afterLines[afterEnd-1] {
+		beforeEnd--
+		afterEnd--
+	}
+	oldBlock := beforeLines[prefix:beforeEnd]
+	newBlock := afterLines[prefix:afterEnd]
+	start := prefix + 1
+	var b strings.Builder
+	fmt.Fprintf(&b, "--- a/%s\n+++ b/%s\n@@ -%d,%d +%d,%d @@\n", cleanRel(path), cleanRel(path), start, len(oldBlock), start, len(newBlock))
+	for _, line := range oldBlock {
+		b.WriteString("-")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	for _, line := range newBlock {
+		b.WriteString("+")
+		b.WriteString(line)
+		b.WriteByte('\n')
+	}
+	return strings.TrimSuffix(b.String(), "\n")
+}
+
+func syntaxCheck(resolved, display string) string {
+	ext := strings.ToLower(filepath.Ext(resolved))
+	data, err := os.ReadFile(resolved)
+	if err != nil {
+		return "syntax check: failed: unable to read the edited file"
+	}
+	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
+	switch ext {
+	case ".json":
+		if json.Valid(data) {
+			return "syntax check: passed (json)"
+		}
+		var value any
+		if err := json.Unmarshal(data, &value); err != nil {
+			return "syntax check: failed (json): " + boundedDiagnostic(err.Error(), resolved, display)
+		}
+	case ".go":
+		if _, err := parser.ParseFile(token.NewFileSet(), display, data, parser.AllErrors); err != nil {
+			return "syntax check: failed (go): " + boundedDiagnostic(err.Error(), resolved, display)
+		}
+		return "syntax check: passed (go)"
+	default:
+		return ""
+	}
+	return ""
+}
+
+func boundedDiagnostic(value, resolved, display string) string {
+	value = strings.ReplaceAll(value, resolved, cleanRel(display))
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	if len(value) > 2048 {
+		value = value[:2048] + " [… cut …]"
+	}
+	return value
 }
 
 func nearMiss(path, text, old string) error {
@@ -342,7 +484,7 @@ func nearMiss(path, text, old string) error {
 	return fmt.Errorf("old_string not found. Closest match: lines %d–%d (similarity %.2f). First difference at line %d — file has %q, old_string has %q, %s. Re-read the file before retrying.", bestStart+1, bestStart+len(oldLines), math.Min(1, math.Max(lineScore, similarity(strings.Join(window, "\n"), old))), bestStart+diff+1, visible(window[diff]), visible(oldLines[diff]), kind)
 }
 func collapse(value string) string {
-	return strings.Join(strings.Fields(strings.TrimRight(value, " \t")), " ")
+	return strings.Join(strings.Fields(punctuationNormalizer.Replace(strings.TrimRight(value, " \t"))), " ")
 }
 func similarity(a, b string) float64 {
 	ar, br := []rune(collapse(a)), []rune(collapse(b))

@@ -628,7 +628,7 @@ if (realModel) {
   await page.locator("#chat-stop").click();
   await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > lifecycleRunStarted.seq, "tool-tick lifecycle run stopped");
 
-  const missingArgsFixture = await browser.evaluate(`(async () => {
+  const missingArgsInitial = await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
     const session = bus.store.sessions[${JSON.stringify(sessionID)}];
     session.chat = [
@@ -639,18 +639,19 @@ if (realModel) {
     bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
     await new Promise(resolve => setTimeout(resolve, 120));
     const summary = document.querySelector('.chat-response-summary');
-    const collapsed = summary?.innerText || '';
-    summary?.click();
-    await new Promise(resolve => setTimeout(resolve, 120));
+    return { collapsed: summary?.innerText || '' };
+  })()`);
+  await page.locator(".chat-step-summary").click();
+  const missingArgsFixture = await page.evaluate(() => {
+    const summary = document.querySelector('.chat-response-summary');
     return {
-      collapsed,
       rows: document.querySelectorAll('[data-entry-key]').length,
       responseAlarm: summary?.closest('.chat-response')?.classList.contains('alarm') || false,
       failureAlarm: document.querySelector('.chat-render-failure')?.classList.contains('alarm') || false,
       text: document.querySelector('#chat-log')?.innerText || ''
     };
-  })()`);
-  assert.doesNotMatch(missingArgsFixture.collapsed, /failed/);
+  });
+  assert.doesNotMatch(missingArgsInitial.collapsed, /failed/);
   assert.equal(missingArgsFixture.rows, 3);
   assert.equal(missingArgsFixture.responseAlarm, false);
   assert.equal(missingArgsFixture.failureAlarm, false);
@@ -661,7 +662,7 @@ if (realModel) {
 
   let events = await sessionEvents(sessionID);
   const beforeRenderFailure = events.at(-1)?.seq || 0;
-  const throwingFixture = await browser.evaluate(`(async () => {
+  await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
     const session = bus.store.sessions[${JSON.stringify(sessionID)}];
     const args = new Proxy({}, { ownKeys() { throw new Error('deliberate render failure'); } });
@@ -669,10 +670,16 @@ if (realModel) {
       { type: 'user', key: 'hotfix:kept', text: 'other entry remains' },
       { type: 'tool', key: 'hotfix:throwing', name: 'shell', args }
     ];
-    for (let index = 0; index < 32; index++) {
+    bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
+    await new Promise(resolve => setTimeout(resolve, 65));
+    return true;
+  })()`);
+  await page.locator(".chat-step-summary").click();
+  const throwingFixture = await browser.evaluate(`(async () => {
+    const bus = await import('/static/js/bus.js');
+    for (let index = 1; index < 32; index++) {
       bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
       await new Promise(resolve => setTimeout(resolve, 65));
-      if (index === 0) document.querySelector('.chat-response-summary')?.click();
     }
     const failure = document.querySelector('.chat-render-failure');
     return {
@@ -696,7 +703,7 @@ if (realModel) {
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('deliberate render failure')`, "server snapshot restored");
 
-  const groupingFixture = await browser.evaluate(`(async () => {
+  const groupingInitial = await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
     const session = bus.store.sessions[${JSON.stringify(sessionID)}];
     session.run = { ...session.run, status: 'idle' };
@@ -711,29 +718,25 @@ if (realModel) {
     bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
     await new Promise(resolve => setTimeout(resolve, 120));
     const summary = document.querySelector('.chat-response-summary');
-    const collapsed = summary?.innerText || '';
-    const collapsedRows = document.querySelectorAll('.chat-response-rows > *').length;
-    summary?.click();
-    await new Promise(resolve => setTimeout(resolve, 120));
+    return { collapsed: summary?.innerText || '', collapsedRows: document.querySelectorAll('.chat-response-rows > *').length };
+  })()`);
+  await page.locator(".chat-step-summary").click();
+  const groupingOpen = await page.evaluate(() => {
     const group = document.querySelector('.chat-tool-group-head');
-    const rows = document.querySelectorAll('.chat-step-rows > *').length;
-    const groupText = group?.innerText || '';
-    group?.click();
-    await new Promise(resolve => setTimeout(resolve, 120));
-    document.querySelector('[data-entry-key="group:long"] .thinking-line')?.click();
-    document.querySelector('[data-entry-key="group:read-3"] .tool-tick')?.click();
-    await new Promise(resolve => setTimeout(resolve, 120));
-    return {
-      collapsed, collapsedRows, rows, groupText,
+    return { rows: document.querySelectorAll('.chat-step-rows > *').length, groupText: group?.innerText || '' };
+  });
+  await page.locator(".chat-tool-group-head").click();
+  await page.locator('[data-entry-key="group:long"] .thinking-line').click();
+  await page.locator('[data-entry-key="group:read-3"] .tool-tick').click();
+  const groupingFixture = await page.evaluate(() => ({
       calls: document.querySelectorAll('.chat-tool-group-calls .tool-tick').length,
       details: document.querySelectorAll('.chat-tool-group-calls .tool-detail').length,
       text: document.querySelector('#chat-log')?.innerText || ''
-    };
-  })()`);
-  assert.match(groupingFixture.collapsed, /3 tool calls · 1 failed · 2 thoughts · 25 ms/);
-  assert.equal(groupingFixture.collapsedRows, 1);
-  assert.equal(groupingFixture.rows, 3);
-  assert.match(groupingFixture.groupText, /read_file ×2 · \+1 thought · 1 failed · 12 ms/);
+  }));
+  assert.match(groupingInitial.collapsed, /3 tool calls · 1 failed · 2 thoughts · 25 ms/);
+  assert.equal(groupingInitial.collapsedRows, 1);
+  assert.equal(groupingOpen.rows, 3);
+  assert.match(groupingOpen.groupText, /read_file ×2 · \+1 thought · 1 failed · 12 ms/);
   assert.equal(groupingFixture.calls, 2);
   assert.equal(groupingFixture.details, 2);
   for (const text of ["ONE COMPLETE", "thin recorded thought", "TWO COMPLETE FAILURE", "long recorded thought", "THREE COMPLETE"]) assert.match(groupingFixture.text, new RegExp(text));
@@ -741,7 +744,7 @@ if (realModel) {
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('TWO COMPLETE FAILURE')`, "grouping fixture restored");
 
-  const twoArrowFixture = await browser.evaluate(`(async () => {
+  await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
     const session = bus.store.sessions[${JSON.stringify(sessionID)}];
     session.run = { ...session.run, status: 'idle' };
@@ -752,10 +755,11 @@ if (realModel) {
     ];
     bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
     await new Promise(resolve => setTimeout(resolve, 120));
-    document.querySelector('.chat-response-summary')?.click();
-    await new Promise(resolve => setTimeout(resolve, 80));
-    document.querySelectorAll('.tool-tick').forEach(node => node.click());
-    await new Promise(resolve => setTimeout(resolve, 80));
+    return true;
+  })()`);
+  await page.locator(".chat-step-summary").click();
+  for (const toolTick of await page.locator(".tool-tick").all()) await toolTick.click();
+  const twoArrowFixture = await page.evaluate(() => {
     const nodes = [...document.querySelectorAll('button.collapse-arrow')].filter(node => !node.hidden);
     return {
       arrows: nodes.map(node => ({
@@ -766,7 +770,7 @@ if (realModel) {
       })),
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
     };
-  })()`);
+  });
   assert.equal(twoArrowFixture.arrows.length, 2, JSON.stringify(twoArrowFixture));
   for (const band of twoArrowFixture.arrows) {
     assert.equal(band.position, "sticky");
@@ -779,7 +783,7 @@ if (realModel) {
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('two independent sections')`, "two-arrow fixture restored");
 
-  const deliveredChip = await browser.evaluate(`(async () => {
+  await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
     const session = bus.store.sessions[${JSON.stringify(sessionID)}];
     session.run = { ...session.run, status: 'idle' };
@@ -790,9 +794,11 @@ if (realModel) {
     ];
     bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
     await new Promise(resolve => setTimeout(resolve, 120));
-    document.querySelector('.chat-response-summary')?.click();
-    await new Promise(resolve => setTimeout(resolve, 120));
-    for (let attempt = 0; attempt < 50 && !document.querySelector('.file-chip a'); attempt++) await new Promise(resolve => setTimeout(resolve, 50));
+    return true;
+  })()`);
+  await page.locator(".chat-step-summary").click();
+  await page.locator(".file-chip a").waitFor({ state: "visible" });
+  const deliveredChip = await page.evaluate(() => {
     const chip = document.querySelector('.file-chip');
     return {
       text: chip?.innerText || '',
@@ -803,7 +809,7 @@ if (realModel) {
       gap: chip ? getComputedStyle(chip).gap : '',
       horizontalOverflow: document.documentElement.scrollWidth > document.documentElement.clientWidth
     };
-  })()`);
+  });
   assert.match(deliveredChip.text, /final\.txt/);
   assert.equal(deliveredChip.links, 1);
   assert.equal(deliveredChip.buttons, 0);
@@ -816,7 +822,7 @@ if (realModel) {
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('DELIVERY READY')`, "delivery fixture restored");
 
-  const proseBlocksFixture = await browser.evaluate(`(async () => {
+  await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
     const session = bus.store.sessions[${JSON.stringify(sessionID)}];
     session.run = { ...session.run, status: 'idle' };
@@ -830,47 +836,54 @@ if (realModel) {
     ];
     bus.setSelection('agent_b', ${JSON.stringify(sessionID)});
     await new Promise(resolve => setTimeout(resolve, 120));
+    return true;
+  })()`);
+  const firstProseHandle = await page.locator(".chat-response-prose").first().elementHandle();
+  assert.ok(firstProseHandle, "first prose block must be actionable");
+  const initial = await page.evaluate(() => {
     const response = document.querySelector('.chat-response');
-    const turn = response.querySelector('.chat-response-summary');
-    let folds = [...response.querySelectorAll('.chat-step-summary')];
-    let prose = [...response.querySelectorAll('.chat-response-prose')];
-    const firstProse = prose[0];
-    const initial = {
+    const folds = [...response.querySelectorAll('.chat-step-summary')];
+    const prose = [...response.querySelectorAll('.chat-response-prose')];
+    return {
       prose: prose.map(node => node.innerText),
       foldCount: folds.length,
       open: folds.map(node => node.getAttribute('aria-expanded')),
       stepRows: [...response.querySelectorAll('.chat-step-rows')].map(node => node.children.length)
     };
-    folds[0].click();
-    await new Promise(resolve => setTimeout(resolve, 80));
-    folds = [...response.querySelectorAll('.chat-step-summary')];
-    const afterFirst = {
+  });
+  await page.locator(".chat-step-summary").first().click();
+  const afterFirst = await page.evaluate((firstProse) => {
+    const response = document.querySelector('.chat-response');
+    const folds = [...response.querySelectorAll('.chat-step-summary')];
+    return {
       open: folds.map(node => node.getAttribute('aria-expanded')),
       first: folds[0].nextElementSibling.innerText,
       firstKeys: [...folds[0].nextElementSibling.querySelectorAll('[data-entry-key]')].map(node => node.dataset.entryKey),
       secondRows: folds[1].nextElementSibling.children.length,
       proseStable: firstProse === response.querySelectorAll('.chat-response-prose')[0] && firstProse.isConnected
     };
-    turn.click();
-    await new Promise(resolve => setTimeout(resolve, 80));
-    folds = [...response.querySelectorAll('.chat-step-summary')];
-    const afterTurnOpen = folds.map(node => node.getAttribute('aria-expanded'));
-    const afterTurnOpenKeys = folds.map(node => [...node.nextElementSibling.querySelectorAll('[data-entry-key]')].map(row => row.dataset.entryKey));
-    turn.click();
-    await new Promise(resolve => setTimeout(resolve, 80));
-    folds = [...response.querySelectorAll('.chat-step-summary')];
-    prose = [...response.querySelectorAll('.chat-response-prose')];
+  }, firstProseHandle);
+  await page.locator(".chat-response-summary").click();
+  const afterTurnOpen = await page.evaluate(() => {
+    const folds = [...document.querySelectorAll('.chat-response .chat-step-summary')];
     return {
-      initial,
-      afterFirst,
-      afterTurnOpen,
-      afterTurnOpenKeys,
+      open: folds.map(node => node.getAttribute('aria-expanded')),
+      keys: folds.map(node => [...node.nextElementSibling.querySelectorAll('[data-entry-key]')].map(row => row.dataset.entryKey))
+    };
+  });
+  await page.locator(".chat-response-summary").click();
+  const final = await page.evaluate((firstProse) => {
+    const response = document.querySelector('.chat-response');
+    const folds = [...response.querySelectorAll('.chat-step-summary')];
+    const prose = [...response.querySelectorAll('.chat-response-prose')];
+    return {
       afterTurnClose: folds.map(node => node.getAttribute('aria-expanded')),
       finalProse: prose.map(node => node.innerText),
       proseStable: firstProse === prose[0] && firstProse.isConnected,
       secondCollapsedText: folds[1].nextElementSibling.innerText
     };
-  })()`);
+  }, firstProseHandle);
+  const proseBlocksFixture = { initial, afterFirst, afterTurnOpen: afterTurnOpen.open, afterTurnOpenKeys: afterTurnOpen.keys, ...final };
   assert.deepEqual(proseBlocksFixture.initial.prose, ["FIRST PROSE BLOCK", "SECOND PROSE BLOCK"]);
   assert.equal(proseBlocksFixture.initial.foldCount, 2);
   assert.deepEqual(proseBlocksFixture.initial.open, ["false", "false"]);
@@ -1031,8 +1044,7 @@ if (realModel) {
   record("operator-attachments-paperclip-source");
   record("attachment-screen-jsonl");
 
-  await page.locator("#chat-task").evaluate(async (node) => {
-    const clipboard = new DataTransfer();
+  const ocrPNG = await page.evaluate(async () => {
     const canvas = document.createElement("canvas");
     canvas.width = 900;
     canvas.height = 220;
@@ -1043,20 +1055,19 @@ if (realModel) {
     context.font = "32px Consolas";
     context.fillText("AgentB OCR acceptance", 40, 80);
     context.fillText("ERROR 42 sample stack trace", 40, 140);
-    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
-    clipboard.items.add(new File([blob], "pasted-ocr.png", { type: "image/png" }));
-    node.dispatchEvent(new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: clipboard }));
+    return canvas.toDataURL("image/png").split(",")[1];
   });
-  const ocrAttachment = page.locator(".chat-pending-file").filter({ hasText: "pasted-ocr.png" });
+  await page.locator("#chat-file-picker").setInputFiles({ name: "ocr-acceptance.png", mimeType: "image/png", buffer: Buffer.from(ocrPNG, "base64") });
+  const ocrAttachment = page.locator(".chat-pending-file").filter({ hasText: "ocr-acceptance.png" });
   await ocrAttachment.waitFor({ state: "visible" });
-  assert.match(await ocrAttachment.innerText(), /OCR: pasted-ocr\.png\.txt/);
+  assert.match(await ocrAttachment.innerText(), /OCR: ocr-acceptance\.png\.txt/);
   assert.doesNotMatch(await ocrAttachment.innerText(), /cannot read images/);
   await page.screenshot({ path: join(baselineDirectory, "chat-ocr-sidecar-before-send.png") });
   await setTask("acceptance: attachment OCR");
   await waitProjectedChatText(sessionID, "Attachment received and rendered.", "OCR attachment answer");
-  const ocrMessage = await waitEvent(sessionID, (event) => event.type === "message.appended" && event.data.message?.attachments?.some((item) => item.path.endsWith("pasted-ocr.png")), "OCR attachment retained in JSONL");
+  const ocrMessage = await waitEvent(sessionID, (event) => event.type === "message.appended" && event.data.message?.attachments?.some((item) => item.path.endsWith("ocr-acceptance.png")), "OCR attachment retained in JSONL");
   assert.equal(ocrMessage.data.message.attachments.length, 1);
-  record("pasted-image-ocr-sidecar-before-send-and-retained");
+  record("trusted-image-input-ocr-sidecar-before-send-and-retained");
 
   const beforeReload = (await browserText("#chat-log")).slice(0, 120);
   await page.reload();

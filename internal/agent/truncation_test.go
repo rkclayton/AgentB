@@ -114,6 +114,57 @@ func TestLengthDuringToolArgumentsDoesNotEnterToolHistory(t *testing.T) {
 	}
 }
 
+func TestRunPublishesCurrentToolAndCoversBetweenTurnAccounting(t *testing.T) {
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, request)
+			return
+		}
+		if requests.Add(1) == 1 {
+			writeStreamChunk(t, w, map[string]any{
+				"choices": []any{map[string]any{"delta": map[string]any{"tool_calls": []any{
+					map[string]any{"index": 0, "id": "first", "type": "function", "function": map[string]any{"name": "write_file", "arguments": `{"path":"first.txt","content":"first"}`}},
+					map[string]any{"index": 1, "id": "second", "type": "function", "function": map[string]any{"name": "write_file", "arguments": `{"path":"second.txt","content":"second"}`}},
+				}}, "finish_reason": "tool_calls"}},
+				"usage": map[string]any{"prompt_tokens": 100, "completion_tokens": 20},
+			})
+			return
+		}
+		writeStreamChunk(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "done"}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 100, "completion_tokens": 1}})
+	}))
+	defer server.Close()
+
+	runner, item, bus := truncationRunner(t, server.URL, "estimated")
+	reason, detail, turns := runner.Run(context.Background(), item, "r-current-tool")
+	if reason != "done" || detail != "" || turns != 2 {
+		t.Fatalf("run=(%q,%q,%d)", reason, detail, turns)
+	}
+	eventsSeen := bus.Recent(item.ID)
+	sequence := make([]string, 0, len(eventsSeen))
+	for _, event := range eventsSeen {
+		data, _ := event.Data.(map[string]any)
+		switch event.Type {
+		case events.Stage:
+			sequence = append(sequence, fmt.Sprintf("stage:%s:%s:t%v", data["stage"], data["state"], data["turn"]))
+		case events.ToolCallEvent:
+			sequence = append(sequence, "call:"+fmt.Sprint(data["call_id"]))
+		case events.ToolResult:
+			sequence = append(sequence, "result:"+fmt.Sprint(data["call_id"]))
+		}
+	}
+	joined := strings.Join(sequence, "|")
+	for _, ordered := range []string{
+		"stage:dispatch:exit:t1|stage:execute:enter:t1|call:first|result:first|call:second|result:second|stage:execute:exit:t1",
+		"stage:append:exit:t1|stage:compact:enter:t1|stage:compact:exit:t1|stage:assemble:enter:t2",
+		"stage:parse:exit:t2|stage:append:enter:t2|stage:append:exit:t2|stage:append:enter:t2|stage:append:exit:t2",
+	} {
+		if !strings.Contains(joined, ordered) {
+			t.Fatalf("event sequence missing %q:\n%s", ordered, joined)
+		}
+	}
+}
+
 func TestMalformedHistoryRepairPreservesFailureNoteWithoutRestoringFailedAction(t *testing.T) {
 	var rejected atomic.Int32
 	var dispatched atomic.Value

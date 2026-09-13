@@ -137,14 +137,17 @@ func TestCapabilitySuiteLiveServiceSplit(t *testing.T) {
 
 	t.Run("read_edit_search_find_file_tools", func(t *testing.T) {
 		path := filepath.Join(workspace, "capability-text.txt")
-		if err := os.WriteFile(path, []byte("before needle\n"), 0600); err != nil {
+		if err := os.WriteFile(path, []byte("before needle   \r\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
 		if result := toolRegistry.CallDetailed(context.Background(), item, "read_file", map[string]any{"path": path}); !result.OK {
 			t.Fatalf("read=%+v", result)
 		}
-		if result := toolRegistry.CallDetailed(context.Background(), item, "edit_file", map[string]any{"path": path, "old_string": "before", "new_string": "after"}); !result.OK {
+		if result := toolRegistry.CallDetailed(context.Background(), item, "edit_file", map[string]any{"path": path, "old_string": "before needle\n", "new_string": "after needle\n"}); !result.OK || !strings.Contains(result.Content, "strategy: whitespace-normalized") || !strings.Contains(result.Content, "--- a/capability-text.txt") {
 			t.Fatalf("edit=%+v", result)
+		}
+		if data, err := os.ReadFile(path); err != nil || string(data) != "after needle\r\n" {
+			t.Fatalf("edit line-ending result=%q err=%v", data, err)
 		}
 		if result := toolRegistry.CallDetailed(context.Background(), item, "search_text", map[string]any{"path": workspace, "pattern": "needle"}); !result.OK || !strings.Contains(result.Content, "capability-text.txt") {
 			t.Fatalf("search=%+v", result)

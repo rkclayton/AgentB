@@ -57,6 +57,20 @@ func edit(t *testing.T, tool *EditFile, s *session.Session, path, old, replaceme
 	return tool.Call(context.Background(), s, map[string]any{"path": path, "old_string": old, "new_string": replacement})
 }
 
+func TestEditFileSchemaRemainsCompatible(t *testing.T) {
+	schema := (&EditFile{}).Schema()
+	properties := schema["properties"].(map[string]any)
+	for _, name := range []string{"path", "old_string", "new_string"} {
+		if _, ok := properties[name]; !ok {
+			t.Fatalf("schema missing %s: %#v", name, schema)
+		}
+	}
+	required := schema["required"].([]string)
+	if strings.Join(required, ",") != "path,old_string,new_string" {
+		t.Fatalf("required=%v", required)
+	}
+}
+
 func TestEditFile(t *testing.T) {
 	t.Run("exact_unique", func(t *testing.T) {
 		root := t.TempDir()
@@ -93,7 +107,7 @@ func TestEditFile(t *testing.T) {
 		s := testSession(root, "a", "A")
 		path := writeFixture(t, root, "x.txt", []byte("alpha   \nbeta\n"))
 		got, err := edit(t, tool, s, path, "alpha\nbeta", "A\nB")
-		if err != nil || !strings.Contains(got, "trailing-whitespace normalization") {
+		if err != nil || !strings.Contains(got, "strategy: whitespace-normalized") {
 			t.Fatalf("got %q, %v", got, err)
 		}
 	})
@@ -174,7 +188,7 @@ func TestEditFile(t *testing.T) {
 		s := testSession(root, "a", "A")
 		path := writeFixture(t, root, "x.txt", []byte("a\nb\nc"))
 		got, err := edit(t, tool, s, path, "b\n", "")
-		if err != nil || !strings.HasPrefix(got, "ok: deleted lines") {
+		if err != nil || !strings.HasPrefix(got, "ok: deleted lines") || !strings.Contains(got, "@@ -2,1 +2,0 @@\n-b") || strings.Contains(got, "-c") {
 			t.Fatalf("got %q, %v", got, err)
 		}
 	})
@@ -182,9 +196,9 @@ func TestEditFile(t *testing.T) {
 		root := t.TempDir()
 		tool, _, _, _ := testTools(root)
 		s := testSession(root, "a", "A")
-		path := writeFixture(t, root, "x.txt", []byte("one\nchanged file line\nthree\n"))
-		_, err := edit(t, tool, s, path, "one\nexpected old line\nthree", "x")
-		if err == nil || !strings.Contains(err.Error(), "Closest match: lines") || !strings.Contains(err.Error(), `"changed file line"`) || !strings.Contains(err.Error(), `"expected old line"`) {
+		path := writeFixture(t, root, "x.txt", []byte("one\nexpected old line\nchanged file line\n"))
+		_, err := edit(t, tool, s, path, "one\nexpected old line\nthree", "REPLACEMENT")
+		if err == nil || !strings.Contains(err.Error(), "Closest match: lines") || !strings.Contains(err.Error(), `"changed file line"`) || !strings.Contains(err.Error(), `"three"`) {
 			t.Fatalf("error %v", err)
 		}
 	})
@@ -225,6 +239,64 @@ func TestEditFile(t *testing.T) {
 		path := writeFixture(t, root, "x.txt", []byte("café\nhello 🌍\n"))
 		got, err := edit(t, tool, s, path, "hello 🌍", "hello 🚀")
 		if err != nil || !strings.Contains(got, "lines 2–2") {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+	t.Run("smart_quotes_and_dashes_match_ASCII", func(t *testing.T) {
+		root := t.TempDir()
+		tool, _, _, _ := testTools(root)
+		s := testSession(root, "a", "A")
+		path := writeFixture(t, root, "x.txt", []byte("message = \"don't re-run - wait\"\n"))
+		got, err := edit(t, tool, s, path, "message = “don’t re—run – wait”", "message = \"done\"")
+		if err != nil || !strings.Contains(got, "strategy: whitespace-normalized") {
+			t.Fatalf("got %q, %v", got, err)
+		}
+		data, _ := os.ReadFile(path)
+		if string(data) != "message = \"done\"\n" {
+			t.Fatalf("file %q", data)
+		}
+	})
+	t.Run("block_anchor_accepts_loose_middle", func(t *testing.T) {
+		root := t.TempDir()
+		tool, _, _, _ := testTools(root)
+		s := testSession(root, "a", "A")
+		path := writeFixture(t, root, "x.txt", []byte("before\nBEGIN unique\nactual middle one\nactual middle two\nEND unique\nafter\n"))
+		got, err := edit(t, tool, s, path, "BEGIN unique\nexpected middle\nstill expected\nEND unique", "BEGIN unique\nnew middle\nEND unique")
+		if err != nil || !strings.Contains(got, "strategy: block-anchor; loose middle accepted") {
+			t.Fatalf("got %q, %v", got, err)
+		}
+		data, _ := os.ReadFile(path)
+		if string(data) != "before\nBEGIN unique\nnew middle\nEND unique\nafter\n" {
+			t.Fatalf("file %q", data)
+		}
+	})
+	t.Run("result_is_unified_diff", func(t *testing.T) {
+		root := t.TempDir()
+		tool, _, _, _ := testTools(root)
+		s := testSession(root, "a", "A")
+		path := writeFixture(t, root, "x.txt", []byte("one\ntwo\nthree\n"))
+		got, err := edit(t, tool, s, path, "two", "TWO")
+		if err != nil || !strings.Contains(got, "--- a/x.txt\n+++ b/x.txt\n@@ -2,1 +2,1 @@\n-two\n+TWO") {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+	t.Run("JSON_syntax_diagnostic_describes_failure", func(t *testing.T) {
+		root := t.TempDir()
+		tool, _, _, _ := testTools(root)
+		s := testSession(root, "a", "A")
+		path := writeFixture(t, root, "x.json", []byte("{\"ok\": true}\n"))
+		got, err := edit(t, tool, s, path, "true", "}")
+		if err != nil || !strings.Contains(got, "syntax check: failed (json):") || strings.Contains(got, "json.Valid") {
+			t.Fatalf("got %q, %v", got, err)
+		}
+	})
+	t.Run("Go_syntax_diagnostic_describes_failure", func(t *testing.T) {
+		root := t.TempDir()
+		tool, _, _, _ := testTools(root)
+		s := testSession(root, "a", "A")
+		path := writeFixture(t, root, "x.go", []byte("package sample\n\nfunc ok() {}\n"))
+		got, err := edit(t, tool, s, path, "func ok() {}", "func broken( {")
+		if err != nil || !strings.Contains(got, "syntax check: failed (go):") || strings.Contains(got, "parser.ParseFile") {
 			t.Fatalf("got %q, %v", got, err)
 		}
 	})

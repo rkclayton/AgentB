@@ -113,9 +113,11 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 	produced := map[string]delivery.Source{}
 	defer func() {
 		result := delivery.Result{}
-		if r.deliver != nil {
-			result = r.deliver(s, runID, delivery.SortedSources(produced))
-		}
+		r.stage(s, runID, turns, "append", func() {
+			if r.deliver != nil {
+				result = r.deliver(s, runID, delivery.SortedSources(produced))
+			}
+		})
 		if reason == "turn_ceiling" {
 			detail = turnCeilingDetail(turns, result)
 		}
@@ -342,11 +344,13 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 			if response.FinishReason == "length" {
 				return "length", "model output was truncated", turn
 			}
-			message, _ := r.makeMessage(ctx, profile, "assistant", response.Content, "history", turn)
-			message.Reasoning = response.Reasoning
-			currentReasoning[message.ID] = true
-			s.Append(message)
-			r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
+			r.stage(s, runID, turn, "append", func() {
+				message, _ := r.makeMessage(ctx, profile, "assistant", response.Content, "history", turn)
+				message.Reasoning = response.Reasoning
+				currentReasoning[message.ID] = true
+				s.Append(message)
+				r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
+			})
 			return "done", "", turn
 		}
 		assistant, _ := r.makeMessage(ctx, profile, "assistant", response.Content, "history", turn)
@@ -376,7 +380,6 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 				} else {
 					args = map[string]any{}
 				}
-				r.bus.Publish(events.New(events.ToolCallEvent, s.ID, runID, map[string]any{"turn": turn, "call_id": call.ID, "name": call.Name, "args": sanitizedToolArguments(call.Name, args)}))
 				results = append(results, result{call: call, durableCall: durableToolCalls[index], args: args, argErr: err})
 			}
 		})
@@ -384,6 +387,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 			remainingResultTokens := max(0, budget.NCtx-budget.Reserve-budget.UsedEst-toolResultContextMargin)
 			for index := range results {
 				item := &results[index]
+				r.bus.Publish(events.New(events.ToolCallEvent, s.ID, runID, map[string]any{"turn": turn, "call_id": item.call.ID, "name": item.call.Name, "args": sanitizedToolArguments(item.call.Name, item.args)}))
 				start := time.Now()
 				if item.argErr != nil {
 					item.content = "error: " + item.argErr.Error()
@@ -468,7 +472,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 		if turn >= r.cfg().Run.MaxTurns {
 			return "turn_ceiling", "maximum turns reached", turn
 		}
-		r.compactAfterTurn(ctx, s, runID, turn, profile, currentReasoning)
+		r.stage(s, runID, turn, "compact", func() {
+			r.compactAfterTurn(ctx, s, runID, turn, profile, currentReasoning)
+		})
 	}
 }
 
@@ -915,8 +921,6 @@ func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID
 		changed = r.summarize(ctx, s, runID, p) || changed
 	}
 	if changed {
-		r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": "compact", "state": "enter", "turn": turn, "ms": 0}))
-		r.bus.Publish(events.New(events.Stage, s.ID, runID, map[string]any{"stage": "compact", "state": "exit", "turn": turn, "ms": 0}))
 		next, err := r.measureSession(ctx, p, s, current, false)
 		if err != nil {
 			r.operationalError(s, runID, "compaction_budget", err)
