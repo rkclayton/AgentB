@@ -179,15 +179,45 @@ func TestTruncatedToolRetryIsBoundedVisibleAndNeverWritesHarnessUserJSONL(t *tes
 }
 
 func TestStopBlockedModelResumesWithAbortRecord(t *testing.T) {
+	for _, test := range []struct {
+		name            string
+		rejectMidSystem bool
+	}{
+		{name: "position-constrained", rejectMidSystem: true},
+		{name: "unconstrained"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			testStopBlockedModelResumesWithAbortRecord(t, test.rejectMidSystem)
+		})
+	}
+}
+
+func testStopBlockedModelResumesWithAbortRecord(t *testing.T, rejectMidSystem bool) {
 	entered := make(chan struct{})
 	resumed := make(chan []llm.Message, 1)
 	var calls atomic.Int32
+	var rejected atomic.Int32
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/tokenize" {
+			_, _ = fmt.Fprint(w, `{"tokens":[1,2,3,4]}`)
+			return
+		}
 		var body struct {
 			Messages []llm.Message `json:"messages"`
 		}
 		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 			t.Fatal(err)
+		}
+		if request.URL.Path == "/apply-template" {
+			for index, message := range body.Messages {
+				if rejectMidSystem && index > 0 && (message.Role == "system" || message.Role == "developer") {
+					rejected.Add(1)
+					http.Error(w, "System message must be at the beginning.", http.StatusInternalServerError)
+					return
+				}
+			}
+			_, _ = fmt.Fprint(w, `{"prompt":"ok"}`)
+			return
 		}
 		if calls.Add(1) == 1 {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -201,7 +231,7 @@ func TestStopBlockedModelResumesWithAbortRecord(t *testing.T) {
 		writeStreamChunk(t, w, map[string]any{"choices": []any{map[string]any{"delta": map[string]any{"content": "resumed"}, "finish_reason": "stop"}}, "usage": map[string]any{"prompt_tokens": 100, "completion_tokens": 1}})
 	}))
 	defer model.Close()
-	_, _, item, scheduler := schedulerFixture(t, model.URL)
+	_, _, item, scheduler := schedulerFixtureAccounting(t, model.URL, "exact")
 	eventStream, unsubscribe := scheduler.bus.Subscribe()
 	defer unsubscribe()
 	if _, err := scheduler.Submit(context.Background(), item.ID, "blocked"); err != nil {
@@ -238,13 +268,24 @@ func TestStopBlockedModelResumesWithAbortRecord(t *testing.T) {
 	select {
 	case messages = <-resumed:
 	case <-time.After(3 * time.Second):
-		t.Fatal("resuming model request missing")
+		t.Fatalf("resuming model request missing: rejected=%d run=%+v", rejected.Load(), item.Snapshot().Run)
 	}
 	joined := ""
-	for _, message := range messages {
+	for index, message := range messages {
 		joined += fmt.Sprintf("%s:%s\n", message.Role, message.Content)
+		if index > 0 && (message.Role == "system" || message.Role == "developer") {
+			t.Fatalf("in-position harness message=%+v", message)
+		}
 	}
-	if !strings.Contains(joined, "system:[HARNESS ABORT RECORD") || !strings.Contains(joined, "partial model output") || !strings.Contains(joined, "user:resume") {
+	stored := item.MessagesCopy()
+	var abortRecord events.Message
+	for _, message := range stored {
+		if strings.HasPrefix(message.Content, harnessAbortRecordPrefix+"\n") {
+			abortRecord = message
+			break
+		}
+	}
+	if rejected.Load() != 0 || len(messages) == 0 || messages[0].Role != "system" || abortRecord.Role != "system" || !strings.Contains(messageText(messages[0].Content), abortRecord.Content) || !strings.Contains(joined, "partial model output") || !strings.Contains(joined, "user:resume") {
 		t.Fatalf("resuming messages:\n%s", joined)
 	}
 }

@@ -402,15 +402,22 @@ func TestStopDetachesUncooperativeRunAtBound(t *testing.T) {
 }
 
 func schedulerFixture(t *testing.T, modelURL string) (config.Config, *config.Profile, *session.Session, *Scheduler) {
+	return schedulerFixtureAccounting(t, modelURL, "estimated")
+}
+
+func schedulerFixtureAccounting(t *testing.T, modelURL, accounting string) (config.Config, *config.Profile, *session.Session, *Scheduler) {
 	t.Helper()
 	workspace := t.TempDir()
 	cfg := config.Defaults(workspace)
-	cfg.Context.Accounting = "estimated"
+	cfg.Context.Accounting = accounting
 	cfg.Run.MaxConcurrent = 1
 	profile := cfg.Servers[0]
 	profile.BaseURL, profile.Model, profile.RequestTimeoutS = modelURL, "model", 30
 	profile.Context.NCtx, profile.Context.ReserveOutput = 32768, 8192
 	profile.Capabilities.Streaming, profile.Capabilities.ToolCalls, profile.Capabilities.OverflowBehavior = true, true, "error"
+	profile.Capabilities.Tokenize = accounting == "exact"
+	profile.Capabilities.ApplyTemplate = accounting == "exact"
+	profile.Capabilities.ApplyTemplateTools = accounting == "exact"
 	cfg.Servers[0] = profile
 	bus := events.NewBus()
 	writers, err := events.NewWriters(t.TempDir())

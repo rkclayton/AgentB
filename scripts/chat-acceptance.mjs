@@ -86,8 +86,7 @@ const fakeHandler = async (request, response) => {
   }
   if (request.url === "/apply-template") {
     const invalid = (body.messages || []).findIndex((message, index) => index > 0
-      && ["system", "developer"].includes(message.role)
-      && String(message.content || "").includes("Progress note (auto-summary of earlier turns):"));
+      && ["system", "developer"].includes(message.role));
     if (invalid >= 0) {
       response.statusCode = 500;
       return void response.end("System message must be at the beginning.");
