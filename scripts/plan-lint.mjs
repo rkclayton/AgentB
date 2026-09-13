@@ -209,7 +209,15 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
     const currentText = currentMatch[2];
     const orderId = currentText.match(/^Order ID:\s*`([^`]+)`/m)?.[1] ?? currentMatch[1].match(/\b(v\d+\.\d+\.\d+|[A-Z][A-Z0-9-]+)\b/)?.[1];
     const inFlight = effectivePlan.match(/^## In flight\s*$\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? "";
-    if (orderId) for (const marker of inFlight.matchAll(/^(?:-\s*)?`?([^\s`/]+)\/(W\d+)/gm)) if (marker[1] !== orderId) errors.push(`PLAN.md: In flight marker ${marker[1]}/${marker[2]} belongs to another order (current ${orderId})`);
+    if (orderId) {
+      const activeMarkers = new Map();
+      for (const marker of inFlight.matchAll(/^(?:-\s*)?`?([^\s`/]+)\/(W\d+)\s+(started|completed)\b/gmi)) {
+        const key = `${marker[1]}/${marker[2].toUpperCase()}`;
+        if (marker[3].toLowerCase() === "started") activeMarkers.set(key, { orderId: marker[1], workId: marker[2].toUpperCase() });
+        else activeMarkers.delete(key);
+      }
+      for (const marker of activeMarkers.values()) if (marker.orderId !== orderId) errors.push(`PLAN.md: In flight marker ${marker.orderId}/${marker.workId} belongs to another order (current ${orderId})`);
+    }
     const workItems = [...currentText.matchAll(/^- (W\d+)\s+\*\*(?:item\s+)?([0-9]+[a-z]*)\b([^\n]*)/gmi)];
     if (!/No product changes/i.test(currentText)) {
       const executable = new Map();

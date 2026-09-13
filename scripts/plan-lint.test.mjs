@@ -259,6 +259,13 @@ function prepare(root) {
 }
 
 {
+  const root = makeFixture("\nNo product changes.\n\n- W1 Inspect.", [], { inFlight: "OTHER/W0 started 11:00\nOTHER/W0 completed 11:01\nTEST/W0 started 12:00" });
+  prepare(root);
+  const result = run(root, "--structural");
+  assert.equal(result.status, 0, "completed historical markers from another order must remain valid");
+}
+
+{
   const root = makeFixture("\nNo product changes.\n\n- W1 Inspect.", []);
   prepare(root);
   fs.writeFileSync(path.join(root, "PLAN.md"), fs.readFileSync(path.join(root, "PLAN.md"), "utf8").replace("## Index", "## Completed work order — old\n\nClosed.\n\n## Index"));
