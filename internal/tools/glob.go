@@ -54,11 +54,15 @@ func (g *Glob) Call(ctx context.Context, s *session.Session, args map[string]any
 	if path == "" {
 		path = "."
 	}
-	root, err := resolveForTool(ctx, s.Workspace, path)
+	readRoot, rootErr := s.ReadRoot(path)
+	if rootErr != nil {
+		return "", rootErr
+	}
+	root, err := resolveForSessionTool(ctx, s, readRoot, path)
 	if err != nil {
 		return "", err
 	}
-	workspaceRoot, err := resolveForTool(ctx, s.Workspace, ".")
+	workspaceRoot, err := resolveForSessionTool(ctx, s, readRoot, ".")
 	if err != nil {
 		return "", err
 	}

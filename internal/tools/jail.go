@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"harness/internal/session"
 )
 
 func Resolve(workspace, path string) (string, error) {
@@ -24,6 +26,13 @@ func resolveForTool(ctx context.Context, workspace, path string) (string, error)
 		enforceWorkspace = false
 	}
 	return resolvePath(workspace, path, enforceWorkspace)
+}
+
+func resolveForSessionTool(ctx context.Context, s *session.Session, root, path string) (string, error) {
+	if s.Role == "d" {
+		ctx = context.WithValue(ctx, osPathPolicyKey{}, false)
+	}
+	return resolveForTool(ctx, root, path)
 }
 
 func resolvePath(workspace, path string, enforceWorkspace bool) (string, error) {

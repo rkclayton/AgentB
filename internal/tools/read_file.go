@@ -33,7 +33,11 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 	if !ok || path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	resolved, err := resolveForTool(ctx, s.Workspace, path)
+	root, rootErr := s.ReadRoot(path)
+	if rootErr != nil {
+		return "", rootErr
+	}
+	resolved, err := resolveForSessionTool(ctx, s, root, path)
 	if err != nil {
 		return "", err
 	}
@@ -59,7 +63,7 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 		if lineErr != nil {
 			return "", lineErr
 		}
-		s.Touch(workspaceRel(s.Workspace, resolved))
+		s.Touch(workspaceRel(root, resolved))
 		return result, nil
 	}
 	if _, linesOnly := args["lines"]; linesOnly {
@@ -73,7 +77,7 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 		return "", err
 	}
 	result := numberedReadFileWindow(string(data), window)
-	s.Touch(workspaceRel(s.Workspace, resolved))
+	s.Touch(workspaceRel(root, resolved))
 	return result, nil
 }
 

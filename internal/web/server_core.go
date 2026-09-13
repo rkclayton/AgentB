@@ -135,7 +135,10 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 		pickFolder: nativeFolderPicker,
 	}
 }
-func (s *Server) SetRegistry(registry *session.Registry) { s.registry = registry }
+func (s *Server) SetRegistry(registry *session.Registry) {
+	registry.SetPlansRoot(filepath.Join(s.roots.Data, "plans"))
+	s.registry = registry
+}
 func (s *Server) SetWorkspaceState(manager *workspaceinfo.Manager, memories *memory.Manager) {
 	s.workspaceState, s.memoryState = manager, memories
 }
@@ -209,6 +212,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/navigation-measurements", s.replayGuard(s.navigationMeasurement))
 	mux.HandleFunc("/api/navigation-suppressions", s.replayGuard(s.navigationSuppression))
 	mux.HandleFunc("/api/sessions", s.replayGuard(s.sessions))
+	mux.HandleFunc("/api/plans", s.replayGuard(s.plans))
 	mux.HandleFunc("/api/sessions/", s.replayGuard(s.session))
 	mux.HandleFunc("/api/workspaces", s.replayGuard(s.workspaces))
 	mux.HandleFunc("/api/workspaces/", s.replayGuard(s.workspaceAction))

@@ -99,8 +99,9 @@ test("No-agent and blank Plan wells are explicit and Console links to active too
 
 test("New chat uses the fixed left plus and history uses the agent right-click menu", () => {
   assert.match(html, /id="app-shell"[^>]+data-page="console"/);
-  assert.match(shell, /left\.append\(newChatButton, tabs\)/);
-  assert.match(shell, /newChatButton\.onclick = \(\) => void createChat\(selectedSession\?\.workspace \|\| store\.config\.workspace, newChatAgentID\)/);
+  assert.match(shell, /left\.append\(newChatButton, newChatMenu, tabs\)/);
+  assert.match(shell, /hasD \? showRoleMenu/);
+  assert.match(shell, /: void createChat\(selectedSession\?\.workspace \|\| store\.config\.workspace, "agent_b"\)/);
   assert.doesNotMatch(shell, /wrap\.append\(newChatButton\)|wrap\.append\(add\)/);
   assert.match(shell, /oncontextmenu/);
   assert.match(shell, /agent-chat-rename/);
@@ -108,6 +109,9 @@ test("New chat uses the fixed left plus and history uses the agent right-click m
   assert.doesNotMatch(html + css, /chat-list|chat-list-toggle/);
   assert.doesNotMatch(html, /chat-clear-conversation|Clear conversation/);
   assert.match(shell, /source_session_id: source\.id, workspace/);
+  assert.match(shell, /agent_d · \$\{name\} — plan/);
+  assert.match(shell, /api\("\/api\/plans", undefined, "GET"\)/);
+  assert.match(shell, /role: "d", plan_id: planID/);
   assert.match(shell, /button\("", chatName/);
   assert.match(shell, /Stop it before closing the chat/);
 });

@@ -56,7 +56,11 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 			return "", fmt.Errorf("invalid glob: %v", err)
 		}
 	}
-	root, err := resolveForTool(ctx, s.Workspace, path)
+	readRoot, rootErr := s.ReadRoot(path)
+	if rootErr != nil {
+		return "", rootErr
+	}
+	root, err := resolveForSessionTool(ctx, s, readRoot, path)
 	if err != nil {
 		return "", err
 	}
@@ -101,7 +105,7 @@ func (g *Grep) Call(ctx context.Context, s *session.Session, args map[string]any
 		if strings.IndexByte(string(sample), 0) >= 0 {
 			return nil
 		}
-		rel := workspaceRel(s.Workspace, filePath)
+		rel := workspaceRel(readRoot, filePath)
 		for index, line := range strings.Split(normalizeLF(string(data)), "\n") {
 			if !re.MatchString(line) {
 				continue

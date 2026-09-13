@@ -1,5 +1,5 @@
 import { api, reduce, setSelection, store, subscribe } from "./bus.js";
-import { chatRowText, closeConfirmText, firstUserLine, isRunning } from "./chat-lifecycle.js";
+import { chatRowText, closeConfirmText, firstUserLine, isRunning, sessionTitle } from "./chat-lifecycle.js";
 import { installUIErrorRelay } from "./ui-error-relay.js";
 import { requestNavigation } from "./navigation-guard.js";
 import { beginNavigation } from "./navigation-telemetry.js";
@@ -30,9 +30,11 @@ export function initShell(options = {}) {
 
   const left = node("div", "shell-left");
   const newChatButton = button("+", "New chat with agent_b", "agent-tab-new");
+  const newChatMenu = node("div", "shell-menu shell-new-menu");
+  newChatMenu.hidden = true;
   const tabs = node("nav", "agent-tabs");
   tabs.setAttribute("aria-label", "Chats");
-  left.append(newChatButton, tabs);
+  left.append(newChatButton, newChatMenu, tabs);
 
   const right = node("div", "shell-right");
   const pages = node("nav", "shell-pages");
@@ -62,7 +64,7 @@ export function initShell(options = {}) {
   right.append(pages, settings);
   root.append(left, right);
   document.addEventListener("click", (event) => {
-    if (!tabs.contains(event.target)) for (const menu of tabs.querySelectorAll(".shell-menu")) menu.hidden = true;
+    if (!root.contains(event.target)) for (const menu of root.querySelectorAll(".shell-menu")) menu.hidden = true;
   });
 
   function report(message) {
@@ -73,9 +75,8 @@ export function initShell(options = {}) {
   }
 
   function sessionsFor(agentID, includeClosed = true) {
-    if (agentID !== "agent_b") return [];
     return Object.values(store.sessions)
-      .filter((session) => includeClosed || !session.closed)
+      .filter((session) => `agent_${session.role === "d" ? "d" : "b"}` === agentID && (includeClosed || !session.closed))
       .sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0));
   }
 
@@ -108,17 +109,18 @@ export function initShell(options = {}) {
 
   function renderTabs() {
     tabs.replaceChildren();
-    const agentID = "agent_b";
-    const open = sessionsFor(agentID, false);
+    const open = Object.values(store.sessions).filter((session) => !session.closed).sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0));
     const selectedSession = store.sessions[store.selection.session_id];
-    const newChatAgentID = selectedSession?.agent_id || agentKey(store.config.agents?.[0]) || agentID;
-    newChatButton.title = `New chat with ${newChatAgentID}`;
+    const configured = configuredAgent(selectedSession);
+    const hasD = !!String(configured?.d || "").trim();
+    newChatButton.title = hasD ? "New chat or plan" : "New chat with agent_b";
     newChatButton.setAttribute("aria-label", newChatButton.title);
     newChatButton.disabled = store.replay || !(store.config.agents || []).length;
-    newChatButton.onclick = () => void createChat(selectedSession?.workspace || store.config.workspace, newChatAgentID);
+    newChatButton.onclick = () => hasD ? showRoleMenu(newChatMenu, newChatButton, configured) : void createChat(selectedSession?.workspace || store.config.workspace, "agent_b");
     if ((page === "chat" || page === "console") && store.selection.agent_id) rememberAgentSide(store.selection.agent_id, page);
     const rendered = open.length ? open : [null];
     for (const session of rendered) {
+      const agentID = `agent_${session?.role === "d" ? "d" : "b"}`;
       const wrap = node("div", "agent-tab-wrap");
       wrap.dataset.agent = agentID;
       if (session) wrap.dataset.session = session.id;
@@ -170,6 +172,37 @@ export function initShell(options = {}) {
       wrap.append(menu);
       tabs.append(wrap);
     }
+  }
+
+  function configuredAgent(session) {
+    return (store.config.agents || []).find((agent) => agentKey(agent) === session?.agent_id) || store.config.agents?.[0];
+  }
+
+  function showRoleMenu(menu, anchor, configured) {
+    menu.replaceChildren();
+    const workspace = store.sessions[store.selection.session_id]?.workspace || store.config.workspace;
+    const name = configured?.name || "Agent";
+    const chat = button(`agent_b · ${name} — chat`, "Open chat", "shell-new-choice");
+    chat.onclick = () => { menu.hidden = true; void createChat(workspace, "agent_b"); };
+    const plan = button(`agent_d · ${name} — plan`, "Open plan chat", "shell-new-choice");
+    plan.onclick = () => void showPlanMenu(menu, anchor, configured, workspace);
+    menu.append(chat, plan);
+    revealMenu(menu, anchor);
+  }
+
+  async function showPlanMenu(menu, anchor, configured, workspace) {
+    try {
+      const plans = await api("/api/plans", undefined, "GET");
+      menu.replaceChildren();
+      const add = (label, planID = "") => {
+        const choice = button(label, label, "shell-new-choice");
+        choice.onclick = () => { menu.hidden = true; void createChat(workspace, "agent_d", planID, configured); };
+        menu.append(choice);
+      };
+      add("none");
+      for (const plan of plans) add(plan.name || plan.id, plan.id);
+      revealMenu(menu, anchor);
+    } catch (error) { report(error.message); }
   }
 
   function renderAgentMenu(menu, agentID) {
@@ -309,11 +342,13 @@ export function initShell(options = {}) {
     } catch (error) { report(error.message); }
   }
 
-  async function createChat(workspace, agentID = "agent_b") {
+  async function createChat(workspace, agentID = "agent_b", planID = "", configured = null) {
     const source = store.sessions[store.selection.session_id] || Object.values(store.sessions).sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0))[0];
     try {
-      const configuredID = agentKey(store.config.agents?.[0]);
-      const body = source ? { source_session_id: source.id, workspace } : { agent_id: configuredID, workspace };
+      const configuredID = agentKey(configured || configuredAgent(source));
+      const body = agentID === "agent_d"
+        ? { agent_id: configuredID, workspace, role: "d", plan_id: planID }
+        : source && source.role !== "d" ? { source_session_id: source.id, workspace } : { agent_id: configuredID, workspace };
       const result = await api("/api/sessions", body);
       reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
       setSelection(agentID, result.session.id);
@@ -322,6 +357,7 @@ export function initShell(options = {}) {
 
   function render() {
     const session = store.sessions[store.selection.session_id];
+    document.title = session ? sessionTitle(session) : "Agent_b";
     renderTabs();
     const query = new URLSearchParams();
     if (session) query.set("session", session.id);

@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -34,12 +35,14 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			ServerID        string `json:"server_id"`
 			Workspace       string `json:"workspace"`
 			SourceSessionID string `json:"source_session_id"`
+			Role            string `json:"role"`
+			PlanID          string `json:"plan_id"`
 		}
 		if !decode(w, r, &body) {
 			return
 		}
 		if body.SourceSessionID != "" {
-			if body.Label != "" || body.AgentID != "" || body.ServerID != "" {
+			if body.Label != "" || body.AgentID != "" || body.ServerID != "" || body.Role != "" || body.PlanID != "" {
 				writeError(w, 400, "source_session_id cannot be combined with overrides", "session")
 				return
 			}
@@ -76,11 +79,15 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			body.AgentID = s.cfg.DefaultAgentID()
 			s.mu.RUnlock()
 		}
-		if runnable, reason := s.registry.AgentRunnable(body.AgentID); !runnable {
+		role := body.Role
+		if role == "" {
+			role = "b"
+		}
+		if runnable, reason := s.registry.AgentRoleRunnable(body.AgentID, role); !runnable {
 			writeError(w, 400, reason, "agent_id")
 			return
 		}
-		item, err := s.registry.Create(body.Label, body.AgentID, body.Workspace)
+		item, err := s.registry.CreateRole(body.Label, body.AgentID, body.Workspace, body.Role, body.PlanID)
 		if err != nil {
 			writeError(w, 400, err.Error(), "session")
 			return
@@ -92,6 +99,43 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 	default:
 		method(w)
 	}
+}
+
+func (s *Server) plans(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		method(w)
+		return
+	}
+	root := filepath.Join(s.roots.Data, "plans")
+	entries, err := os.ReadDir(root)
+	if os.IsNotExist(err) {
+		writeJSON(w, 200, []any{})
+		return
+	}
+	if err != nil {
+		writeError(w, 500, err.Error(), "plans")
+		return
+	}
+	values := []map[string]string{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		id := entry.Name()
+		name := id
+		if data, readErr := os.ReadFile(filepath.Join(root, id, "plan.md")); readErr == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					if value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#")); value != "" {
+						name = value
+						break
+					}
+				}
+			}
+		}
+		values = append(values, map[string]string{"id": id, "name": name})
+	}
+	writeJSON(w, 200, values)
 }
 
 func (s *Server) workspaces(w http.ResponseWriter, r *http.Request) {

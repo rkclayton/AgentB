@@ -1351,6 +1351,32 @@ if (realModel) {
   assert.ok(restartedState.sessions[scriptSessionID]?.messages?.some((message) => message.content?.includes("acceptance: run-script grant")));
   assert.ok((await readdir(join(args.data, "chats"))).filter((name) => name.endsWith(".jsonl")).length >= retainedBeforeRestart);
   record("chats-transcripts-and-names-survive-application-restart");
+
+  const browserPlanDir = join(args.data, "plans", "browser-plan");
+  await mkdir(join(browserPlanDir, "plan", "items"), { recursive: true });
+  await writeFile(join(browserPlanDir, "plan.md"), "# Browser plan\n");
+  await writeFile(join(browserPlanDir, "NOTES.md"), "");
+  const beforeD = await state();
+  await json(`http://127.0.0.1:${appPort}/api/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-AgentB-Mutation-Token": beforeD.mutation_token },
+    body: JSON.stringify({ agents: [{ ...beforeD.config.agents[0], d: "acceptance" }] }),
+  });
+  await page.reload();
+  await browser.wait(`document.querySelector('.shell-left > .agent-tab-new')?.title === 'New chat or plan'`, "d-aware plus");
+  await page.locator(".shell-left > .agent-tab-new").click();
+  const roleChoices = page.locator(".shell-new-menu .shell-new-choice");
+  assert.deepEqual(await roleChoices.allTextContents(), ["agent_b · Acceptance — chat", "agent_d · Acceptance — plan"]);
+  await roleChoices.nth(1).click();
+  await browser.wait(`[...document.querySelectorAll('.shell-new-menu .shell-new-choice')].some(item=>item.textContent==='Browser plan')`, "plan choices");
+  assert.equal(await page.locator(".shell-new-menu .shell-new-choice").first().innerText(), "none");
+  await clickText(".shell-new-menu .shell-new-choice", "Browser plan");
+  await browser.wait(`document.querySelector('.agent-tab-wrap.selected .agent-tab')?.innerText.includes('agent_d') && document.title.endsWith('· plan: Browser plan')`, "d chat plan identity");
+  const dState = await state();
+  const dSession = Object.values(dState.sessions).find((session) => session.role === "d" && session.plan_id === "browser-plan");
+  assert.ok(dSession, JSON.stringify(dState.sessions));
+  assert.equal(dSession.server_id, "acceptance");
+  record("d-plus-plan-choice-tab-and-title");
   record("fake-model-script-complete");
   await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID, shell_flip: shellFlipEvidence, shell_style_boundary: shellStyleBoundaryEvidence }, null, 2));
   const evidenceLogs = join(evidenceRun, "jsonl");

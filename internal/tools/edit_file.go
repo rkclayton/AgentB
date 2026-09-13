@@ -32,9 +32,6 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 	if path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	if err := refuseRepoPolicyWrite(s.Workspace, path); err != nil {
-		return "", err
-	}
 	if !oldOK {
 		return "", fmt.Errorf("old_string is required")
 	}
@@ -44,12 +41,19 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 	if old == "" {
 		return "", fmt.Errorf("old_string is empty; use write_file to create a file, or give the exact text to replace.")
 	}
-	resolved, err := resolveForTool(ctx, s.Workspace, path)
+	root, rootErr := s.WriteRoot(path)
+	if rootErr != nil {
+		return "", rootErr
+	}
+	if err := refuseRepoPolicyWrite(root, path); err != nil {
+		return "", err
+	}
+	resolved, err := resolveForSessionTool(ctx, s, root, path)
 	if err != nil {
 		return "", err
 	}
 	displayPath := cleanRel(path)
-	if relative, relativeErr := filepath.Rel(s.Workspace, resolved); relativeErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+	if relative, relativeErr := filepath.Rel(root, resolved); relativeErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		displayPath = cleanRel(relative)
 	}
 	prefix, err := e.coordinator.check(s, path, resolved)

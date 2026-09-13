@@ -110,6 +110,10 @@ type Snapshot struct {
 	ServerID             string                     `json:"server_id"`
 	AgentName            string                     `json:"agent_name"`
 	BProfile             string                     `json:"b_profile"`
+	Role                 string                     `json:"role"`
+	PlanID               string                     `json:"plan_id,omitempty"`
+	PlanName             string                     `json:"plan_name,omitempty"`
+	PlanDir              string                     `json:"plan_dir,omitempty"`
 	CreatedAt            string                     `json:"created_at"`
 	Workspace            string                     `json:"workspace"`
 	WorkspaceDir         string                     `json:"workspace_dir"`
@@ -218,7 +222,11 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		}
 	case events.SessionUpdated:
 		next.AgentID = firstString(stringValue(data["agent_id"]), next.AgentID)
-		next.ServerID = stringValue(data["server_id"])
+		next.ServerID = firstString(stringValue(data["server_id"]), next.ServerID)
+		next.Role = firstString(stringValue(data["role"]), next.Role)
+		next.PlanID = firstString(stringValue(data["plan_id"]), next.PlanID)
+		next.PlanName = firstString(stringValue(data["plan_name"]), next.PlanName)
+		next.PlanDir = firstString(stringValue(data["plan_dir"]), next.PlanDir)
 		if value := stringValue(data["agent_name"]); value != "" {
 			next.AgentName = value
 		}
@@ -699,6 +707,10 @@ type seed struct {
 	AgentName            string                     `json:"agent_name"`
 	MainProfile          string                     `json:"main_profile"`
 	BProfile             string                     `json:"b_profile"`
+	Role                 string                     `json:"role"`
+	PlanID               string                     `json:"plan_id,omitempty"`
+	PlanName             string                     `json:"plan_name,omitempty"`
+	PlanDir              string                     `json:"plan_dir,omitempty"`
 	CreatedAt            string                     `json:"created_at"`
 	Closed               bool                       `json:"closed"`
 	NamePinned           bool                       `json:"name_pinned,omitempty"`
@@ -733,7 +745,7 @@ type seed struct {
 func (value seed) snapshot(cursor Cursor) Snapshot {
 	return Snapshot{
 		SchemaVersion: SchemaVersion, Cursor: cursor, Complete: true,
-		ID: value.ID, Label: value.Label, AgentID: value.AgentID, ServerID: value.ServerID, AgentName: value.AgentName, BProfile: firstString(value.BProfile, value.MainProfile), CreatedAt: value.CreatedAt, Closed: value.Closed, NamePinned: value.NamePinned, Workspace: value.Workspace, WorkspaceDir: firstString(value.WorkspaceDir, value.Workspace), WorkspaceMissing: value.WorkspaceMissing, ProjectContent: value.ProjectContent, ProjectFiles: append([]string(nil), value.ProjectFiles...), ProjectNotes: append([]string(nil), value.ProjectNotes...), PendingRepoPolicy: value.PendingRepoPolicy, RepoPolicy: value.RepoPolicy,
+		ID: value.ID, Label: value.Label, AgentID: value.AgentID, ServerID: value.ServerID, AgentName: value.AgentName, BProfile: firstString(value.BProfile, value.MainProfile), Role: firstString(value.Role, "b"), PlanID: value.PlanID, PlanName: value.PlanName, PlanDir: value.PlanDir, CreatedAt: value.CreatedAt, Closed: value.Closed, NamePinned: value.NamePinned, Workspace: value.Workspace, WorkspaceDir: firstString(value.WorkspaceDir, value.Workspace), WorkspaceMissing: value.WorkspaceMissing, ProjectContent: value.ProjectContent, ProjectFiles: append([]string(nil), value.ProjectFiles...), ProjectNotes: append([]string(nil), value.ProjectNotes...), PendingRepoPolicy: value.PendingRepoPolicy, RepoPolicy: value.RepoPolicy,
 		Run: value.Run, Tools: cloneTools(value.Tools), Messages: cloneMessages(value.Messages), Budget: value.Budget,
 		QueuedMessages: value.QueuedMessages, Runnable: value.Runnable, NotRunnableReason: value.NotRunnableReason,
 		MemoryPath: value.MemoryPath, MemoryContent: value.MemoryContent, AgentMemoryPath: value.AgentMemoryPath, AgentMemoryContent: value.AgentMemoryContent, LogPath: value.LogPath,
@@ -753,7 +765,7 @@ func diff(before, after Snapshot) Patch {
 	}{
 		{"complete", before.Complete, after.Complete}, {"id", before.ID, after.ID}, {"label", before.Label, after.Label},
 		{"agent_id", before.AgentID, after.AgentID}, {"server_id", before.ServerID, after.ServerID}, {"agent_name", before.AgentName, after.AgentName},
-		{"b_profile", before.BProfile, after.BProfile}, {"created_at", before.CreatedAt, after.CreatedAt}, {"workspace", before.Workspace, after.Workspace}, {"workspace_dir", before.WorkspaceDir, after.WorkspaceDir}, {"workspace_missing", before.WorkspaceMissing, after.WorkspaceMissing}, {"project_content", before.ProjectContent, after.ProjectContent}, {"project_files", before.ProjectFiles, after.ProjectFiles}, {"project_notes", before.ProjectNotes, after.ProjectNotes}, {"pending_repo_policy", before.PendingRepoPolicy, after.PendingRepoPolicy}, {"repo_policy", before.RepoPolicy, after.RepoPolicy},
+		{"b_profile", before.BProfile, after.BProfile}, {"role", before.Role, after.Role}, {"plan_id", before.PlanID, after.PlanID}, {"plan_name", before.PlanName, after.PlanName}, {"plan_dir", before.PlanDir, after.PlanDir}, {"created_at", before.CreatedAt, after.CreatedAt}, {"workspace", before.Workspace, after.Workspace}, {"workspace_dir", before.WorkspaceDir, after.WorkspaceDir}, {"workspace_missing", before.WorkspaceMissing, after.WorkspaceMissing}, {"project_content", before.ProjectContent, after.ProjectContent}, {"project_files", before.ProjectFiles, after.ProjectFiles}, {"project_notes", before.ProjectNotes, after.ProjectNotes}, {"pending_repo_policy", before.PendingRepoPolicy, after.PendingRepoPolicy}, {"repo_policy", before.RepoPolicy, after.RepoPolicy},
 		{"tools", before.Tools, after.Tools}, {"messages", before.Messages, after.Messages}, {"budget", before.Budget, after.Budget},
 		{"queued_messages", before.QueuedMessages, after.QueuedMessages}, {"runnable", before.Runnable, after.Runnable},
 		{"not_runnable_reason", before.NotRunnableReason, after.NotRunnableReason}, {"memory_path", before.MemoryPath, after.MemoryPath},

@@ -98,7 +98,7 @@ export function initSettings() {
 		"shell.credential",
         "server.probed",
       ].includes(event.type) || (event.type === "projection.patch" && (event.data?.operations || []).some((operation) =>
-        ["/label", "/agent_id", "/server_id", "/agent_name", "/b_profile", "/runnable", "/not_runnable_reason", "/tools", "/memory_path", "/memory_content", "/agent_memory_path", "/agent_memory_content", "/budget", "/closed"].includes(operation.path))))
+        ["/label", "/agent_id", "/server_id", "/agent_name", "/b_profile", "/role", "/plan_id", "/plan_name", "/runnable", "/not_runnable_reason", "/tools", "/memory_path", "/memory_content", "/agent_memory_path", "/agent_memory_content", "/budget", "/closed"].includes(operation.path))))
     )
       render();
     if (open && event.type === "snapshot") {

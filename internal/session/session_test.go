@@ -234,3 +234,52 @@ func TestCreateLikeKeepsProfileWorkspaceAndExactToolsetAfterClose(t *testing.T) 
 		t.Fatalf("closed session was discarded: %+v", registry.List())
 	}
 }
+
+func TestRoleAndPlanSnapshotRestoreWithoutLegacyMigration(t *testing.T) {
+	logs := t.TempDir()
+	writers, err := events.NewWriters(logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer writers.Close()
+	profile := &config.Profile{ID: "planner", Label: "Planner", Context: config.Context{NCtx: 32768, ReserveOutput: 8192}, Capabilities: config.Capabilities{Streaming: true, ToolCalls: true, OverflowBehavior: "error"}}
+	cfg := config.Config{Context: config.GlobalContext{Accounting: "estimated"}, Agents: []config.Agent{{Name: "Agent", B: "planner", D: "planner", Toolset: config.FullToolset()}}}
+	registry := NewRegistry(events.NewBus(), writers, func(id string) (*config.Profile, bool) { return profile, id == profile.ID }, 40, func() config.Config { return cfg })
+	plans := t.TempDir()
+	registry.SetPlansRoot(plans)
+	legacy, err := registry.Create("legacy", "agent", t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacySaved := legacy.Snapshot()
+	legacySaved.Role = ""
+	legacySaved.ID = "legacy-restored"
+	if restored, err := registry.Restore(legacySaved); err != nil || restored.Snapshot().Role != "b" || restored.Snapshot().PlanID != "" {
+		t.Fatalf("legacy restore=%+v err=%v", restored, err)
+	}
+	planID := "stable-plan"
+	planDir := filepath.Join(plans, planID)
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "plan.md"), []byte("# Stable name\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := registry.CreateRole("design", "agent", legacy.Workspace, "d", planID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := d.Snapshot()
+	saved.ID = "design-restored"
+	restored, err := registry.Restore(saved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := restored.Snapshot()
+	if got.Role != "d" || got.PlanID != planID || got.PlanName != "Stable name" || got.PlanDir != planDir {
+		t.Fatalf("d restore=%+v", got)
+	}
+	if restored.ToggleTool("shell", true) || restored.ToolEnabled("shell") {
+		t.Fatal("d session enabled shell outside its file jail")
+	}
+}

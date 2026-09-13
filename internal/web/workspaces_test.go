@@ -28,7 +28,7 @@ func TestBoundDirectorySessionAndNativeFolderPickerRoutes(t *testing.T) {
 	}
 	cfg := config.Defaults(filepath.Join(root, "default"))
 	cfg.Servers = []config.Profile{{ID: "main", Label: "Main", BaseURL: "http://127.0.0.1:8000", Model: "model", Context: config.Context{NCtx: 32768, ReserveOutput: 8192}, Capabilities: config.Capabilities{Streaming: true, ToolCalls: true, OverflowBehavior: "error"}}}
-	cfg.Agents = []config.Agent{{Name: "Main", B: "main", Toolset: config.FullToolset()}}
+	cfg.Agents = []config.Agent{{Name: "Main", B: "main", D: "main", Toolset: config.FullToolset()}}
 	bus := events.NewBus()
 	writers, err := events.NewWriters(logs)
 	if err != nil {
@@ -79,6 +79,30 @@ func TestBoundDirectorySessionAndNativeFolderPickerRoutes(t *testing.T) {
 	}
 	if response.Session.WorkspaceDir != filepath.Clean(bound) || response.Session.WorkspaceMissing || len(response.Session.ProjectFiles) != 1 {
 		t.Fatalf("session=%+v", response.Session)
+	}
+	planDir := filepath.Join(data, "plans", "stable")
+	if err := os.MkdirAll(planDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "plan.md"), []byte("# Stable display name\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dCreated := call(http.MethodPost, "/api/sessions", map[string]any{"agent_id": "main", "workspace": bound, "role": "d", "plan_id": "stable"})
+	if dCreated.Code != http.StatusCreated {
+		t.Fatalf("d create %d %s", dCreated.Code, dCreated.Body.String())
+	}
+	var dResponse struct {
+		Session session.Snapshot `json:"session"`
+	}
+	if err := json.Unmarshal(dCreated.Body.Bytes(), &dResponse); err != nil {
+		t.Fatal(err)
+	}
+	if dResponse.Session.Role != "d" || dResponse.Session.PlanID != "stable" || dResponse.Session.PlanName != "Stable display name" || dResponse.Session.ServerID != "main" {
+		t.Fatalf("d session=%+v", dResponse.Session)
+	}
+	plans := call(http.MethodGet, "/api/plans", nil)
+	if plans.Code != http.StatusOK || !bytes.Contains(plans.Body.Bytes(), []byte(`"id":"stable","name":"Stable display name"`)) {
+		t.Fatalf("plans %d %s", plans.Code, plans.Body.String())
 	}
 	listed := call(http.MethodGet, "/api/workspaces", nil)
 	var known []workspaceinfo.Entry

@@ -34,9 +34,8 @@ export function reduce(event) {
     Object.assign(store, data);
     store.selection = selection;
     const selected = selection.session_id || active;
-    store.active = selection.agent_id === "agent_b"
-      ? (store.sessions[selected] && !store.sessions[selected].closed ? selected : firstOpenSessionID())
-      : "";
+    store.active = store.sessions[selected] && !store.sessions[selected].closed && roleAgentID(store.sessions[selected]) === selection.agent_id
+      ? selected : firstOpenSessionID(selection.agent_id);
     store.selection.session_id = store.active;
     persistSelection();
     operatorReconciler.observed();
@@ -100,10 +99,10 @@ function applyProjectionPatch(patch) {
   }
   target.cursor = patch.cursor;
   if (target.closed && store.active === patch.session_id) {
-    store.active = store.selection.agent_id === "agent_b" ? firstOpenSessionID() : "";
+    store.active = firstOpenSessionID(store.selection.agent_id);
     store.selection.session_id = store.active;
     persistSelection();
-  } else if (!store.active && !target.closed && store.selection.agent_id === "agent_b") {
+  } else if (!store.active && !target.closed && roleAgentID(target) === store.selection.agent_id) {
     store.active = patch.session_id;
     store.selection.session_id = patch.session_id;
     persistSelection();
@@ -161,13 +160,14 @@ async function resync() {
   finally { resyncing = false; }
 }
 
-function firstOpenSessionID() {
-  return Object.values(store.sessions).find((session) => !session.closed)?.id || "";
+function roleAgentID(session) { return `agent_${session?.role === "d" ? "d" : "b"}`; }
+function firstOpenSessionID(agentID = "agent_b") {
+  return Object.values(store.sessions).find((session) => !session.closed && roleAgentID(session) === agentID)?.id || "";
 }
 export function setActive(id) { setSelection(store.selection.agent_id || "agent_b", id); }
 export function setSelection(agentID, sessionID = "") {
   const nextAgent = agentID || "agent_b";
-  const nextSession = sessionID && store.sessions[sessionID] && !store.sessions[sessionID].closed ? sessionID : "";
+  const nextSession = sessionID && store.sessions[sessionID] && !store.sessions[sessionID].closed && roleAgentID(store.sessions[sessionID]) === nextAgent ? sessionID : "";
   store.selection = { agent_id: nextAgent, session_id: nextSession };
   store.active = nextSession;
   persistSelection();

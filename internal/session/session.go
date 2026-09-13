@@ -1,7 +1,11 @@
 package session
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +38,10 @@ type Snapshot struct {
 	ServerID             string                     `json:"server_id"`
 	AgentName            string                     `json:"agent_name"`
 	BProfile             string                     `json:"b_profile"`
+	Role                 string                     `json:"role"`
+	PlanID               string                     `json:"plan_id,omitempty"`
+	PlanName             string                     `json:"plan_name,omitempty"`
+	PlanDir              string                     `json:"plan_dir,omitempty"`
 	CreatedAt            string                     `json:"created_at"`
 	Closed               bool                       `json:"closed"`
 	NamePinned           bool                       `json:"name_pinned"`
@@ -66,43 +74,44 @@ type Snapshot struct {
 	CompactionCompletion int                        `json:"compaction_completion_tokens"`
 }
 type Session struct {
-	ID, Label, AgentID, ServerID, Workspace string
-	WorkspaceMissing                        bool
-	ProjectBlock                            string
-	ProjectFiles                            []string
-	ProjectNotes                            []string
-	PendingRepoPolicy                       *workspaceinfo.PolicyState
-	RepoPolicy                              *workspaceinfo.PolicyState
-	ProjectTouch                            func(string)
-	AgentName, BProfile                     string
-	Closed                                  bool
-	NamePinned                              bool
-	Messages                                []events.Message
-	Budget                                  events.Budget
-	Run                                     RunState
-	ToolsEnabled                            map[string]bool
-	ToolCalls                               map[string]int
-	LastSeen                                map[string]time.Time
-	CreatedAt                               time.Time
-	LogPath                                 string
-	Runnable                                bool
-	NotRunnableReason                       string
-	MemoryBlock                             string
-	MemoryPath                              string
-	AgentMemoryBlock                        string
-	AgentMemoryPath                         string
-	PromptAddendum                          string
-	SchemaTokens                            map[string]int
-	MarginalTokens                          map[string]int
-	queuedMessages                          int
-	modelTurns                              int
-	compactionCount                         int
-	compactionTokenDelta                    int
-	compactionModelCalls                    int
-	compactionPrompt                        int
-	compactionCompletion                    int
-	submitting                              int
-	mu                                      sync.Mutex
+	ID, Label, AgentID, ServerID, Workspace    string
+	Role, PlanID, PlanName, PlanDir, PlansRoot string
+	WorkspaceMissing                           bool
+	ProjectBlock                               string
+	ProjectFiles                               []string
+	ProjectNotes                               []string
+	PendingRepoPolicy                          *workspaceinfo.PolicyState
+	RepoPolicy                                 *workspaceinfo.PolicyState
+	ProjectTouch                               func(string)
+	AgentName, BProfile                        string
+	Closed                                     bool
+	NamePinned                                 bool
+	Messages                                   []events.Message
+	Budget                                     events.Budget
+	Run                                        RunState
+	ToolsEnabled                               map[string]bool
+	ToolCalls                                  map[string]int
+	LastSeen                                   map[string]time.Time
+	CreatedAt                                  time.Time
+	LogPath                                    string
+	Runnable                                   bool
+	NotRunnableReason                          string
+	MemoryBlock                                string
+	MemoryPath                                 string
+	AgentMemoryBlock                           string
+	AgentMemoryPath                            string
+	PromptAddendum                             string
+	SchemaTokens                               map[string]int
+	MarginalTokens                             map[string]int
+	queuedMessages                             int
+	modelTurns                                 int
+	compactionCount                            int
+	compactionTokenDelta                       int
+	compactionModelCalls                       int
+	compactionPrompt                           int
+	compactionCompletion                       int
+	submitting                                 int
+	mu                                         sync.Mutex
 }
 
 func (s *Session) Snapshot() Snapshot {
@@ -120,7 +129,117 @@ func (s *Session) SnapshotUnlocked() Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name], MarginalTokens: s.MarginalTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, AgentID: s.AgentID, ServerID: s.ServerID, AgentName: s.AgentName, BProfile: s.BProfile, CreatedAt: s.CreatedAt.Format(time.RFC3339Nano), Closed: s.Closed, NamePinned: s.NamePinned, Workspace: s.Workspace, WorkspaceDir: s.Workspace, WorkspaceMissing: s.WorkspaceMissing, ProjectContent: s.ProjectBlock, ProjectFiles: append([]string(nil), s.ProjectFiles...), ProjectNotes: append([]string(nil), s.ProjectNotes...), PendingRepoPolicy: clonePolicyState(s.PendingRepoPolicy), RepoPolicy: clonePolicyState(s.RepoPolicy), Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, AgentMemoryPath: s.AgentMemoryPath, AgentMemoryContent: s.AgentMemoryBlock, PromptAddendum: s.PromptAddendum, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
+	return Snapshot{ID: s.ID, Label: s.Label, AgentID: s.AgentID, ServerID: s.ServerID, AgentName: s.AgentName, BProfile: s.BProfile, Role: s.Role, PlanID: s.PlanID, PlanName: s.PlanName, PlanDir: s.PlanDir, CreatedAt: s.CreatedAt.Format(time.RFC3339Nano), Closed: s.Closed, NamePinned: s.NamePinned, Workspace: s.Workspace, WorkspaceDir: s.Workspace, WorkspaceMissing: s.WorkspaceMissing, ProjectContent: s.ProjectBlock, ProjectFiles: append([]string(nil), s.ProjectFiles...), ProjectNotes: append([]string(nil), s.ProjectNotes...), PendingRepoPolicy: clonePolicyState(s.PendingRepoPolicy), RepoPolicy: clonePolicyState(s.RepoPolicy), Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, AgentMemoryPath: s.AgentMemoryPath, AgentMemoryContent: s.AgentMemoryBlock, PromptAddendum: s.PromptAddendum, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
+}
+
+func (s *Session) ReadRoot(path string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Role == "d" && s.PlanDir != "" {
+		if err := s.validatePlanDirLocked(); err != nil {
+			return "", err
+		}
+		candidate := filepath.FromSlash(path)
+		if !filepath.IsAbs(candidate) || pathWithin(s.PlanDir, candidate) {
+			return s.PlanDir, nil
+		}
+		if s.PlansRoot != "" && pathWithin(s.PlansRoot, candidate) {
+			return "", fmt.Errorf("path is outside the workspace")
+		}
+	}
+	return s.Workspace, nil
+}
+
+func (s *Session) WriteRoot(path string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Role != "d" {
+		return s.Workspace, nil
+	}
+	if s.PlanDir != "" {
+		if err := s.validatePlanDirLocked(); err != nil {
+			return "", err
+		}
+		return s.PlanDir, nil
+	}
+	if filepath.IsAbs(filepath.FromSlash(path)) {
+		return "", fmt.Errorf("path is outside the plan")
+	}
+	if s.PlansRoot == "" {
+		return "", fmt.Errorf("plan storage is unavailable")
+	}
+	if err := os.MkdirAll(s.PlansRoot, 0o700); err != nil {
+		return "", err
+	}
+	var planID, planDir string
+	for attempt := 0; attempt < 8; attempt++ {
+		random := make([]byte, 8)
+		if _, err := rand.Read(random); err != nil {
+			return "", err
+		}
+		planID = hex.EncodeToString(random)
+		planDir = filepath.Join(s.PlansRoot, planID)
+		if err := os.Mkdir(planDir, 0o700); err == nil {
+			break
+		} else if !os.IsExist(err) {
+			return "", err
+		}
+		planDir = ""
+	}
+	if planDir == "" {
+		return "", fmt.Errorf("could not allocate a unique plan id")
+	}
+	if err := os.MkdirAll(filepath.Join(planDir, "plan", "items"), 0o700); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "plan.md"), []byte("# Untitled plan\n"), 0o600); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "NOTES.md"), nil, 0o600); err != nil {
+		return "", err
+	}
+	s.PlanID, s.PlanName, s.PlanDir = planID, "Untitled plan", planDir
+	return s.PlanDir, nil
+}
+
+func (s *Session) validatePlanDirLocked() error {
+	if s.PlansRoot == "" || !pathWithin(s.PlansRoot, s.PlanDir) {
+		return fmt.Errorf("plan storage is unavailable")
+	}
+	info, err := os.Lstat(s.PlanDir)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("plan folder is not a directory")
+	}
+	return nil
+}
+
+func (s *Session) RefreshPlanName() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.Role != "d" || s.PlanDir == "" {
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(s.PlanDir, "plan.md"))
+	if err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") {
+			if name := strings.TrimSpace(strings.TrimLeft(trimmed, "#")); name != "" {
+				s.PlanName = name
+			}
+			return
+		}
+	}
+}
+
+func pathWithin(root, candidate string) bool {
+	rel, err := filepath.Rel(root, filepath.Clean(candidate))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 func (s *Session) CombinedMemory() string {
 	s.mu.Lock()
@@ -251,6 +370,9 @@ func (s *Session) ToggleTool(name string, enabled bool) bool {
 		return false
 	}
 	if _, ok := s.ToolsEnabled[name]; !ok {
+		return false
+	}
+	if s.Role == "d" && enabled && (name == "shell" || name == "run_script") {
 		return false
 	}
 	s.ToolsEnabled[name] = enabled

@@ -31,10 +31,11 @@ test("Open chat list excludes durable closed sessions", () => {
   assert.deepEqual(openSessions({ s2: idle, s3: { ...idle, id: "s3", closed: true } }).map((session) => session.id), ["s2"]);
 });
 
-test("Assistant labels use only role while the title keeps the Agent name", () => {
+test("Assistant labels use only role while the title carries profile and d plan", () => {
   assert.equal(agentAuthor(idle), "agent_b");
   assert.equal(agentAuthor(idle, "c"), "agent_c");
-  assert.equal(sessionTitle(idle), "Coder");
+  assert.equal(sessionTitle(idle), "Coder · Home API");
+  assert.equal(sessionTitle({ ...idle, role: "d", plan_name: "Release map" }), "Coder · Home API · plan: Release map");
 });
 
 test("Close confirmation counts changed files and memory entries without deleting either", () => {

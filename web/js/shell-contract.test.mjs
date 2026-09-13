@@ -24,7 +24,7 @@ test("shared shell slot order is identical on Chat Console and Plan", () => {
 });
 
 test("each open chat gets an agent tab whose robot eyes expose that chat state", () => {
-  assert.match(shell, /const open = sessionsFor\(agentID, false\)/);
+  assert.match(shell, /const open = Object\.values\(store\.sessions\)\.filter/);
   assert.match(shell, /for \(const session of rendered\)/);
   assert.match(shell, /wrap\.dataset\.session = session\.id/);
   assert.match(shell, /return "waiting"[\s\S]*return "running"[\s\S]*return "idle"/);
@@ -36,8 +36,8 @@ test("each open chat gets an agent tab whose robot eyes expose that chat state",
   assert.match(tokens, /\.agent-tab-robot\.waiting\{color:var\(--alarm\)\}/);
   assert.match(shell, /session\?\.model_unreachable\) return "offline"/);
   assert.match(shell, /\(store\.servers \|\| \[\]\)\.find/);
-  assert.match(shell, /left\.append\(newChatButton, tabs\)/);
-  assert.match(shell, /newChatButton\.onclick = \(\) => void createChat\(selectedSession\?\.workspace \|\| store\.config\.workspace, newChatAgentID\)/);
+  assert.match(shell, /left\.append\(newChatButton, newChatMenu, tabs\)/);
+  assert.match(shell, /newChatButton\.onclick = \(\) => hasD \? showRoleMenu/);
   assert.doesNotMatch(shell, /wrap\.append\([^\n]*(?:agent-tab-new|newChatButton)/);
   assert.match(shell, /newChatButton\.disabled = store\.replay \|\| !\(store\.config\.agents \|\| \[\]\)\.length/);
   assert.match(tokens, /--agent-tab-width:118px/);
@@ -51,6 +51,16 @@ test("each open chat gets an agent tab whose robot eyes expose that chat state",
   assert.match(shell, /button\("", chatName/);
   assert.match(shell, /<span>\$\{escapeHTML\(agentID\)\}<\/span>/);
   assert.match(shell, /button\("×", `Close \$\{chatName\}`/);
+  assert.match(shell, /const agentID = `agent_\$\{session\?\.role === "d" \? "d" : "b"\}`/);
+  assert.match(shell, /document\.title = session \? sessionTitle\(session\) : "Agent_b"/);
+});
+
+test("plus adds a two-line d choice only for an assigned d profile", () => {
+  assert.match(shell, /const hasD = !!String\(configured\?\.d \|\| ""\)\.trim\(\)/);
+  assert.match(shell, /agent_b · \$\{name\} — chat/);
+  assert.match(shell, /agent_d · \$\{name\} — plan/);
+  assert.match(shell, /add\("none"\)/);
+  assert.match(shell, /for \(const plan of plans\) add\(plan\.name \|\| plan\.id, plan\.id\)/);
 });
 
 test("Plan is a compact accessible brain icon", () => {

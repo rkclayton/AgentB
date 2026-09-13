@@ -30,9 +30,13 @@ func workspaceRel(workspace, resolved string) string {
 	return cleanRel(rel)
 }
 func (c *FileCoordinator) check(s *session.Session, path, resolved string) (string, error) {
-	rel := workspaceRel(s.Workspace, resolved)
+	root := s.Workspace
+	if s.Role == "d" {
+		root = s.PlanDir
+	}
+	rel := workspaceRel(root, resolved)
 	seen, hasSeen := s.LastSeenAt(rel)
-	if record, ok := c.workspaces.LastWriter(s.Workspace, rel); ok && record.SessionID != s.ID && (!hasSeen || record.At.After(seen)) {
+	if record, ok := c.workspaces.LastWriter(root, rel); ok && record.SessionID != s.ID && (!hasSeen || record.At.After(seen)) {
 		age := int(time.Since(record.At).Seconds())
 		if age < 0 {
 			age = 0
@@ -47,16 +51,28 @@ func (c *FileCoordinator) check(s *session.Session, path, resolved string) (stri
 	return "", nil
 }
 func (c *FileCoordinator) record(s *session.Session, resolved string) {
-	rel := workspaceRel(s.Workspace, resolved)
+	root := s.Workspace
+	if s.Role == "d" {
+		root = s.PlanDir
+	}
+	rel := workspaceRel(root, resolved)
 	s.Touch(rel)
-	c.workspaces.RecordWrite(s.Workspace, rel, s.ID)
+	c.workspaces.RecordWrite(root, rel, s.ID)
+	if s.Role == "d" {
+		s.RefreshPlanName()
+		c.bus.Publish(events.New(events.SessionUpdated, s.ID, "", map[string]any{"role": s.Role, "plan_id": s.PlanID, "plan_name": s.PlanName, "plan_dir": s.PlanDir}))
+	}
 }
 
 func (c *FileCoordinator) wasAgentWritten(s *session.Session, resolved string) bool {
 	if c == nil || s == nil {
 		return false
 	}
-	_, ok := c.workspaces.LastWriter(s.Workspace, workspaceRel(s.Workspace, resolved))
+	root := s.Workspace
+	if s.Role == "d" {
+		root = s.PlanDir
+	}
+	_, ok := c.workspaces.LastWriter(root, workspaceRel(root, resolved))
 	return ok
 }
 
@@ -75,9 +91,6 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 	if !ok || path == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	if err := refuseRepoPolicyWrite(s.Workspace, path); err != nil {
-		return "", err
-	}
 	content, ok := args["content"].(string)
 	if !ok {
 		return "", fmt.Errorf("content is required")
@@ -85,7 +98,14 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 	if len(content) > 512*1024 {
 		return "", fmt.Errorf("content exceeds the 512 KB limit")
 	}
-	resolved, err := resolveForTool(ctx, s.Workspace, path)
+	root, rootErr := s.WriteRoot(path)
+	if rootErr != nil {
+		return "", rootErr
+	}
+	if err := refuseRepoPolicyWrite(root, path); err != nil {
+		return "", err
+	}
+	resolved, err := resolveForSessionTool(ctx, s, root, path)
 	if err != nil {
 		return "", err
 	}

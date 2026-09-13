@@ -44,7 +44,11 @@ func (t *ListDir) Call(ctx context.Context, s *session.Session, args map[string]
 	if depth < 1 || depth > 3 {
 		return "", fmt.Errorf("depth must be between 1 and 3")
 	}
-	root, err := resolveForTool(ctx, s.Workspace, path)
+	readRoot, rootErr := s.ReadRoot(path)
+	if rootErr != nil {
+		return "", rootErr
+	}
+	root, err := resolveForSessionTool(ctx, s, readRoot, path)
 	if err != nil {
 		return "", err
 	}
