@@ -130,46 +130,56 @@ func TestCompactionAuxUnsetUsesOneMainCall(t *testing.T) {
 	}
 }
 
-func TestCompactionSummaryFitsPositionConstrainedTemplate(t *testing.T) {
+func TestCompactionSummaryFitsTemplateEndpoints(t *testing.T) {
 	const content = "verbatim compact summary retained in full"
-	mainServer := newSummaryServer(t, content)
-	mainServer.rejectMidSystem = true
-	runner, item, _, cfg := compactionRunner(t, mainServer, nil, 32768)
-	cfg.Servers[0].Capabilities.ApplyTemplate = true
-	cfg.Servers[0].Capabilities.Tokenize = true
+	for _, test := range []struct {
+		name            string
+		rejectMidSystem bool
+	}{
+		{name: "position-constrained", rejectMidSystem: true},
+		{name: "unconstrained"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			mainServer := newSummaryServer(t, content)
+			mainServer.rejectMidSystem = test.rejectMidSystem
+			runner, item, _, cfg := compactionRunner(t, mainServer, nil, 32768)
+			cfg.Servers[0].Capabilities.ApplyTemplate = true
+			cfg.Servers[0].Capabilities.Tokenize = true
 
-	if !runner.summarize(context.Background(), item, "run", profileForRunner(runner, "main")) {
-		t.Fatal("summary was not accepted")
-	}
-	var storedSummary events.Message
-	for _, message := range item.MessagesCopy() {
-		if message.Category == "summary" {
-			storedSummary = message
-			break
-		}
-	}
-	if storedSummary.Content == "" || !strings.Contains(storedSummary.Content, content) {
-		t.Fatalf("stored summary=%+v", storedSummary)
-	}
-	if _, err := runner.measureSession(context.Background(), profileForRunner(runner, "main"), item, nil, false); err != nil {
-		t.Fatalf("measure compacted session against position-constrained template: %v", err)
-	}
+			if !runner.summarize(context.Background(), item, "run", profileForRunner(runner, "main")) {
+				t.Fatal("summary was not accepted")
+			}
+			var storedSummary events.Message
+			for _, message := range item.MessagesCopy() {
+				if message.Category == "summary" {
+					storedSummary = message
+					break
+				}
+			}
+			if storedSummary.Content == "" || !strings.Contains(storedSummary.Content, content) {
+				t.Fatalf("stored summary=%+v", storedSummary)
+			}
+			if _, err := runner.measureSession(context.Background(), profileForRunner(runner, "main"), item, nil, false); err != nil {
+				t.Fatalf("measure compacted session: %v", err)
+			}
 
-	mainServer.mu.Lock()
-	templates := append([][]llm.Message(nil), mainServer.templates...)
-	mainServer.mu.Unlock()
-	if len(templates) == 0 {
-		t.Fatal("budget measurement did not call apply-template")
-	}
-	measured := templates[len(templates)-1]
-	var summaries []llm.Message
-	for _, message := range measured {
-		if message.Content == storedSummary.Content {
-			summaries = append(summaries, message)
-		}
-	}
-	if len(summaries) != 1 || summaries[0].Role != "assistant" {
-		t.Fatalf("measured summary=%+v messages=%+v", summaries, measured)
+			mainServer.mu.Lock()
+			templates := append([][]llm.Message(nil), mainServer.templates...)
+			mainServer.mu.Unlock()
+			if len(templates) == 0 {
+				t.Fatal("budget measurement did not call apply-template")
+			}
+			measured := templates[len(templates)-1]
+			var summaries []llm.Message
+			for _, message := range measured {
+				if message.Content == storedSummary.Content {
+					summaries = append(summaries, message)
+				}
+			}
+			if len(summaries) != 1 || summaries[0].Role != "assistant" {
+				t.Fatalf("measured summary=%+v messages=%+v", summaries, measured)
+			}
+		})
 	}
 }
 
