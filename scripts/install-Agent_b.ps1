@@ -245,7 +245,9 @@ if ([string]::IsNullOrWhiteSpace($SourceDirectory)) { $SourceDirectory = Split-P
 if ([string]::IsNullOrWhiteSpace($OperatorSid)) { $OperatorSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value }
 if ([string]::IsNullOrWhiteSpace($OperatorLocalAppData)) { $OperatorLocalAppData = [Environment]::GetFolderPath('LocalApplicationData') }
 if ([string]::IsNullOrWhiteSpace($DataDirectory)) { $DataDirectory = Join-Path $OperatorLocalAppData 'Agent_b' }
-if ([string]::IsNullOrWhiteSpace($TranscriptPath)) {
+if ($WhatIfPreference) {
+    $TranscriptPath = Join-Path ([IO.Path]::GetTempPath()) ("Agent_b-whatif-installer-{0}.log" -f [DateTime]::Now.ToString('yyyyMMdd-HHmmss-fff'))
+} elseif ([string]::IsNullOrWhiteSpace($TranscriptPath)) {
     $TranscriptPath = Join-Path (Join-Path $DataDirectory 'logs') ("installer-{0}.log" -f [DateTime]::Now.ToString('yyyyMMdd-HHmmss-fff'))
 }
 $script:installTranscriptPath = Get-FullPath $TranscriptPath

@@ -58,7 +58,44 @@ function Get-FilePrefixHash {
     }
 }
 
+function Get-RootFingerprint {
+    param([string[]]$Roots)
+    return ($Roots | ForEach-Object {
+        $root = [IO.Path]::GetFullPath($_)
+        [ordered]@{
+            root = $root
+            exists = Test-Path -LiteralPath $root
+            directories = @($(if (Test-Path -LiteralPath $root -PathType Container) {
+                Get-ChildItem -LiteralPath $root -Recurse -Directory | ForEach-Object { $_.FullName.Substring($root.Length).TrimStart('\') } | Sort-Object
+            }))
+            files = @($(if (Test-Path -LiteralPath $root -PathType Container) {
+                Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object {
+                    [ordered]@{ path = $_.FullName.Substring($root.Length).TrimStart('\'); length = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+                }
+            }))
+        }
+    } | ConvertTo-Json -Depth 6 -Compress)
+}
+
+$whatIfTranscript = ''
 try {
+    $whatIfApplication = Join-Path $testRoot 'WhatIf\Application\Agent_b'
+    $whatIfData = Join-Path $testRoot 'WhatIf\Data\Agent_b'
+    $whatIfWorkspace = Join-Path $testRoot 'WhatIf\ProgramData\Agent_b\workspace'
+    $whatIfRoots = @($whatIfApplication, $whatIfData, $whatIfWorkspace)
+    $whatIfBefore = Get-RootFingerprint -Roots $whatIfRoots
+    $whatIfOutput = (& powershell.exe -NoLogo -NoProfile -File $installer -SourceDirectory (Split-Path -Parent $PSScriptRoot) -ApplicationDirectory $whatIfApplication -DataDirectory $whatIfData -WorkspaceDirectory $whatIfWorkspace -StartMenuDirectory (Join-Path $testRoot 'WhatIf\StartMenu') -UninstallRegistryPath ($testRegistry + '-WhatIf') -TestMode -WhatIf | Out-String)
+    if ($LASTEXITCODE -ne 0) { throw "WhatIf install exited $LASTEXITCODE.`n$whatIfOutput" }
+    $whatIfAfter = Get-RootFingerprint -Roots $whatIfRoots
+    if ($whatIfAfter -cne $whatIfBefore) { throw "WhatIf changed a target root.`nBEFORE $whatIfBefore`nAFTER $whatIfAfter" }
+    $whatIfTranscript = if ($whatIfOutput -match '(?m)^Transcript: (.+)$') { $Matches[1].Trim() } else { '' }
+    $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+    if (-not $whatIfTranscript -or -not (Test-Path -LiteralPath $whatIfTranscript -PathType Leaf) -or
+        -not ([IO.Path]::GetFullPath($whatIfTranscript).StartsWith($tempRoot + '\', [StringComparison]::OrdinalIgnoreCase)) -or
+        (Split-Path -Leaf $whatIfTranscript) -notlike 'Agent_b-whatif-installer-*.log') {
+        throw "WhatIf transcript was not isolated in the caller's temporary directory.`n$whatIfOutput"
+    }
+
     & powershell.exe -NoLogo -NoProfile -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
     if ($LASTEXITCODE -ne 0) { throw "First install exited $LASTEXITCODE." }
 
@@ -371,6 +408,14 @@ try {
     }
     Write-Host 'PASS: isolated three-root install, upgrade preservation, preserve-data uninstall, reinstall, and owner-checked purge uninstall'
 } finally {
+    if ($whatIfTranscript -and (Test-Path -LiteralPath $whatIfTranscript -PathType Leaf)) {
+        $resolvedTranscript = [IO.Path]::GetFullPath($whatIfTranscript)
+        $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
+        if ((Split-Path -Parent $resolvedTranscript).Equals($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
+            (Split-Path -Leaf $resolvedTranscript) -like 'Agent_b-whatif-installer-*.log') {
+            Remove-Item -LiteralPath $resolvedTranscript -Force
+        }
+    }
     if (Test-Path -LiteralPath $testRegistry) { Remove-Item -LiteralPath $testRegistry -Recurse -Force }
     if (Test-Path -LiteralPath $testRoot) {
         Assert-TemporaryTestPath $testRoot
