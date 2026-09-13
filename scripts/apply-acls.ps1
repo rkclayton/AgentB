@@ -172,6 +172,7 @@ if (($Verify.IsPresent -and $Remove.IsPresent) -or ($Inspect.IsPresent -and ($Ve
 
 $application = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\')
 $data = [IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
+$plans = Join-Path $data 'plans'
 $workspace = [IO.Path]::GetFullPath($WorkspaceDirectory).TrimEnd('\')
 $exchange = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($ExchangeDirectory)).TrimEnd('\')
 
@@ -222,7 +223,7 @@ $denyRights = [Security.AccessControl.FileSystemRights]::WriteData `
     -bor [Security.AccessControl.FileSystemRights]::ChangePermissions `
     -bor [Security.AccessControl.FileSystemRights]::TakeOwnership
 $allowRights = [Security.AccessControl.FileSystemRights]::Modify
-$denyDataRights = [Security.AccessControl.FileSystemRights]::FullControl
+$denyDataRights = [Security.AccessControl.FileSystemRights]([int][Security.AccessControl.FileSystemRights]::FullControl -band (-bnot [int][Security.AccessControl.FileSystemRights]::Traverse))
 $traverseRights = [Security.AccessControl.FileSystemRights]::ReadAndExecute
 $parentTraverseRights = [Security.AccessControl.FileSystemRights]::Traverse
 $none = [Security.AccessControl.InheritanceFlags]::None
@@ -236,7 +237,7 @@ $sharedAnchors = @(
     [IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\'),
     [IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\')
 )
-foreach ($reachable in @($application, $workspace, $exchange)) {
+foreach ($reachable in @($application, $workspace, $exchange, $plans)) {
     $parent = [IO.DirectoryInfo]$reachable
     while ($parent.Parent -and $parent.Parent.Parent) {
         $parent = $parent.Parent
@@ -249,10 +250,20 @@ foreach ($reachable in @($application, $workspace, $exchange)) {
     }
 }
 $targets += @(
-    [pscustomobject]@{ Path = $application; Rights = $denyRights; Inheritance = $recursive; Type = $deny; Intent = 'deny application-tree mutation' },
-    [pscustomobject]@{ Path = $application; Rights = $traverseRights; Inheritance = $recursive; Type = $allow; Intent = 'grant application-tree read and execute' },
-    [pscustomobject]@{ Path = $data; Rights = $denyDataRights; Inheritance = $recursive; Type = $deny; Intent = 'deny service identity access to operator data' }
+	[pscustomobject]@{ Path = $application; Rights = $denyRights; Inheritance = $recursive; Type = $deny; Intent = 'deny application-tree mutation' },
+	[pscustomobject]@{ Path = $application; Rights = $traverseRights; Inheritance = $recursive; Type = $allow; Intent = 'grant application-tree read and execute' },
+	[pscustomobject]@{ Path = $data; Rights = $denyDataRights; Inheritance = $recursive; Type = $deny; Intent = 'deny service identity access to operator data except traversal' }
 )
+
+if (-not (Test-Path -LiteralPath $plans -PathType Container) -and -not $WhatIfPreference) {
+	if ($Verify -or $Inspect -or $Remove) {
+		if ($Verify) { Write-Host "DRIFT: plans directory does not exist :: $plans" }
+	} else {
+		if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
+		if ($PSCmdlet.ShouldProcess($plans, 'Create plans directory')) { $null = New-Item -ItemType Directory -Path $plans }
+	}
+}
+$targets += [pscustomobject]@{ Path = $plans; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant plans-folder Modify' }
 
 if (-not (Test-Path -LiteralPath $workspace -PathType Container) -and -not $WhatIfPreference) {
     if ($Verify -or $Inspect -or $Remove) {
@@ -274,13 +285,14 @@ if (-not (Test-Path -LiteralPath $exchange -PathType Container) -and -not $WhatI
 }
 $targets += [pscustomobject]@{ Path = $exchange; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant exchange-folder Modify' }
 
-Write-Host 'Agent_b root and exchange-folder ACL policy'
+Write-Host 'Agent_b root, plans, workspace, and exchange-folder ACL policy'
 Write-Host "Identity: $env:COMPUTERNAME\$AccountName"
 Write-Host "Application: $application"
 Write-Host "Operator data: $data"
+Write-Host "Plans folder: $plans"
 Write-Host "Service workspace: $workspace"
 Write-Host "Exchange folder: $exchange"
-Write-Host 'The service identity can read/execute but not mutate the application tree, cannot access operator data, and can modify only the workspace and exchange folder.'
+Write-Host 'The service identity can read/execute but not mutate the application tree, can traverse operator data only to the plans folder, and can modify only plans, workspace, and exchange.'
 
 if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $Verify -and -not $Inspect) {
     [Console]::Error.WriteLine('Administrator elevation is required to apply or remove ACLs.')
@@ -320,7 +332,7 @@ if ($Verify -or $Inspect) {
         if ($Verify) { Write-Host "$(if ($present) { 'PASS' } else { 'DRIFT' }): $($target.Intent) :: $($target.Path)" }
     }
     if ($Inspect) {
-        $status = [ordered]@{ supported = $true; account_exists = $true; applied = ($drift -eq 0); drift = $drift; summary = $(if ($drift -eq 0) { 'root and exchange-folder ACL policy verified' } else { "$drift ACL drift item(s)" }) }
+        $status = [ordered]@{ supported = $true; account_exists = $true; applied = ($drift -eq 0); drift = $drift; summary = $(if ($drift -eq 0) { 'root, plans, workspace, and exchange-folder ACL policy verified' } else { "$drift ACL drift item(s)" }) }
         Write-Output ($statusMarker + ($status | ConvertTo-Json -Compress))
         exit 0
     }

@@ -53,6 +53,20 @@ func TestProducedFileMetadataTracksOnlyJailedFileTools(t *testing.T) {
 			t.Fatalf("%s metadata=%#v", name, metadata)
 		}
 	}
+	planRoot := t.TempDir()
+	planDir := filepath.Join(planRoot, "stable")
+	if err := os.MkdirAll(filepath.Join(planDir, "reports"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(planDir, "reports", "done.txt"), []byte("plan"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d := &session.Session{Role: "d", Workspace: workspace, PlansRoot: planRoot, PlanID: "stable", PlanDir: planDir}
+	dMetadata := producedFileMetadata(d, "write_file", map[string]any{"path": "reports/done.txt"})
+	dFile, _ := dMetadata["file"].(map[string]any)
+	if dFile["path"] != "reports/done.txt" || dFile["bytes"] != int64(4) {
+		t.Fatalf("d metadata=%#v", dMetadata)
+	}
 	if metadata := producedFileMetadata(s, "run_script", map[string]any{"path": "reports/done.txt"}); metadata != nil {
 		t.Fatalf("run_script unexpectedly tracked: %#v", metadata)
 	}

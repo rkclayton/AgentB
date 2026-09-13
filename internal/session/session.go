@@ -165,6 +165,10 @@ func (s *Session) WriteRoot(path string) (string, error) {
 	if filepath.IsAbs(filepath.FromSlash(path)) {
 		return "", fmt.Errorf("path is outside the plan")
 	}
+	cleaned := filepath.Clean(filepath.FromSlash(path))
+	if cleaned == ".." || strings.HasPrefix(cleaned, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path is outside the workspace")
+	}
 	if s.PlansRoot == "" {
 		return "", fmt.Errorf("plan storage is unavailable")
 	}
@@ -407,6 +411,12 @@ func (s *Session) ApplyAgentConfig(agentID string, agent config.Agent, profile c
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	profileID := agent.B
+	if s.Role == "d" {
+		profileID = agent.D
+		enabled["shell"] = false
+		enabled["run_script"] = false
+	}
 	if s.RepoPolicy != nil && len(s.RepoPolicy.Policy.DefaultToolset) > 0 {
 		policy := map[string]bool{}
 		for _, name := range s.RepoPolicy.Policy.DefaultToolset {
@@ -416,7 +426,7 @@ func (s *Session) ApplyAgentConfig(agentID string, agent config.Agent, profile c
 			enabled[name] = value && policy[name]
 		}
 	}
-	changed := s.AgentID != agentID || s.ServerID != agent.B || s.AgentName != agent.Name || s.BProfile != profile.Label || s.PromptAddendum != agent.PromptAddendum
+	changed := s.AgentID != agentID || s.ServerID != profileID || s.AgentName != agent.Name || s.BProfile != profile.Label || s.PromptAddendum != agent.PromptAddendum
 	if !changed {
 		for name, value := range enabled {
 			if s.ToolsEnabled[name] != value {
@@ -425,7 +435,7 @@ func (s *Session) ApplyAgentConfig(agentID string, agent config.Agent, profile c
 			}
 		}
 	}
-	s.AgentID, s.ServerID, s.AgentName, s.BProfile = agentID, agent.B, agent.Name, profile.Label
+	s.AgentID, s.ServerID, s.AgentName, s.BProfile = agentID, profileID, agent.Name, profile.Label
 	s.PromptAddendum, s.ToolsEnabled = agent.PromptAddendum, enabled
 	return changed
 }

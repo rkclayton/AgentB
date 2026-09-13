@@ -126,7 +126,7 @@ func (s *Server) plans(w http.ResponseWriter, r *http.Request) {
 		if data, readErr := os.ReadFile(filepath.Join(root, id, "plan.md")); readErr == nil {
 			for _, line := range strings.Split(string(data), "\n") {
 				if strings.HasPrefix(strings.TrimSpace(line), "#") {
-					if value := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#")); value != "" {
+					if value := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#")); value != "" {
 						name = value
 						break
 					}

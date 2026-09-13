@@ -58,9 +58,14 @@ func (c *FileCoordinator) record(s *session.Session, resolved string) {
 	rel := workspaceRel(root, resolved)
 	s.Touch(rel)
 	c.workspaces.RecordWrite(root, rel, s.ID)
+	c.publishPlan(s)
+}
+
+func (c *FileCoordinator) publishPlan(s *session.Session) {
 	if s.Role == "d" {
 		s.RefreshPlanName()
-		c.bus.Publish(events.New(events.SessionUpdated, s.ID, "", map[string]any{"role": s.Role, "plan_id": s.PlanID, "plan_name": s.PlanName, "plan_dir": s.PlanDir}))
+		snapshot := s.Snapshot()
+		c.bus.Publish(events.New(events.SessionUpdated, s.ID, "", map[string]any{"role": snapshot.Role, "plan_id": snapshot.PlanID, "plan_name": snapshot.PlanName, "plan_dir": snapshot.PlanDir}))
 	}
 }
 
@@ -98,6 +103,11 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 	if len(content) > 512*1024 {
 		return "", fmt.Errorf("content exceeds the 512 KB limit")
 	}
+	if s.Role == "d" {
+		if err := refuseRepoPolicyWrite(".", path); err != nil {
+			return "", err
+		}
+	}
 	root, rootErr := s.WriteRoot(path)
 	if rootErr != nil {
 		return "", rootErr
@@ -110,6 +120,7 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 		return "", err
 	}
 	if existing, readErr := os.ReadFile(resolved); readErr == nil && string(existing) == content {
+		w.coordinator.publishPlan(s)
 		return fmt.Sprintf("unchanged: %s already has the requested bytes", cleanRel(path)), nil
 	}
 	prefix, err := w.coordinator.check(s, path, resolved)

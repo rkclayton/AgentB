@@ -160,6 +160,37 @@ func TestCapabilitySuiteLiveServiceSplit(t *testing.T) {
 		}
 	})
 
+	t.Run("d_plan_file_boundary_under_service_identity", func(t *testing.T) {
+		repositoryFile := filepath.Join(workspace, "d-repository-source.txt")
+		if err := os.WriteFile(repositoryFile, []byte("repository evidence"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		d := &session.Session{ID: "capability-d", Role: "d", Workspace: workspace, PlansRoot: filepath.Join(workspace, "d-plans"), LastSeen: map[string]time.Time{}, ToolsEnabled: enabled}
+		if result := toolRegistry.CallDetailed(context.Background(), d, "write_file", map[string]any{"path": "plan.md", "content": "# Capability plan\n"}); !result.OK {
+			t.Fatalf("d write=%+v", result)
+		}
+		if d.PlanID == "" || d.PlanDir == "" {
+			t.Fatalf("d plan was not bound: %+v", d.Snapshot())
+		}
+		if result := toolRegistry.CallDetailed(context.Background(), d, "read_file", map[string]any{"path": repositoryFile}); !result.OK || !strings.Contains(result.Content, "repository evidence") {
+			t.Fatalf("d repository read=%+v", result)
+		}
+		if result := toolRegistry.CallDetailed(context.Background(), d, "write_file", map[string]any{"path": filepath.Join(workspace, "d-escape.txt"), "content": "escape"}); result.OK || result.OperatorOverrideReason == "" {
+			t.Fatalf("d repository write did not match the visible b-jail refusal: %+v", result)
+		} else if _, ok := toolRegistry.CallAsOperator(context.Background(), d, "write_file", map[string]any{"path": filepath.Join(workspace, "d-escape.txt"), "content": "escape"}); ok {
+			t.Fatal("operator identity widened the d repository-write jail")
+		}
+		sibling := filepath.Join(d.PlansRoot, "sibling")
+		if err := os.MkdirAll(sibling, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if result := toolRegistry.CallDetailed(context.Background(), d, "read_file", map[string]any{"path": filepath.Join(sibling, "plan.md")}); result.OK || result.OperatorOverrideReason == "" {
+			t.Fatalf("d sibling read did not match the visible b-jail refusal: %+v", result)
+		} else if _, ok := toolRegistry.CallAsOperator(context.Background(), d, "read_file", map[string]any{"path": filepath.Join(sibling, "plan.md")}); ok {
+			t.Fatal("operator identity widened the d sibling-plan jail")
+		}
+	})
+
 	t.Run("fetch_public_text_fetch_url", func(t *testing.T) {
 		value, err := NewFetch(cfg.Tools.Fetch).Call(context.Background(), item, map[string]any{"url": "https://example.com"})
 		if err != nil || !strings.Contains(value, "Example Domain") {

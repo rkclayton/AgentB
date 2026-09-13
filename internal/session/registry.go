@@ -112,7 +112,10 @@ func (r *Registry) Restore(saved Snapshot) (*Session, error) {
 	}
 	planID, planDir := "", ""
 	if role == "d" && saved.PlanID != "" {
-		planID = filepath.Base(saved.PlanID)
+		planID, err = normalizePlanID(saved.PlanID)
+		if err != nil {
+			return nil, fmt.Errorf("restore session %s: %w", saved.ID, err)
+		}
 		planDir = filepath.Join(r.plansRoot, planID)
 	}
 	s := &Session{
@@ -154,12 +157,18 @@ func planDisplayName(dir string) string {
 	data, err := os.ReadFile(filepath.Join(dir, "plan.md"))
 	if err == nil {
 		for _, line := range strings.Split(string(data), "\n") {
-			if name := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "#")); strings.HasPrefix(strings.TrimSpace(line), "#") && name != "" {
+			if name := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#")); strings.HasPrefix(strings.TrimSpace(line), "#") && name != "" {
 				return name
 			}
 		}
 	}
 	return filepath.Base(dir)
+}
+func normalizePlanID(value string) (string, error) {
+	if value == "" || value == "." || value == ".." || filepath.IsAbs(value) || filepath.Base(value) != value || strings.ContainsAny(value, `/\`) {
+		return "", fmt.Errorf("plan_id: invalid plan id")
+	}
+	return value, nil
 }
 func (r *Registry) create(label, agentID, workspace string, enabled map[string]bool, role, planID string) (*Session, error) {
 	r.mu.Lock()
@@ -185,6 +194,19 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 	profile, ok := r.profiles(profileID)
 	if !ok {
 		return nil, fmt.Errorf("agent_id: %s profile %s was not found", role, profileID)
+	}
+	planDir, planName := "", ""
+	if role == "d" && planID != "" {
+		normalized, normalizeErr := normalizePlanID(planID)
+		if normalizeErr != nil {
+			return nil, normalizeErr
+		}
+		planID = normalized
+		planDir = filepath.Join(r.plansRoot, planID)
+		if info, statErr := os.Lstat(planDir); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("plan_id: plan not found")
+		}
+		planName = planDisplayName(planDir)
 	}
 	abs, err := filepath.Abs(workspace)
 	if err != nil {
@@ -259,15 +281,6 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 		if err != nil {
 			return nil, err
 		}
-	}
-	planDir, planName := "", ""
-	if role == "d" && planID != "" {
-		planDir = filepath.Join(r.plansRoot, filepath.Base(planID))
-		if info, statErr := os.Lstat(planDir); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("plan_id: plan not found")
-		}
-		planID = filepath.Base(planID)
-		planName = planDisplayName(planDir)
 	}
 	session := &Session{ID: id, Label: label, AgentID: agentID, ServerID: profileID, AgentName: agent.Name, BProfile: profile.Label, Role: role, PlanID: planID, PlanName: planName, PlanDir: planDir, PlansRoot: r.plansRoot, PromptAddendum: agent.PromptAddendum, Workspace: abs, WorkspaceMissing: setup.Missing, ProjectBlock: setup.Instructions.Block, ProjectFiles: setup.Instructions.Files, ProjectNotes: setup.Instructions.Notes, PendingRepoPolicy: pendingPolicy, RepoPolicy: activePolicy, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, AgentMemoryBlock: agentMemoryBlock, AgentMemoryPath: agentMemoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
 	if r.workspaces != nil && !setup.Missing {
@@ -612,9 +625,17 @@ func (r *Registry) SetAgent(id, agentID string) error {
 	if !ok {
 		return fmt.Errorf("agent_id: unknown agent %s", agentID)
 	}
-	profile, ok := r.profiles(agent.B)
+	snapshot := s.Snapshot()
+	profileID := agent.B
+	if snapshot.Role == "d" {
+		profileID = agent.D
+		if profileID == "" {
+			return fmt.Errorf("agent_id: agent_d is not assigned")
+		}
+	}
+	profile, ok := r.profiles(profileID)
 	if !ok {
-		return fmt.Errorf("agent_id: b profile %s was not found", agent.B)
+		return fmt.Errorf("agent_id: %s profile %s was not found", snapshot.Role, profileID)
 	}
 	agentID = config.AgentID(agent.Name)
 	runnable, reason := runnable(profile, r.config().Context.Accounting)
@@ -635,7 +656,7 @@ func (r *Registry) SetAgent(id, agentID string) error {
 	memoryBlock, memoryPath := "", ""
 	if r.memory != nil {
 		var err error
-		memoryBlock, memoryPath, err = r.memory(context.Background(), workspace, agent.B)
+		memoryBlock, memoryPath, err = r.memory(context.Background(), workspace, profileID)
 		if err != nil {
 			return err
 		}
@@ -643,7 +664,7 @@ func (r *Registry) SetAgent(id, agentID string) error {
 	agentMemoryBlock, agentMemoryPath := "", ""
 	if r.agentMemory != nil {
 		var err error
-		agentMemoryBlock, agentMemoryPath, err = r.agentMemory(context.Background(), agentID, agent.B)
+		agentMemoryBlock, agentMemoryPath, err = r.agentMemory(context.Background(), agentID, profileID)
 		if err != nil {
 			return err
 		}
@@ -655,13 +676,17 @@ func (r *Registry) SetAgent(id, agentID string) error {
 	for _, name := range agent.Toolset {
 		enabled[name] = true
 	}
+	if snapshot.Role == "d" {
+		enabled["shell"] = false
+		enabled["run_script"] = false
+	}
 	s.mu.Lock()
-	s.AgentID, s.ServerID, s.AgentName, s.BProfile = agentID, agent.B, agent.Name, profile.Label
+	s.AgentID, s.ServerID, s.AgentName, s.BProfile = agentID, profileID, agent.Name, profile.Label
 	s.PromptAddendum, s.ToolsEnabled = agent.PromptAddendum, enabled
 	s.Runnable, s.NotRunnableReason = true, ""
 	s.MemoryBlock, s.MemoryPath, s.AgentMemoryBlock, s.AgentMemoryPath, s.Budget = memoryBlock, memoryPath, agentMemoryBlock, agentMemoryPath, initialBudget(profile)
 	s.mu.Unlock()
-	r.bus.Publish(events.New(events.SessionUpdated, id, "", map[string]any{"session_id": id, "agent_id": agentID, "server_id": agent.B, "agent_name": agent.Name, "b_profile": profile.Label, "runnable": true, "not_runnable_reason": "", "memory_path": memoryPath, "memory_content": memoryBlock}))
+	r.bus.Publish(events.New(events.SessionUpdated, id, "", map[string]any{"session_id": id, "agent_id": agentID, "server_id": profileID, "agent_name": agent.Name, "b_profile": profile.Label, "runnable": true, "not_runnable_reason": "", "memory_path": memoryPath, "memory_content": memoryBlock}))
 	return nil
 }
 
@@ -669,13 +694,6 @@ func (r *Registry) ApplyAgentBinding(agentID string) error {
 	agent, ok := r.resolveAgent(agentID)
 	if !ok {
 		return fmt.Errorf("agent_id: unknown agent %s", agentID)
-	}
-	profile, ok := r.profiles(agent.B)
-	if !ok {
-		return fmt.Errorf("agent_id: b profile %s was not found", agent.B)
-	}
-	if runnable, reason := runnable(profile, r.config().Context.Accounting); !runnable {
-		return fmt.Errorf("agent_id: %s", reason)
 	}
 	for _, item := range r.List() {
 		snapshot := item.Snapshot()
@@ -685,10 +703,21 @@ func (r *Registry) ApplyAgentBinding(agentID string) error {
 		if snapshot.Run.Status == "running" || snapshot.Run.Status == "stopping" {
 			return fmt.Errorf("agent_id: session %s is running", snapshot.ID)
 		}
+		profileID := agent.B
+		if snapshot.Role == "d" {
+			profileID = agent.D
+		}
+		profile, ok := r.profiles(profileID)
+		if !ok {
+			return fmt.Errorf("agent_id: %s profile %s was not found", snapshot.Role, profileID)
+		}
+		if runnable, reason := runnable(profile, r.config().Context.Accounting); !runnable {
+			return fmt.Errorf("agent_id: %s", reason)
+		}
 		memoryBlock, memoryPath := snapshot.MemoryContent, snapshot.MemoryPath
 		if r.memory != nil {
 			var err error
-			memoryBlock, memoryPath, err = r.memory(context.Background(), snapshot.Workspace, agent.B)
+			memoryBlock, memoryPath, err = r.memory(context.Background(), snapshot.Workspace, profileID)
 			if err != nil {
 				return err
 			}
@@ -696,7 +725,7 @@ func (r *Registry) ApplyAgentBinding(agentID string) error {
 		agentMemoryBlock, agentMemoryPath := snapshot.AgentMemoryContent, snapshot.AgentMemoryPath
 		if r.agentMemory != nil {
 			var err error
-			agentMemoryBlock, agentMemoryPath, err = r.agentMemory(context.Background(), agentID, agent.B)
+			agentMemoryBlock, agentMemoryPath, err = r.agentMemory(context.Background(), agentID, profileID)
 			if err != nil {
 				return err
 			}
@@ -708,7 +737,7 @@ func (r *Registry) ApplyAgentBinding(agentID string) error {
 		item.Budget = initialBudget(profile)
 		item.mu.Unlock()
 		r.bus.Publish(events.New(events.SessionUpdated, item.ID, "", map[string]any{
-			"session_id": item.ID, "agent_id": agentID, "server_id": agent.B,
+			"session_id": item.ID, "agent_id": agentID, "server_id": profileID,
 			"agent_name": agent.Name, "b_profile": profile.Label, "runnable": true,
 			"not_runnable_reason": "", "memory_path": memoryPath, "memory_content": memoryBlock,
 			"agent_memory_path": agentMemoryPath, "agent_memory_content": agentMemoryBlock,

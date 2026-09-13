@@ -39,6 +39,21 @@ func TestNextIsPureAndEmitsVersionedCursorPatch(t *testing.T) {
 	}
 }
 
+func TestPlanBindingUpdateDoesNotEraseUnmentionedSessionState(t *testing.T) {
+	state := seeded(t)
+	state.ServerID, state.Runnable, state.MemoryPath, state.MemoryContent = "planner", true, "memory.md", "remembered"
+	next, _, err := Next(state, Record{Cursor: Cursor{Generation: "plan.events", Offset: 90}, Event: events.Event{
+		SessionID: "main", Type: events.SessionUpdated,
+		Data: map[string]any{"role": "d", "plan_id": "stable", "plan_name": "Stable"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next.Role != "d" || next.PlanID != "stable" || next.ServerID != "planner" || !next.Runnable || next.MemoryPath != "memory.md" || next.MemoryContent != "remembered" {
+		t.Fatalf("plan update erased session state: %+v", next)
+	}
+}
+
 func TestMessageAttachmentProjectsIntoChatEntry(t *testing.T) {
 	state := seeded(t)
 	attachment := events.Attachment{Path: "attachments/spec.txt", Bytes: 12, SHA256: strings.Repeat("a", 64)}

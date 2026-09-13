@@ -36,6 +36,14 @@ func TestDSessionFileBoundarySeparatesPlanWritesFromRepositoryReads(t *testing.T
 	edit, write, read, _ := testTools(repo)
 	item := testSession(repo, "d1", "Planner")
 	item.Role, item.PlansRoot = "d", plans
+	for _, path := range []string{"../escape.md", ".agentb/policy.json"} {
+		if _, err := write.Call(context.Background(), item, map[string]any{"path": path, "content": "no"}); err == nil {
+			t.Fatalf("unbound d accepted %s", path)
+		}
+		if item.PlanID != "" || item.PlanDir != "" {
+			t.Fatalf("refused write bound a plan: %+v", item.Snapshot())
+		}
+	}
 	if _, err := write.Call(context.Background(), item, map[string]any{"path": "draft.md", "content": "plan A"}); err != nil {
 		t.Fatal(err)
 	}

@@ -83,6 +83,7 @@ try {
     $env:AGENTB_STEP4_LIVE_ACCOUNT = $account
     $env:AGENTB_STEP4_LIVE_APPLICATION_ROOT = $applicationRoot
     $env:AGENTB_STEP4_LIVE_DATA_ROOT = $dataRoot
+    $env:AGENTB_STEP4_LIVE_PLANS_ROOT = Join-Path $dataRoot 'plans'
     $env:AGENTB_STEP4_LIVE_WORKSPACE_ROOT = $workspaceRoot
     & $go test -count=1 ./internal/tools -run '^TestStep4LiveThreeRootShell$' -v
     if ($LASTEXITCODE -ne 0) { throw "Live service-shell test failed with exit code $LASTEXITCODE." }
@@ -97,6 +98,7 @@ try {
     Remove-Item Env:\AGENTB_STEP4_LIVE_ACCOUNT -ErrorAction SilentlyContinue
     Remove-Item Env:\AGENTB_STEP4_LIVE_APPLICATION_ROOT -ErrorAction SilentlyContinue
     Remove-Item Env:\AGENTB_STEP4_LIVE_DATA_ROOT -ErrorAction SilentlyContinue
+    Remove-Item Env:\AGENTB_STEP4_LIVE_PLANS_ROOT -ErrorAction SilentlyContinue
     Remove-Item Env:\AGENTB_STEP4_LIVE_WORKSPACE_ROOT -ErrorAction SilentlyContinue
     if ($firewallAttempted) {
         & (Join-Path $PSScriptRoot 'apply-firewall-rule.ps1') -AccountName $account -ModelAddress 127.0.0.1 -ModelPort 8080 -RuleName $firewallRule -LegacyAllowRuleName $legacyRule -Remove -NoPrompt -Confirm:$false

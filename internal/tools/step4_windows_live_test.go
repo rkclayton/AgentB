@@ -21,8 +21,9 @@ func TestStep4LiveThreeRootShell(t *testing.T) {
 	account := os.Getenv("AGENTB_STEP4_LIVE_ACCOUNT")
 	applicationRoot := os.Getenv("AGENTB_STEP4_LIVE_APPLICATION_ROOT")
 	dataRoot := os.Getenv("AGENTB_STEP4_LIVE_DATA_ROOT")
+	plansRoot := os.Getenv("AGENTB_STEP4_LIVE_PLANS_ROOT")
 	workspaceRoot := os.Getenv("AGENTB_STEP4_LIVE_WORKSPACE_ROOT")
-	if account == "" || applicationRoot == "" || dataRoot == "" || workspaceRoot == "" {
+	if account == "" || applicationRoot == "" || dataRoot == "" || plansRoot == "" || workspaceRoot == "" {
 		t.Skip("set all AGENTB_STEP4_LIVE_* variables for the operator test")
 	}
 
@@ -61,6 +62,17 @@ func TestStep4LiveThreeRootShell(t *testing.T) {
 	t.Log(strings.TrimSpace(detail.Content))
 	if body, err := os.ReadFile(workspaceMarker); err != nil || strings.TrimSpace(string(body)) != "verified" {
 		t.Fatalf("workspace marker = %q, %v", body, err)
+	}
+
+	planMarker := filepath.Join(plansRoot, "service-plan-write.txt")
+	planDetail := shell.CallDetailed(context.Background(), s, map[string]any{
+		"command": "Set-Content -LiteralPath " + quotePowerShell(planMarker) + " -Value plan -ErrorAction Stop",
+	})
+	if planDetail.Err != nil || planDetail.OperatorOverrideReason != "" {
+		t.Fatalf("service write in plans folder failed: %+v", planDetail)
+	}
+	if body, err := os.ReadFile(planMarker); err != nil || strings.TrimSpace(string(body)) != "plan" {
+		t.Fatalf("plan marker = %q, %v", body, err)
 	}
 
 	for _, denied := range []struct {

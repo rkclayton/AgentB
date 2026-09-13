@@ -265,6 +265,9 @@ func TestRoleAndPlanSnapshotRestoreWithoutLegacyMigration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(planDir, "plan.md"), []byte("# Stable name\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := registry.CreateRole("invalid", "agent", legacy.Workspace, "d", "."); err == nil || !strings.Contains(err.Error(), "invalid plan id") {
+		t.Fatalf("invalid plan id error=%v", err)
+	}
 	d, err := registry.CreateRole("design", "agent", legacy.Workspace, "d", planID)
 	if err != nil {
 		t.Fatal(err)
@@ -281,5 +284,10 @@ func TestRoleAndPlanSnapshotRestoreWithoutLegacyMigration(t *testing.T) {
 	}
 	if restored.ToggleTool("shell", true) || restored.ToolEnabled("shell") {
 		t.Fatal("d session enabled shell outside its file jail")
+	}
+	d.ToolsEnabled["shell"] = true
+	d.ApplyAgentConfig("agent", cfg.Agents[0], *profile)
+	if d.ServerID != cfg.Agents[0].D || d.ToolEnabled("shell") || d.ToolEnabled("run_script") {
+		t.Fatalf("agent rebind widened d session: %+v", d.Snapshot())
 	}
 }

@@ -56,11 +56,17 @@ func (s *Server) fileWorkspace(sessionID string) (string, bool) {
 	}
 	if s.registry != nil {
 		if item, ok := s.registry.Get(sessionID); ok {
+			if item.Role == "d" && item.PlanDir != "" {
+				return item.PlanDir, true
+			}
 			return item.Workspace, true
 		}
 	}
 	if s.replay != nil {
 		if item, ok := s.replay.Sessions[sessionID]; ok {
+			if item.Role == "d" && item.PlanDir != "" {
+				return item.PlanDir, true
+			}
 			return item.Workspace, item.Workspace != ""
 		}
 	}

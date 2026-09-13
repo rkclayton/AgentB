@@ -233,10 +233,18 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		if value := firstString(stringValue(data["b_profile"]), stringValue(data["main_profile"])); value != "" {
 			next.BProfile = value
 		}
-		next.Runnable = boolValue(data["runnable"])
-		next.NotRunnableReason = stringValue(data["not_runnable_reason"])
-		next.MemoryPath = stringValue(data["memory_path"])
-		next.MemoryContent = stringValue(data["memory_content"])
+		if _, ok := data["runnable"]; ok {
+			next.Runnable = boolValue(data["runnable"])
+		}
+		if _, ok := data["not_runnable_reason"]; ok {
+			next.NotRunnableReason = stringValue(data["not_runnable_reason"])
+		}
+		if _, ok := data["memory_path"]; ok {
+			next.MemoryPath = stringValue(data["memory_path"])
+		}
+		if _, ok := data["memory_content"]; ok {
+			next.MemoryContent = stringValue(data["memory_content"])
+		}
 	case events.ProjectInstructions:
 		if boolValue(data["lazy"]) {
 			if block := stringValue(data["block"]); block != "" {

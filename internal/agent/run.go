@@ -532,7 +532,11 @@ func producedFileMetadata(s *session.Session, name string, args map[string]any) 
 	if requested == "" {
 		return nil
 	}
-	resolved, err := tools.Resolve(s.Workspace, requested)
+	root, err := s.WriteRoot(requested)
+	if err != nil {
+		return nil
+	}
+	resolved, err := tools.Resolve(root, requested)
 	if err != nil {
 		return nil
 	}
@@ -540,7 +544,7 @@ func producedFileMetadata(s *session.Session, name string, args map[string]any) 
 	if err != nil || !info.Mode().IsRegular() {
 		return nil
 	}
-	root, err := filepath.EvalSymlinks(s.Workspace)
+	root, err = filepath.EvalSymlinks(root)
 	if err != nil {
 		return nil
 	}

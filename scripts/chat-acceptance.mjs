@@ -1367,15 +1367,18 @@ if (realModel) {
   await page.locator(".shell-left > .agent-tab-new").click();
   const roleChoices = page.locator(".shell-new-menu .shell-new-choice");
   assert.deepEqual(await roleChoices.allTextContents(), ["agent_b · Acceptance — chat", "agent_d · Acceptance — plan"]);
+  await page.screenshot({ path: join(evidenceRun, "d-role-menu.png") });
   await roleChoices.nth(1).click();
   await browser.wait(`[...document.querySelectorAll('.shell-new-menu .shell-new-choice')].some(item=>item.textContent==='Browser plan')`, "plan choices");
   assert.equal(await page.locator(".shell-new-menu .shell-new-choice").first().innerText(), "none");
+  await page.screenshot({ path: join(evidenceRun, "d-plan-menu.png") });
   await clickText(".shell-new-menu .shell-new-choice", "Browser plan");
   await browser.wait(`document.querySelector('.agent-tab-wrap.selected .agent-tab')?.innerText.includes('agent_d') && document.title.endsWith('· plan: Browser plan')`, "d chat plan identity");
   const dState = await state();
   const dSession = Object.values(dState.sessions).find((session) => session.role === "d" && session.plan_id === "browser-plan");
   assert.ok(dSession, JSON.stringify(dState.sessions));
   assert.equal(dSession.server_id, "acceptance");
+  await page.screenshot({ path: join(evidenceRun, "d-plan.png") });
   record("d-plus-plan-choice-tab-and-title");
   record("fake-model-script-complete");
   await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID, shell_flip: shellFlipEvidence, shell_style_boundary: shellStyleBoundaryEvidence }, null, 2));
