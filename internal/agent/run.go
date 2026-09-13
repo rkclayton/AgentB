@@ -186,13 +186,18 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 		budgetBusy := false
 		r.stage(s, runID, turn, "assemble", func() {
 			records := s.MessagesCopy()
-			abortContext := harnessAbortContext(records)
-			systemBase := appendHarnessAbortContext(r.prompt.RenderParts(profile, s, toolNames, "", ""), abortContext)
-			systemProject := appendHarnessAbortContext(r.prompt.RenderParts(profile, s, toolNames, s.ProjectBlock, ""), abortContext)
-			systemWorkspaceMemory := appendHarnessAbortContext(r.prompt.RenderMemoryParts(profile, s, toolNames, s.ProjectBlock, s.MemoryBlock, ""), abortContext)
-			system = appendHarnessAbortContext(r.prompt.RenderMemoryParts(profile, s, toolNames, s.ProjectBlock, s.MemoryBlock, s.AgentMemoryBlock), abortContext)
+			systemBase := r.prompt.RenderParts(profile, s, toolNames, "", "")
+			systemProject := r.prompt.RenderParts(profile, s, toolNames, s.ProjectBlock, "")
+			systemWorkspaceMemory := r.prompt.RenderMemoryParts(profile, s, toolNames, s.ProjectBlock, s.MemoryBlock, "")
+			system = r.prompt.RenderMemoryParts(profile, s, toolNames, s.ProjectBlock, s.MemoryBlock, s.AgentMemoryBlock)
 			messages := []llm.Message{{Role: "system", Content: system}}
 			requestRecords := make([]events.Message, 0, len(records))
+			for _, message := range records {
+				if isHarnessAbortRecord(message) {
+					messages = append(messages, requestMessage(profile, s, message))
+					requestRecords = append(requestRecords, message)
+				}
+			}
 			for _, message := range records {
 				if isHarnessAbortRecord(message) {
 					continue
@@ -208,11 +213,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 			if truncatedToolRetry != "" {
 				request.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": truncatedToolRetry}}
 			}
-			withoutToolSystems := r.withoutToolSystems(profile, s, enabled, s.MemoryBlock)
-			for name, rendered := range withoutToolSystems {
-				withoutToolSystems[name] = appendHarnessAbortContext(rendered, abortContext)
-			}
-			budget, budgetErr = r.budget.MeasureWithBusy(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, SystemProject: systemProject, SystemWorkspaceMemory: systemWorkspaceMemory, System: system, WithoutToolSystems: withoutToolSystems, Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: requestRecords}, false, func(err error) {
+			budget, budgetErr = r.budget.MeasureWithBusy(ctx, profile, s, r.cfg().Context, budgetInput{SystemBase: systemBase, SystemProject: systemProject, SystemWorkspaceMemory: systemWorkspaceMemory, System: system, WithoutToolSystems: r.withoutToolSystems(profile, s, enabled, s.MemoryBlock), Schemas: schemas, AllSchemas: r.tools.AllSchemas(), Messages: messages[1:], Records: requestRecords}, false, func(err error) {
 				budgetBusy = true
 				r.bus.Publish(events.New(events.ModelBusy, s.ID, runID, map[string]any{"host": modelHost(profile), "detail": err.Error()}))
 			})

@@ -209,11 +209,16 @@ func testStopBlockedModelResumesWithAbortRecord(t *testing.T, rejectMidSystem bo
 			t.Fatal(err)
 		}
 		if request.URL.Path == "/apply-template" {
+			historyStarted := false
 			for index, message := range body.Messages {
-				if rejectMidSystem && index > 0 && (message.Role == "system" || message.Role == "developer") {
+				system := message.Role == "system" || message.Role == "developer"
+				if rejectMidSystem && index > 0 && system && historyStarted {
 					rejected.Add(1)
 					http.Error(w, "System message must be at the beginning.", http.StatusInternalServerError)
 					return
+				}
+				if !system {
+					historyStarted = true
 				}
 			}
 			_, _ = fmt.Fprint(w, `{"prompt":"ok"}`)
@@ -271,10 +276,19 @@ func testStopBlockedModelResumesWithAbortRecord(t *testing.T, rejectMidSystem bo
 		t.Fatalf("resuming model request missing: rejected=%d run=%+v", rejected.Load(), item.Snapshot().Run)
 	}
 	joined := ""
+	historyStarted := false
+	var sentAbort llm.Message
 	for index, message := range messages {
 		joined += fmt.Sprintf("%s:%s\n", message.Role, message.Content)
-		if index > 0 && (message.Role == "system" || message.Role == "developer") {
+		system := message.Role == "system" || message.Role == "developer"
+		if index > 0 && system && historyStarted {
 			t.Fatalf("in-position harness message=%+v", message)
+		}
+		if system && strings.HasPrefix(messageText(message.Content), harnessAbortRecordPrefix+"\n") {
+			sentAbort = message
+		}
+		if !system {
+			historyStarted = true
 		}
 	}
 	stored := item.MessagesCopy()
@@ -285,7 +299,7 @@ func testStopBlockedModelResumesWithAbortRecord(t *testing.T, rejectMidSystem bo
 			break
 		}
 	}
-	if rejected.Load() != 0 || len(messages) == 0 || messages[0].Role != "system" || abortRecord.Role != "system" || !strings.Contains(messageText(messages[0].Content), abortRecord.Content) || !strings.Contains(joined, "partial model output") || !strings.Contains(joined, "user:resume") {
+	if rejected.Load() != 0 || len(messages) == 0 || messages[0].Role != "system" || sentAbort.Role != "system" || messageText(sentAbort.Content) != abortRecord.Content || abortRecord.Role != "system" || !strings.Contains(joined, "partial model output") || !strings.Contains(joined, "user:resume") {
 		t.Fatalf("resuming messages:\n%s", joined)
 	}
 }

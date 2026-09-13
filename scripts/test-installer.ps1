@@ -61,6 +61,19 @@ function Get-FilePrefixHash {
 try {
     & powershell.exe -NoLogo -NoProfile -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
     if ($LASTEXITCODE -ne 0) { throw "First install exited $LASTEXITCODE." }
+
+    $configPath = Join-Path $testData 'harness.json'
+    $installedConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
+    if (-not ([string]$installedConfig.workspace).Equals($testWorkspace, [StringComparison]::OrdinalIgnoreCase) -or
+        -not ([string]$installedConfig.log_dir).Equals((Join-Path $testData 'logs'), [StringComparison]::OrdinalIgnoreCase) -or
+        -not ([string]$installedConfig.memory.dir).Equals((Join-Path $testData 'memory'), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Installed configuration does not use the three-root layout.'
+    }
+    $testPort = Get-FreeTcpPort
+    $installedConfig.listen = "127.0.0.1:$testPort"
+    [IO.File]::WriteAllText($configPath, ($installedConfig | ConvertTo-Json -Depth 100) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $configHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+
     foreach ($path in @(
         (Join-Path $testApplication 'Agent_b.exe'),
         (Join-Path $testApplication 'Agent_b.cmd'),
@@ -70,8 +83,12 @@ try {
     )) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing installed file: $path" }
     }
-    & powershell.exe -NoLogo -NoProfile -File (Join-Path $testApplication 'scripts\launch-Agent_b.ps1') -ApplicationDirectory $testApplication -DataDirectory $testData -ConfigPath (Join-Path $testData 'harness.json') -Check
+    $checkOutput = (& powershell.exe -NoLogo -NoProfile -File (Join-Path $testApplication 'scripts\launch-Agent_b.ps1') -ApplicationDirectory $testApplication -DataDirectory $testData -ConfigPath $configPath -Check | Out-String)
     if ($LASTEXITCODE -ne 0) { throw "Installed launcher check exited $LASTEXITCODE." }
+    if ($checkOutput -notmatch [regex]::Escape("API base: http://127.0.0.1:$testPort/") -or
+        $checkOutput -notmatch 'Endpoint ready: False') {
+        throw "Installed launcher check did not measure the assigned isolated port.`n$checkOutput"
+    }
 
     $launcherSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'scripts\launch-Agent_b.ps1')
     if ($launcherSource -notmatch "'chat'" -or $launcherSource -notmatch 'Show-AgentBWindow -Url \$appUrl -ReplaceExisting') {
@@ -175,18 +192,6 @@ try {
         -not ([string]$registration.WorkspaceLocation).Equals($testWorkspace, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Installed apps registration is incorrect.'
     }
-
-    $configPath = Join-Path $testData 'harness.json'
-    $installedConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
-    if (-not ([string]$installedConfig.workspace).Equals($testWorkspace, [StringComparison]::OrdinalIgnoreCase) -or
-        -not ([string]$installedConfig.log_dir).Equals((Join-Path $testData 'logs'), [StringComparison]::OrdinalIgnoreCase) -or
-        -not ([string]$installedConfig.memory.dir).Equals((Join-Path $testData 'memory'), [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Installed configuration does not use the three-root layout.'
-    }
-    $testPort = Get-FreeTcpPort
-    $installedConfig.listen = "127.0.0.1:$testPort"
-    [IO.File]::WriteAllText($configPath, ($installedConfig | ConvertTo-Json -Depth 100) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-    $configHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
 
     $portOwner = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, $testPort)
     $portOwner.Start()

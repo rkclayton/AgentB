@@ -85,8 +85,13 @@ const fakeHandler = async (request, response) => {
     return void response.end(JSON.stringify({ tokens: Array.from({ length: Math.max(1, Math.ceil(content.length / 4)) }, (_, i) => i) }));
   }
   if (request.url === "/apply-template") {
-    const invalid = (body.messages || []).findIndex((message, index) => index > 0
-      && ["system", "developer"].includes(message.role));
+    let historyStarted = false;
+    const invalid = (body.messages || []).findIndex((message, index) => {
+      const system = ["system", "developer"].includes(message.role);
+      const rejected = index > 0 && system && historyStarted;
+      if (!system) historyStarted = true;
+      return rejected;
+    });
     if (invalid >= 0) {
       response.statusCode = 500;
       return void response.end("System message must be at the beginning.");

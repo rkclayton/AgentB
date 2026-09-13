@@ -226,23 +226,6 @@ func isHarnessAbortRecord(message events.Message) bool {
 	return message.Role == "system" && message.Category == "history" && strings.HasPrefix(message.Content, harnessAbortRecordPrefix+"\n")
 }
 
-func harnessAbortContext(records []events.Message) string {
-	parts := []string{}
-	for _, message := range records {
-		if isHarnessAbortRecord(message) {
-			parts = append(parts, message.Content)
-		}
-	}
-	return strings.Join(parts, "\n\n")
-}
-
-func appendHarnessAbortContext(system, context string) string {
-	if context == "" {
-		return system
-	}
-	return system + "\n\n" + context
-}
-
 func (r *Runner) stopped(s *session.Session, runID string, turn int, detail string) (string, string, int) {
 	reason := r.abortReason(s.ID, runID)
 	if strings.TrimSpace(detail) == "" {
