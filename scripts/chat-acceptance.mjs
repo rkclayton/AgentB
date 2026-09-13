@@ -1127,6 +1127,7 @@ if (realModel) {
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('model unreachable')`, "unreachable strip");
   await waitEvent(sessionID, (event) => event.type === "model.unreachable", "model.unreachable");
   await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.data?.reason === "model_unreachable", "unreachable run stopped");
+  await browser.wait(`[...document.querySelectorAll('#chat-log > .chat-notice-row')].some((row) => row.innerText.includes('model unreachable ·'))`, "flat unreachable notice");
   const unreachableRows = await page.evaluate(() => {
     const rows = [...document.querySelectorAll("#chat-log > .chat-entry")];
     const user = rows.findLastIndex((row) => row.classList.contains("chat-user") && row.innerText.includes("acceptance: unreachable"));
