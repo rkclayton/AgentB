@@ -84,7 +84,14 @@ const fakeHandler = async (request, response) => {
     const content = String(body.content || body.prompt || "");
     return void response.end(JSON.stringify({ tokens: Array.from({ length: Math.max(1, Math.ceil(content.length / 4)) }, (_, i) => i) }));
   }
-  if (request.url === "/apply-template") return void response.end(JSON.stringify({ prompt: JSON.stringify(body.messages || []) }));
+  if (request.url === "/apply-template") {
+    const invalid = (body.messages || []).findIndex((message, index) => index > 0 && ["system", "developer"].includes(message.role));
+    if (invalid >= 0) {
+      response.statusCode = 500;
+      return void response.end("System message must be at the beginning.");
+    }
+    return void response.end(JSON.stringify({ prompt: JSON.stringify(body.messages || []) }));
+  }
   if (request.url !== "/v1/chat/completions") { response.statusCode = 404; return void response.end(); }
   const user = latestUser(body);
   if (user.includes("Summarize the work so far")) {
@@ -1123,10 +1130,10 @@ if (realModel) {
   assert.equal(prefix(requests[0]), prefix(requests.at(-1)));
   const summaryEvent = events.findLast((event) => event.type === "message.appended" && event.data?.message?.category === "summary");
   assert.ok(summaryEvent, "compaction did not append a summary message");
-  assert.equal(summaryEvent.data.message.role, "system");
+  assert.equal(summaryEvent.data.message.role, "assistant");
   const requestAfterSummary = requests.find((event) => event.seq > summaryEvent.seq);
   assert.ok(requestAfterSummary, "compaction summary was not followed by a model request");
-  assert.ok(requestAfterSummary.body.messages.some((message) => message.role === "system" && message.content === summaryEvent.data.message.content), "model request did not retain the complete system summary");
+  assert.ok(requestAfterSummary.body.messages.some((message) => message.role === "assistant" && message.content === summaryEvent.data.message.content), "model request did not retain the complete assistant summary");
   assert.ok((await browserText("#chat-log")).includes("acceptance: compaction"));
   const summaryRow = page.locator(".chat-summary").last();
   await summaryRow.waitFor({ state: "visible" });

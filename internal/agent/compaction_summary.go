@@ -104,7 +104,7 @@ func (r *Runner) trySummary(ctx context.Context, s *session.Session, runID strin
 	if evidence := summaryEvidenceAppendix(s.MessagesCopy()); evidence != "" {
 		summaryContent += "\n\n" + evidence
 	}
-	message, _ := r.makeMessage(ctx, sessionProfile, "system", summaryContent, "summary", 0)
+	message, _ := r.makeMessage(ctx, sessionProfile, "assistant", summaryContent, "summary", 0)
 	if !r.compact.Summarize(s, runID, message, source) {
 		return false, "rejected"
 	}

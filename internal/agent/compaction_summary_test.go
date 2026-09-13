@@ -13,18 +13,21 @@ import (
 
 	"harness/internal/config"
 	"harness/internal/events"
+	"harness/internal/llm"
 	"harness/internal/session"
 	"harness/internal/tools"
 )
 
 type summaryServer struct {
-	server        *httptest.Server
-	chatCalls     atomic.Int32
-	templateCalls atomic.Int32
-	tokenizeCalls atomic.Int32
-	mu            sync.Mutex
-	lastChat      map[string]any
-	content       string
+	server          *httptest.Server
+	chatCalls       atomic.Int32
+	templateCalls   atomic.Int32
+	tokenizeCalls   atomic.Int32
+	mu              sync.Mutex
+	lastChat        map[string]any
+	templates       [][]llm.Message
+	content         string
+	rejectMidSystem bool
 }
 
 func newSummaryServer(t *testing.T, content string) *summaryServer {
@@ -35,18 +38,25 @@ func newSummaryServer(t *testing.T, content string) *summaryServer {
 		case "/apply-template":
 			result.templateCalls.Add(1)
 			var body struct {
-				Messages []struct {
-					Content string `json:"content"`
-				} `json:"messages"`
+				Messages []llm.Message `json:"messages"`
 			}
 			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
+			result.mu.Lock()
+			result.templates = append(result.templates, append([]llm.Message(nil), body.Messages...))
+			result.mu.Unlock()
+			for index, message := range body.Messages {
+				if result.rejectMidSystem && index > 0 && (message.Role == "system" || message.Role == "developer") {
+					http.Error(w, "System message must be at the beginning.", http.StatusInternalServerError)
+					return
+				}
+			}
 			var prompt strings.Builder
 			for _, message := range body.Messages {
 				prompt.WriteString("<message>")
-				prompt.WriteString(message.Content)
+				prompt.WriteString(messageText(message.Content))
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{"prompt": prompt.String()})
 		case "/tokenize":
@@ -112,11 +122,54 @@ func TestCompactionAuxUnsetUsesOneMainCall(t *testing.T) {
 			break
 		}
 	}
-	if summary.Role != "system" {
+	if summary.Role != "assistant" {
 		t.Fatalf("compaction summary attribution=%+v", snapshot.Messages)
 	}
-	if converted := requestMessage(profileForRunner(runner, "main"), item, summary); converted.Role != "system" || converted.Content != summary.Content {
+	if converted := requestMessage(profileForRunner(runner, "main"), item, summary); converted.Role != "assistant" || converted.Content != summary.Content {
 		t.Fatalf("model request summary=%+v", converted)
+	}
+}
+
+func TestCompactionSummaryFitsPositionConstrainedTemplate(t *testing.T) {
+	const content = "verbatim compact summary retained in full"
+	mainServer := newSummaryServer(t, content)
+	mainServer.rejectMidSystem = true
+	runner, item, _, cfg := compactionRunner(t, mainServer, nil, 32768)
+	cfg.Servers[0].Capabilities.ApplyTemplate = true
+	cfg.Servers[0].Capabilities.Tokenize = true
+
+	if !runner.summarize(context.Background(), item, "run", profileForRunner(runner, "main")) {
+		t.Fatal("summary was not accepted")
+	}
+	var storedSummary events.Message
+	for _, message := range item.MessagesCopy() {
+		if message.Category == "summary" {
+			storedSummary = message
+			break
+		}
+	}
+	if storedSummary.Content == "" || !strings.Contains(storedSummary.Content, content) {
+		t.Fatalf("stored summary=%+v", storedSummary)
+	}
+	if _, err := runner.measureSession(context.Background(), profileForRunner(runner, "main"), item, nil, false); err != nil {
+		t.Fatalf("measure compacted session against position-constrained template: %v", err)
+	}
+
+	mainServer.mu.Lock()
+	templates := append([][]llm.Message(nil), mainServer.templates...)
+	mainServer.mu.Unlock()
+	if len(templates) == 0 {
+		t.Fatal("budget measurement did not call apply-template")
+	}
+	measured := templates[len(templates)-1]
+	var summaries []llm.Message
+	for _, message := range measured {
+		if message.Content == storedSummary.Content {
+			summaries = append(summaries, message)
+		}
+	}
+	if len(summaries) != 1 || summaries[0].Role != "assistant" {
+		t.Fatalf("measured summary=%+v messages=%+v", summaries, measured)
 	}
 }
 
