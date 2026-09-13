@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-const source = await readFile(new URL("./settings.js", import.meta.url), "utf8");
+const source = (await Promise.all([
+  "settings.js", "settings-connections.js", "settings-general.js", "settings-workspace.js", "settings-security.js",
+].map((name) => readFile(new URL(`./${name}`, import.meta.url), "utf8")))).join("\n");
 
 test("Security signing onboarding is gated and standard users see Verify only", () => {
   assert.match(source, /Create certificate/);

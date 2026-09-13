@@ -1,6 +1,10 @@
 import { api, reduce, setActive, store, subscribe } from "./bus.js";
 import { operatorStatusView } from "./operator-status.js";
 import { navigationSurfaceReady } from "./navigation-telemetry.js";
+import { renderConnectionsPage } from "./settings-connections.js";
+import { renderGeneralPage } from "./settings-general.js";
+import { renderSecurityPage } from "./settings-security.js";
+import { renderWorkspacePage } from "./settings-workspace.js";
 
 const sheet = document.getElementById("settings-page");
 let gear;
@@ -148,17 +152,17 @@ function render() {
       .filter(([key, value]) => key && value),
   );
   const content = {
-    servers: () => servers(),
-    sessions: () => sessions(),
-    workspace: () => workspaces(),
-    tools: () => tools(active),
-    memory: () => memory(active),
-    context: () => context(active),
-    run: () => run(),
-    delivery: () => delivery(),
-    shell: () => shell(active),
-    about: () => about(),
-    session: () => sessionControls(active),
+    servers: () => renderConnectionsPage(settingsPageContext(active)),
+    sessions: () => renderGeneralPage("sessions", active, settingsPageContext(active)),
+    workspace: () => renderWorkspacePage(settingsPageContext(active)),
+    tools: () => renderGeneralPage("tools", active, settingsPageContext(active)),
+    memory: () => renderGeneralPage("memory", active, settingsPageContext(active)),
+    context: () => renderGeneralPage("context", active, settingsPageContext(active)),
+    run: () => renderGeneralPage("run", active, settingsPageContext(active)),
+    delivery: () => renderGeneralPage("delivery", active, settingsPageContext(active)),
+    shell: () => renderSecurityPage("shell", active, settingsPageContext(active)),
+    about: () => renderGeneralPage("about", active, settingsPageContext(active)),
+    session: () => renderSecurityPage("session", active, settingsPageContext(active)),
   };
   const label = sectionLabels.find(([id]) => id === activeSection)?.[1] || "Settings";
   const saveLabel = settingsSaving ? "Saving…" : drafts.size ? `Save (${drafts.size})` : "Saved";
@@ -185,6 +189,17 @@ function render() {
   navigationSurfaceReady("settings", store);
 }
 
+function settingsPageContext(active) {
+  return {
+    active, store, expanded, armed, drafts, errors, probeMessages, workspaceState, operatorFileState,
+    shellCredentialMessage, shellCredentialAlarm, serviceAccountStatus, serviceAccountBusy,
+    serviceAccountMessage, serviceAccountAlarm, hardeningStatus, hardeningBusy, hardeningMessage,
+    hardeningAlarm, signingStatus, signingBusy, signingMessage, signingAlarm, serverProfiles,
+    row, field, text, number, numberControl, textarea, secret, toggle, choices, approvalChoices,
+    copyRow, currentValue, issue, profileReason, html, attr, selectedHardeningServerID, operatorStatusView,
+  };
+}
+
 function refreshSaveControls() {
   const status = sheet.querySelector("[data-save-status]");
   const button = sheet.querySelector('[data-action="save-settings"]');
@@ -207,255 +222,6 @@ function group(name, content) {
   return `<section class="settings-group"><h2>${name}</h2>${content}</section>`;
 }
 
-function servers() {
-  const profiles = serverProfiles();
-  const rows = profiles
-    .map((profile) => {
-      const isOpen = expanded.has(profile.id);
-      const hasPendingChanges = [...drafts.keys()].some((path) => path.startsWith(`servers.${profile.id}.`));
-      const feedback = probeMessages.get(profile.id);
-      const reason = profileReason(profile);
-      const failed = (profile.capabilities?.findings || []).some((x) =>
-        x.startsWith("probe failed:"),
-      );
-      const testState = profile._probing
-        ? "testing"
-        : hasPendingChanges
-          ? "unsaved — Test will save first"
-          : feedback?.message
-            ? feedback.message
-            : failed
-              ? "failed"
-              : !reason && profile.capabilities?.probed_at
-                ? "ready"
-                : "not tested";
-      const ready = !reason && !!profile.capabilities?.probed_at;
-      const lamp = failed || feedback?.alarm || (reason && reason !== "context length unknown") ? "alarm" : profile._probing || ready || feedback ? "live" : "";
-      const removeKey = `server:${profile.id}`;
-      return `<div class="profile-row ${isOpen ? "selected" : ""}">
-          <button type="button" class="profile-summary" data-action="profile-toggle" data-id="${attr(profile.id)}">
-            <span class="lamp ${lamp}"></span><span>${html(profile.label)}</span><span class="profile-url">${html(profile.base_url)}</span><span class="profile-state">${testState}</span>
-          </button>
-          <button type="button" data-action="probe" data-id="${attr(profile.id)}" title="${hasPendingChanges ? "Test will save this connection first." : ""}" ${profile._probing ? "disabled" : ""}>${profile._probing ? "Testing…" : "Test"}</button>
-          <button type="button" class="profile-remove ${armed.has(removeKey) ? "confirm" : ""}" data-action="remove-server" data-id="${attr(profile.id)}" aria-label="${armed.has(removeKey) ? `Confirm remove ${attr(profile.label)}` : `Remove ${attr(profile.label)}`}">${armed.has(removeKey) ? "Confirm ×" : "×"}</button>
-      </div>`;
-    })
-    .join("");
-  const editors = profiles.filter((profile) => expanded.has(profile.id)).map((profile) => `<section class="profile-editor" aria-label="${attr(profile.label)} connection settings">
-    <div class="profile-editor-head"><div><span class="lamp ${profileReason(profile) && profileReason(profile) !== "context length unknown" ? "alarm" : ""}"></span><h3>${html(profile.label)}</h3><span class="profile-url">${html(profile.base_url)}</span></div><button type="button" data-action="duplicate-server" data-id="${attr(profile.id)}">Duplicate</button></div>
-    <div class="profile-fields">${profileFields(profile, profileReason(profile))}</div>
-  </section>`).join("");
-  return `<div class="settings-actions settings-connections-actions"><button type="button" data-action="open-setup">Open setup guide</button><button type="button" data-action="add-server">Add connection</button></div><div class="settings-subhead">Profiles</div><div class="profile-list">${rows || '<p class="settings-note inline">No connections configured.</p>'}</div>${editors}`;
-}
-
-function profileFields(profile, reason) {
-  const id = profile.id;
-  const p = `servers.${id}`;
-  const caps = profile.capabilities || {};
-  const efforts = profile.reasoning?.valid_efforts || caps.valid_efforts || [];
-  const llama = caps.server === "llama.cpp";
-  const findings = (caps.findings || [])
-    .map((value) => `<li>${html(value)}</li>`)
-    .join("");
-  const samplingRows = [
-    ["temperature", "temperature", "0.01", false],
-    ["top_p", "top_p", "0.01", false],
-    ["top_k", "top_k", "1", !llama],
-    ["min_p", "min_p", "0.01", !llama],
-    ["presence_penalty", "presence penalty", "0.1", false],
-    ["repeat_penalty", "repeat penalty", "0.1", !llama],
-  ].map(([name, label, step, disabled]) => `<div class="sampling-label">${html(label)}</div>${["thinking", "nonthinking"].map((mode) => `<div>${numberControl(`${p}.sampling.${mode}.${name}`, profile.sampling[mode][name], step, disabled)}${disabled ? '<span class="control-note">llama.cpp only</span>' : ""}</div>`).join("")}`).join("");
-	return `<div class="profile-fieldset profile-identity"><h4>Connection</h4>${text(`${p}.label`, "label", profile.label)}
-    ${text(`${p}.base_url`, "base_url", profile.base_url)}
-	${text(`${p}.extract_url`, "extract_url", profile.extract_url || "")}
-	${choices(`${p}.attachment_handling`, "attachment handling", ["auto", "native", "extract"], profile.attachment_handling || "auto")}
-	<p class="settings-note">auto follows probed capability; native always sends supported attachment kinds; extract keeps their binary local</p>
-    ${text(`${p}.model`, "model", profile.model)}
-	${text(`${p}.credential`, "credential ref", profile.credential || "")}
-    ${secret(`${p}.api_key`, "api_key", profile.api_key, id)}
-	<p class="settings-note">API keys are stored in user-scoped DPAPI storage; configuration keeps only the credential reference.</p>
-    ${number(`${p}.request_timeout_s`, "timeout", profile.request_timeout_s)}
-    ${choices(`${p}.probe_mode`, "probe mode", ["full", "minimal", "off"], profile.probe_mode)}
-    <p class="settings-note">minimal and off skip checks that spend tokens; assumed values are marked in findings</p></div>
-    <div class="profile-fieldset profile-reasoning"><h4>Reasoning &amp; context</h4>
-    ${choices(`${p}.reasoning.control`, "control", ["auto", "chat_template_kwargs", "top_level", "server_flag", "none"], profile.reasoning.control)}
-    ${toggle(`${p}.reasoning.enabled`, "enabled", profile.reasoning.enabled)}
-    ${efforts.length ? choices(`${p}.reasoning.effort`, "effort", efforts, profile.reasoning.effort) : row("effort", '<span class="settings-note inline">not supported by this server</span>')}
-    ${toggle(`${p}.reasoning.preserve`, "preserve", profile.reasoning.preserve)}
-    ${number(`${p}.reasoning.max_tokens`, "reasoning cap", profile.reasoning.max_tokens || 0, "1")}
-    ${number(`${p}.context.reserve_output`, "reserve", profile.context.reserve_output)}
-	${number(`${p}.context.n_ctx`, "context size", profile.context.n_ctx, "1")}
-    <p class="settings-note">Test fills this from the server when available. Otherwise enter the server's configured context window; it is required for use and for probe mode off.</p></div>
-    <div class="profile-fieldset profile-sampling"><h4>Sampling</h4><div class="sampling-grid"><div></div><div class="sampling-column">Thinking</div><div class="sampling-column">Non-thinking</div>${samplingRows}</div></div>
-    <div class="profile-fieldset profile-prompt"><h4>System prompt</h4>
-    ${textarea(`${p}.system_prompt_override`, "system prompt override", profile.system_prompt_override || "")}
-    <p class="settings-note">variables: {{workspace}} {{tools}} {{agent}} {{project}} {{memory}}</p></div>
-    <div class="profile-fieldset profile-capabilities"><h4>Capabilities</h4>
-    <div class="findings"><span class="settings-note">${html(caps.probed_at || "not probed")}</span><ul>${findings || "<li>no findings</li>"}</ul></div>
-    ${reason && reason !== "context length unknown" ? `<p class="field-error">${html(reason)}</p>` : ""}
-    ${errors.get(p) ? `<p class="field-error">${html(errors.get(p))}</p>` : ""}</div>`;
-}
-
-function sessions() {
-  const profiles = serverProfiles().filter((profile) => !profileReason(profile));
-  const items = Object.values(store.sessions)
-    .map((item) => {
-      const running = item.run.status !== "idle";
-      const key = `session:${item.id}`;
-      const profileOptions = serverProfiles()
-        .map((candidate) => {
-          const problem = profileReason(candidate);
-          return `<option value="${attr(candidate.id)}" ${candidate.id === item.server_id ? "selected" : ""} ${problem ? "disabled" : ""}>${html(candidate.label)}</option>`;
-        })
-        .join("");
-      return `<div class="session-row">
-        <input class="session-label" data-session-label="${attr(item.id)}" value="${attr(item.label)}" aria-label="${attr(item.id)} label">
-        <select data-session-server="${attr(item.id)}" aria-label="${attr(item.id)} server" ${running || store.replay ? "disabled" : ""}>${profileOptions}</select><span class="path" title="${attr(item.workspace)}">${html(item.workspace)}</span>
-        <span>${html(item.run.status)}</span>
-        <button type="button" class="${armed.has(key) ? "confirm" : ""}" data-action="close-session" data-id="${attr(item.id)}">${running && armed.has(key) ? "Confirm" : "Close"}</button>
-      </div>${issue(`session.${item.id}`) ? `<p class="field-error">${html(issue(`session.${item.id}`))}</p>` : ""}`;
-    })
-    .join("");
-  const defaultProfile = store.config.agents?.[0]?.b || "";
-  const options = profiles
-    .map((p) => `<option value="${attr(p.id)}" ${p.id === defaultProfile ? "selected" : ""}>${html(p.label)}</option>`)
-    .join("");
-  return `${items}
-    <div class="settings-subhead">New session</div>
-    ${row("label", '<input id="new-session-label" value="new session">')}
-    ${row("profile", `<select id="new-session-profile">${options}</select>`)}
-    ${row("workspace", `<input id="new-session-workspace" value="${attr(store.config.workspace || "")}">`)}
-    <button type="button" class="text-action" data-action="new-session" ${options ? "" : "disabled"}>New session</button>
-    ${issue("new-session") ? `<p class="field-error">${html(issue("new-session"))}</p>` : ""}
-    ${number("run.max_concurrent", "max concurrent", store.config.run?.max_concurrent)}`;
-}
-
-function tools(active) {
-  const toolState = Object.fromEntries((active?.tools || []).map((tool) => [tool.name, tool]));
-  const tokenCount = (value) => Number(value || 0).toLocaleString("en-US");
-  const head = (name) => {
-    const tool = toolState[name] || {};
-    return `<div class="tool-setting-head"><code>${name}</code><span class="tool-cost"><span class="tool-cost-primary">${tokenCount(tool.marginal_tokens)} marginal</span><span>schema ${tokenCount(tool.schema_tokens)}</span></span></div>`;
-  };
-  const cfg = store.config;
-  const availability = active
-    ? `<div class="settings-subhead">Current session</div>${active.tools.map((tool) => row(tool.name, `<span class="session-tool-control"><span class="number">${tool.calls || 0} calls</span><button class="switch ${tool.enabled ? "on" : ""}" type="button" data-action="session-tool-toggle" data-id="${attr(tool.name)}" data-enabled="${tool.enabled}" aria-label="Toggle ${attr(tool.name)}" aria-pressed="${tool.enabled}"></button></span>`)).join("")}`
-    : '<p class="settings-note">No active session.</p>';
-  const blockTokens = active?.budget?.categories?.tools;
-  const block = row("enabled tools block", `<span class="number">${blockTokens == null ? "not measured" : `${tokenCount(blockTokens)} tokens`}</span>`);
-  return `${availability}<div class="settings-subhead">Configuration and request cost</div>${block}
-    <p class="settings-note">Marginals include the tool-name prompt; neither marginals nor schema sizes sum to the block because shared scaffolding is counted once.</p>
-    ${head("read_file")}
-    ${number("tools.read_file.default_limit", "default bytes", cfg.tools?.read_file?.default_limit)}
-    ${number("tools.read_file.max_limit", "max bytes per call", cfg.tools?.read_file?.max_limit)}
-	<div class="settings-subhead">Attachment ingest</div>
-	${number("tools.attachments.max_bytes", "max upload bytes", cfg.tools?.attachments?.max_bytes)}
-    ${head("list_dir")}
-    ${number("tools.list_dir.max_entries", "max entries", cfg.tools?.list_dir?.max_entries)}
-    ${text("tools.list_dir.ignore", "ignore", (cfg.tools?.list_dir?.ignore || []).join(", "), "list")}
-    ${head("write_file")}${head("edit_file")}
-    ${head("search_text")}
-    ${number("tools.grep.max_matches", "max matches", cfg.tools?.grep?.max_matches)}
-    ${number("tools.grep.max_line_chars", "max line chars", cfg.tools?.grep?.max_line_chars)}
-    ${head("shell")}
-	${text("tools.shell.operator_commands", "operator commands", (cfg.tools?.shell?.operator_commands || []).join(", "), "list")}
-    ${number("shell.timeout_s", "timeout", cfg.shell?.timeout_s)}
-    ${number("shell.max_timeout_s", "max timeout", cfg.shell?.max_timeout_s)}
-    ${number("shell.max_output_lines_head", "head lines", cfg.shell?.max_output_lines_head)}
-    ${number("shell.max_output_lines_tail", "tail lines", cfg.shell?.max_output_lines_tail)}
-    ${text("shell.deny", "deny", (cfg.shell?.deny || []).join(", "), "list")}
-    ${head("remember")}${head("recall")}${head("fetch_url")}${head("find_files")}${head("run_script")}${head("call_service")}`;
-}
-
-function memory(active) {
-  const value = (active?.memory_content || "")
-    .split(/\r?\n/)
-    .slice(0, 200)
-    .join("\n");
-  return `${toggle("memory.enabled", "enabled", store.config.memory?.enabled)}
-    ${number("memory.max_tokens", "max tokens", store.config.memory?.max_tokens)}
-    ${text("memory.dir", "directory", store.config.memory?.dir || "")}
-    ${copyRow("file", active?.memory_path || "")}
-    <pre class="memory-content">${html(value || "No notes for this workspace.")}</pre>`;
-}
-
-function context(active) {
-  const profile = serverProfiles().find((x) => x.id === active?.server_id);
-  const choice = store.config.context?.accounting || "auto";
-  let actual = "estimated — no active profile";
-  if (profile) {
-    actual = choice === "estimated"
-      ? "estimated — by choice"
-      : profile.capabilities?.tokenize
-        ? "exact — /tokenize available"
-        : "estimated — no /tokenize on this profile";
-  }
-  const facts = store.serving_facts || {};
-  const blocked = ["yes", "partial"].includes(facts.tokenize_blocks_on_slot);
-  return `${number("context.soft_pct", "soft threshold (%)", Math.round((store.config.context?.soft_pct || 0) * 100), "1", false, "", false, "percent")}
-    ${number("context.summary_pct", "summary threshold (%)", Math.round((store.config.context?.summary_pct || 0) * 100), "1", false, "", false, "percent")}
-    ${choices("context.accounting", "accounting", ["auto", "exact", "estimated"], choice)}
-    <p class="settings-note">${html(actual)}</p>
-    ${blocked ? `<p class="settings-note">/tokenize measured ${html(facts.tokenize_busy_ms || "?")} ms busy and may occupy the generation slot</p>` : ""}
-    ${row("reserve", `<output>${active?.budget?.reserve ?? 0}</output>`)}
-    ${row("ceiling", `<output>${active?.budget?.ceiling ?? 0}</output>`)}
-    <p class="settings-note">from profile ${html(profile?.label || "none")}</p>`;
-}
-
-function run() {
-  const cfg = store.config;
-  return `${toggle("chat.auto_rename", "auto-name chats every 20 turns", cfg.chat?.auto_rename !== false)}
-    ${number("run.cycle_window", "cycle window", cfg.run?.cycle_window)}
-    <p class="settings-note">0 = off</p>
-    ${number("run.max_consecutive_tool_errors", "max tool errors", cfg.run?.max_consecutive_tool_errors)}
-    <p class="settings-note">0 = off</p>
-    ${approvalChoices(cfg.approval?.mode)}
-    <p class="settings-note">With the service identity enabled, run_script still requires confirmation. Shell follows the approval mode; boundary-only runs in-workspace commands silently, while boundary escapes and configured operator commands still ask.</p>
-	${number("run.queue_depth", "queue depth (0 = unbounded)", cfg.run?.queue_depth)}`;
-}
-
-function about() {
-  const build = store.build || {};
-  const tag = build.tag ? (String(build.tag).startsWith("v") ? build.tag : `v${build.tag}`) : "version unknown";
-  const commit = String(build.commit || "unknown").slice(0, 7);
-  return `${row("version", `<code>${html(`${tag} · ${commit}${build.dirty ? " · dirty" : ""}`)}</code>`)}
-    <p class="settings-note">Build and signing details are kept in Settings so the shared application shell stays focused on selection and run state.</p>`;
-}
-
-function workspaces() {
-	const sandboxWorkspaces=currentValue("sandbox.workspaces",store.config.sandbox?.workspaces||{});
-	const sandboxStatus=store.sandbox||{reason:"sandbox capability has not been checked",findings:[]};
-	const directories = workspaceState.length ? workspaceState.map((item) => {
-		const policyKey=`policy:${item.dir}`; const policy=item.policy;
-		const sandboxed=sandboxWorkspaces[item.dir]===true;
-		return `<div class="session-row workspace-row"><span class="path" title="${attr(item.dir)}">${html(item.dir)}</span><span>${item.memory_count} memory ${item.memory_count===1?"entry":"entries"}</span><span>${html(relativeDate(item.last_used))}</span><button type="button" role="switch" aria-checked="${sandboxed}" class="switch ${sandboxed?"on":""}" data-action="sandbox-workspace-toggle" data-id="${attr(item.dir)}" title="Run shell and bash in Docker Sandbox"></button></div>
-		${policy ? `<div class="session-row workspace-policy-row"><span class="path" title="${attr(policy.path)}">${html(policy.path)}</span><code title="${attr(policy.hash)}">${html((policy.hash||"").slice(0,12))}</code><span>${html(policy.approved_at||"not approved")}</span><button type="button" class="${armed.has(policyKey)?"confirm":""}" data-action="revoke-workspace-policy" data-id="${attr(item.dir)}" ${policy.approved?"":"disabled"}>${armed.has(policyKey)?"Confirm revoke":"Revoke"}</button></div>`:""}`;
-	}).join("") : '<p class="settings-note">No known workspace directories.</p>';
-	const findings=(sandboxStatus.findings||[]).map((finding)=>`<p class="settings-note">${html(finding)}</p>`).join("");
-	return `${operatorFilesWorkspace()}<div class="settings-subhead">Docker Sandbox execution</div><p class="settings-note">${html(sandboxStatus.reason||"capability unavailable")}</p>${findings}<div class="settings-subhead">Known directories · right switch selects the execution target</div>${directories}`;
-}
-
-function operatorFilesWorkspace() {
-	const bytes=Number(operatorFileState.attachment_bytes||0).toLocaleString("en-US");
-	const files=Number(operatorFileState.attachment_files||0);
-	const emptyKey="operator-attachments:empty";
-	const dir=store.sessions[store.active]?.workspace||store.config.workspace||"";
-	const found=operatorFileState.instruction_found||[];
-	const adoptable=!found.includes("AGENT_B.md")&&found.some((name)=>name==="AGENTS.md"||name==="CLAUDE.md");
-	const adopt=adoptable?`<div class="settings-subhead">Adopt repository instructions</div>
-		<p class="settings-note">Create AGENT_B.md from ${html(found.join(" + "))}; source files remain in place.</p>
-		<label class="settings-check warning"><input id="adopt-instruction-cleanup" type="checkbox"> Also remove AGENTS.md / CLAUDE.md</label>
-		<p class="settings-note">Cleanup is destructive and is off by default.</p>
-		<button type="button" data-action="adopt-instructions" data-id="${attr(dir)}">Adopt</button>`:"";
-	return `${row("attachments",`<span class="path" title="${attr(operatorFileState.attachments_path||"")}">${files} files · ${bytes} bytes</span><button type="button" class="${armed.has(emptyKey)?"confirm":""}" data-action="empty-operator-attachments" ${files?"":"disabled"}>${armed.has(emptyKey)?"Confirm empty":"Empty"}</button>`)}
-		${toggle("operator_files.allow_mailbox_approvals","Allow approvals from the mailbox",store.config.operator_files?.allow_mailbox_approvals===true)}
-		<p class="settings-note">whoever can write to your synced folder can then grant the agent your identity.</p>
-		${number("operator_files.log_retention_days","log retention (days)",store.config.operator_files?.log_retention_days||30)}
-		${adopt}<div class="settings-subhead">Known directories</div>`;
-}
-
-function relativeDate(value) { if(!value)return "never"; const date=new Date(value); return Number.isNaN(date.valueOf())?value:date.toLocaleString(); }
-
 async function refreshWorkspaceState() {
 	try { workspaceState=await api("/api/workspaces",undefined,"GET") } catch { workspaceState=[] }
 	if(open&&activeSection==="workspace")render();
@@ -466,155 +232,6 @@ async function refreshOperatorFileState() {
 	try { operatorFileState=await api(`/api/operator-files?dir=${encodeURIComponent(dir)}`,undefined,"GET") }
 	catch { operatorFileState={attachment_files:0,attachment_bytes:0,instruction_found:[]} }
 	if(open&&activeSection==="workspace")render();
-}
-
-function delivery() {
-  const cfg = store.config.deliver || {};
-  return `${choices("deliver.mode", "delivery", ["chips", "folder", "both"], cfg.mode || "both")}
-    ${text("deliver.exchange_folder", "exchange folder", cfg.exchange_folder || "")}
-    <p class="settings-note">The folder is created on first delivery. Apply host protections after changing it so the service identity receives Modify access only on this folder.</p>`;
-}
-
-function shell(active) {
-	const service = store.config.shell?.service_account || {};
-	const credential = store.shell_credential || {};
-	const stored = credential.stored
-		? `stored ${credential.stored_at || "(time unavailable)"}`
-		: "not stored";
-	const accountState = !serviceAccountStatus.loaded
-		? "checking local account…"
-		: !serviceAccountStatus.supported
-			? "local account setup is available only on Windows"
-			: serviceAccountStatus.exists
-				? `${service.account || "agentb-svc"} · ${serviceAccountStatus.enabled ? "enabled" : "disabled"}${serviceAccountStatus.administrator ? " · ADMINISTRATOR — refused" : !serviceAccountStatus.users_member ? " · Users membership missing" : " · non-admin"}`
-				: "not created";
-	const setupAction = serviceAccountStatus.exists ? "reset" : "create";
-	const setupLabel = serviceAccountBusy
-		? "Waiting for Windows UAC…"
-		: serviceAccountStatus.exists
-			? "Reset password"
-			: "Create account";
-	const setupDisabled = serviceAccountBusy || !serviceAccountStatus.loaded || !serviceAccountStatus.supported || serviceAccountStatus.administrator;
-	const profile = serverProfiles().find((item) => item.id === selectedHardeningServerID());
-	const protectionReady = hardeningStatus.acl?.applied && hardeningStatus.firewall?.applied;
-	const elevationState = !hardeningStatus.loaded
-		? "checking process elevation…"
-		: hardeningStatus.harness_elevated
-			? "already elevated · Windows will not show UAC"
-			: "standard user token · Windows may request UAC";
-	const protectionState = !hardeningStatus.loaded
-		? "checking host protections…"
-		: !hardeningStatus.supported
-			? "available only on Windows"
-			: protectionReady
-				? "ACL + outbound policy verified"
-				: `${hardeningStatus.acl?.summary || "ACL not applied"} · ${hardeningStatus.firewall?.summary || "firewall not applied"}`;
-	const applyBlocker = drafts.size
-		? "Save pending settings before applying host protections."
-		: serviceAccountBusy
-			? "Wait for the service-account operation to finish."
-			: !service.enabled
-				? "Enable the service identity and save first."
-				: !credential.stored
-					? "Store the service-account credential first."
-					: !serviceAccountStatus.exists
-						? "Create the service account first."
-						: serviceAccountStatus.administrator
-							? "The service account is an Administrator and cannot be used."
-							: !profile
-								? "Test and select a runnable model connection first."
-								: "";
-	const canApply = !hardeningBusy && !applyBlocker;
-	const canInspect = !hardeningBusy && hardeningStatus.loaded && hardeningStatus.supported && serviceAccountStatus.exists;
-	const canTestIdentity = !serviceAccountBusy && credential.stored && protectionReady;
-	const protectionFeedback = applyBlocker
-		? `Apply unavailable: ${applyBlocker}${hardeningMessage ? ` Last result: ${hardeningMessage}` : ""}`
-		: hardeningMessage;
-	const signedFiles = signingStatus.files || [];
-	const signaturesValid = signedFiles.length > 0 && signedFiles.every((file) => file.status === "Valid" && file.thumbprint === signingStatus.thumbprint && file.timestamped);
-	const certificateDone = signingStatus.configured && signingStatus.has_private_key && signingStatus.code_signing_eku;
-	const verifyDone = certificateDone && signingStatus.chain_valid && signaturesValid;
-	const signingAllowed = signingStatus.can_manage && !signingBusy;
-	const operatorView = operatorStatusView(store.shell_identity);
-  return `<div class="settings-subhead">Operator mode</div>
-	${row("identity", `<button type="button" class="settings-operator-status" data-action="operator-context" aria-pressed="${operatorView.active}" aria-label="${attr(operatorView.label)}"><img src="${operatorView.src}" srcset="${operatorView.srcset}" width="24" height="24" alt=""><span>${operatorView.active ? "Stop running everything as me" : "Run everything as me for 20 minutes"}</span></button>`)}
-	<p class="settings-note">This defeats the service-account OS boundary for every tool in every chat until it expires.</p>
-	<div class="settings-subhead">Service identity</div>
-    ${row("status", `<span class="account-status"><span class="lamp ${serviceAccountStatus.administrator ? "alarm" : serviceAccountStatus.exists ? "live" : ""}"></span>${html(accountState)}</span>`)}
-    ${row("credential", `<span class="account-status">${html(stored)}</span>`)}
-    ${row("new password", `<input id="service-account-setup-password" type="password" autocomplete="new-password" aria-label="New service-account password" ${setupDisabled ? "disabled" : ""}>`)}
-    ${row("repeat", `<input id="service-account-setup-confirmation" type="password" autocomplete="new-password" aria-label="Repeat new service-account password" ${setupDisabled ? "disabled" : ""}>`)}
-    <div class="settings-actions">
-      <button type="button" data-action="setup-service-account" data-setup-action="${setupAction}" ${setupDisabled ? "disabled" : ""}>${setupLabel}</button>
-      <button type="button" data-action="test-shell-credential" title="${protectionReady ? "" : "Apply host protection before testing workspace access."}" ${canTestIdentity ? "" : "disabled"}>Test identity</button>
-      <button type="button" data-action="refresh-service-account" ${serviceAccountBusy ? "disabled" : ""}>Refresh</button>
-    </div>
-    ${feedback(serviceAccountMessage, serviceAccountAlarm, "The non-admin Windows account used by shell and file tools. Windows may request approval.")}
-	<div class="settings-subhead">Host protections</div>
-	${row("Agent_b", `<span class="account-status ${hardeningStatus.harness_elevated ? "alarm" : ""}">${html(elevationState)}</span>`)}
-	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
-	${row("model route", `<select id="hardening-server" aria-label="Model route for host protections">${hardeningProfiles()}</select>`)}
-	<div class="settings-actions">
-	  <button type="button" data-action="apply-hardening" title="${attr(applyBlocker)}" aria-busy="${hardeningBusy}" ${canApply ? "" : "disabled"}>${hardeningBusy ? "Working…" : drafts.size ? "Save first" : "Apply protection"}</button>
-	  <button type="button" data-action="verify-hardening" ${canInspect ? "" : "disabled"}>Verify</button>
-	  <button type="button" data-action="refresh-hardening">Refresh</button>
-	  <button type="button" class="${armed.has("hardening:remove") ? "confirm" : ""}" data-action="remove-hardening" ${canInspect ? "" : "disabled"}>${armed.has("hardening:remove") ? "Confirm remove" : "Remove"}</button>
-	</div>
-	${feedback(protectionFeedback, hardeningAlarm || !!applyBlocker, "Apply protection requests Windows approval, grants workspace access, then tests the service identity.")}
-	<div class="settings-subhead">Code signing</div>
-	<p class="settings-note">Gives this installation a stable publisher identity and trusted local chain; it does not create Defender cloud reputation.</p>
-	${row("certificate", `<span class="account-status"><span class="lamp ${certificateDone ? "live" : ""}"></span>${html(certificateDone ? `${signingStatus.subject} · ${signingStatus.thumbprint}` : "not done")}</span>`)}
-	${row("artifacts", `<span class="account-status"><span class="lamp ${verifyDone ? "live" : signingStatus.loaded ? "alarm" : ""}"></span>${html(verifyDone ? "done · signed, timestamped, chain valid" : "not done")}</span>`)}
-	${signingStatus.can_manage ? `<div class="settings-actions vertical">
-	  <button type="button" data-action="create-signing" ${signingAllowed ? "" : "disabled"}>Create certificate</button>
-	  <p class="settings-note">Create a protected certificate here, or import or select one you already own.</p>
-	  ${row("PFX", '<input id="signing-pfx" type="file" accept=".pfx,application/x-pkcs12">')}
-	  ${row("password", '<input id="signing-password" type="password" autocomplete="off">')}
-	  ${row("stored certificate", `<select id="signing-thumbprint"><option value="">Select code-signing certificate</option>${(signingStatus.certificates || []).filter((certificate) => certificate.has_private_key).map((certificate) => `<option value="${attr(certificate.thumbprint)}" ${certificate.thumbprint === store.config.signing?.thumbprint ? "selected" : ""}>${html(certificate.subject)} · ${html(certificate.thumbprint)}</option>`).join("")}</select>`)}
-	  <div class="settings-actions"><button type="button" data-action="import-signing" ${signingAllowed ? "" : "disabled"}>Import certificate</button><button type="button" data-action="export-signing" ${certificateDone && signingAllowed ? "" : "disabled"}>Export .cer</button></div>
-	  <button type="button" data-action="sign-application" ${certificateDone && signingAllowed ? "" : "disabled"}>Sign application</button>
-	  <p class="settings-note">Sign Agent_b.exe and PowerShell scripts, then restart Agent_b.</p>
-	  <button type="button" data-action="verify-signing" ${signingBusy ? "disabled" : ""}>Verify signatures</button>
-	  <p class="settings-note">Verify signer, thumbprint, timestamp, and certificate chain.</p>
-	</div>` : `<div class="settings-actions vertical"><button type="button" data-action="verify-signing" ${signingBusy ? "disabled" : ""}>Verify signatures</button><p class="settings-note">Standard users can verify signatures but cannot create, import, select, export, or sign.</p></div>`}
-	${feedback(signingMessage, signingAlarm, "Self-created keys are non-exportable and usable only by the elevated signing helper; imported keys keep their existing protection.")}
-    <details class="settings-advanced">
-      <summary>Advanced</summary>
-      ${toggle("shell.service_account.enabled", "service identity", service.enabled)}
-      ${text("shell.command", "shell command", (store.config.shell?.command || []).join(" "), "command")}
-      ${text("shell.service_account.account", "account", service.account || "agentb-svc")}
-      ${text("shell.service_account.domain", "domain", service.domain || ".")}
-      ${row("store credential", '<input id="shell-service-password" type="password" autocomplete="new-password" aria-label="Service-account credential">')}
-      <div class="settings-actions">
-        <button type="button" data-action="store-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Store credential</button>
-        <button type="button" data-action="clear-shell-credential" ${serviceAccountBusy ? "disabled" : ""}>Clear credential</button>
-      </div>
-      ${feedback(shellCredentialMessage, shellCredentialAlarm, "Credentials are encrypted for this Windows user and never returned to the browser.")}
-    </details>`;
-}
-
-function feedback(message, alarm, fallback) {
-	const value = message || fallback || "";
-	return `<p class="settings-feedback ${alarm ? "alarm" : ""}" role="status" title="${attr(value)}">${html(value)}</p>`;
-}
-
-function hardeningProfiles() {
-	const selected = selectedHardeningServerID();
-	const options = serverProfiles()
-		.filter((profile) => !profileReason(profile))
-		.map((profile) => `<option value="${attr(profile.id)}" ${profile.id === selected ? "selected" : ""}>${html(profile.label)} · ${html(profile.base_url)}</option>`)
-		.join("");
-	return options || '<option value="">No ready connection</option>';
-}
-
-function sessionControls(active) {
-  if (!active) return '<p class="settings-note">No active session.</p>';
-  const resetKey = `reset:${active.id}`;
-  return `<div class="settings-actions vertical">
-      <button type="button" class="${armed.has(resetKey) ? "confirm" : ""}" data-action="reset-session" data-id="${attr(active.id)}">${armed.has(resetKey) ? "Confirm clear" : "Clear conversation"}</button>
-    </div>
-    <p class="settings-note">Clears messages and run counters; keeps workspace, profile, enabled tools, and memory.</p>
-    ${copyRow("JSONL", active.log_path || "")}`;
 }
 
 function row(label, control, extra = "") {

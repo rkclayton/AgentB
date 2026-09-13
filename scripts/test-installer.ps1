@@ -193,7 +193,10 @@ try {
         if ($chatCSS -notmatch [regex]::Escape($required)) { throw "Installed Chat layout is missing: $required" }
     }
     $chatScript = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\chat.js')
-    $settingsScript = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\settings.js')
+    $settingsScript = [string]::Join("`n", @(
+        @('settings.js', 'settings-connections.js', 'settings-general.js', 'settings-workspace.js', 'settings-security.js') |
+            ForEach-Object { Get-Content -Raw -LiteralPath (Join-Path $testApplication "web\js\$_") }
+    ))
     if ($shellSource -notmatch 'link\.onclick = \(event\) => event\.preventDefault\(\);' -or
         $settingsScript -notmatch 'gear\.addEventListener\("click", \(event\) => \{\s+event\.preventDefault\(\);' -or
         $settingsScript -match 'consoleLaunch') {

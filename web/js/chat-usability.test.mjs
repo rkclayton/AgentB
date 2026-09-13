@@ -7,7 +7,9 @@ const css = await readFile(new URL("../css/chat.css", import.meta.url), "utf8");
 const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
 const shell = await readFile(new URL("./shell.js", import.meta.url), "utf8");
 const tokens = await readFile(new URL("../css/tokens.css", import.meta.url), "utf8");
-const settings = await readFile(new URL("./settings.js", import.meta.url), "utf8");
+const settings = (await Promise.all([
+  "settings.js", "settings-connections.js", "settings-general.js", "settings-workspace.js", "settings-security.js",
+].map((name) => readFile(new URL(`./${name}`, import.meta.url), "utf8")))).join("\n");
 const plan = await readFile(new URL("../plan.html", import.meta.url), "utf8");
 const consoleHTML = await readFile(new URL("../index.html", import.meta.url), "utf8");
 

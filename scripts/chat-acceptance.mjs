@@ -85,6 +85,10 @@ const fakeHandler = async (request, response) => {
     return void response.end(JSON.stringify({ tokens: Array.from({ length: Math.max(1, Math.ceil(content.length / 4)) }, (_, i) => i) }));
   }
   if (request.url === "/apply-template") {
+    if (JSON.stringify(body.messages || []).includes('"image_url"')) {
+      response.statusCode = 400;
+      return void response.end("image input is not supported by the acceptance profile");
+    }
     let historyStarted = false;
     const invalid = (body.messages || []).findIndex((message, index) => {
       const system = ["system", "developer"].includes(message.role);
@@ -1057,6 +1061,18 @@ if (realModel) {
   record("operator-attachments-paperclip-source");
   record("attachment-screen-jsonl");
 
+  const afterSettingsTest = await state();
+  const testedProfile = afterSettingsTest.config.servers.find((profile) => profile.id === "acceptance");
+  await json(`http://127.0.0.1:${appPort}/api/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-AgentB-Mutation-Token": afterSettingsTest.mutation_token },
+    body: JSON.stringify({ servers: [{ ...testedProfile, probe_mode: "off", capabilities: {
+      ...testedProfile.capabilities, server: "agentb-fake", n_ctx: 32768, tokenize: true,
+      apply_template: true, apply_template_tools: true, streaming: true, tool_calls: true,
+      document_input: false, image_input: false, vision: "rejected", cached_tokens: true,
+      findings: ["acceptance fake"],
+    } }] }),
+  });
   const ocrPNG = await page.evaluate(async () => {
     const canvas = document.createElement("canvas");
     canvas.width = 900;
