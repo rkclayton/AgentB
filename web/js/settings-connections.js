@@ -1,6 +1,6 @@
-let store, expanded, armed, drafts, errors, probeMessages, workspaceState, operatorFileState, shellCredentialMessage, shellCredentialAlarm, serviceAccountStatus, serviceAccountBusy, serviceAccountMessage, serviceAccountAlarm, hardeningStatus, hardeningBusy, hardeningMessage, hardeningAlarm, signingStatus, signingBusy, signingMessage, signingAlarm, serverProfiles, row, field, text, number, numberControl, textarea, secret, toggle, choices, approvalChoices, copyRow, currentValue, issue, profileReason, html, attr, selectedHardeningServerID, operatorStatusView;
+let expanded, armed, drafts, errors, probeMessages, serverProfiles, row, text, number, numberControl, textarea, secret, toggle, choices, profileReason, html, attr;
 function useSettingsContext(context) {
-  ({ store, expanded, armed, drafts, errors, probeMessages, workspaceState, operatorFileState, shellCredentialMessage, shellCredentialAlarm, serviceAccountStatus, serviceAccountBusy, serviceAccountMessage, serviceAccountAlarm, hardeningStatus, hardeningBusy, hardeningMessage, hardeningAlarm, signingStatus, signingBusy, signingMessage, signingAlarm, serverProfiles, row, field, text, number, numberControl, textarea, secret, toggle, choices, approvalChoices, copyRow, currentValue, issue, profileReason, html, attr, selectedHardeningServerID, operatorStatusView } = context);
+  ({ expanded, armed, drafts, errors, probeMessages, serverProfiles, row, text, number, numberControl, textarea, secret, toggle, choices, profileReason, html, attr } = context);
 }
 
 function servers() {

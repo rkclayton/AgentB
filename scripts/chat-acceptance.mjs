@@ -657,7 +657,7 @@ if (realModel) {
     const summary = document.querySelector('.chat-response-summary');
     return { collapsed: summary?.innerText || '' };
   })()`);
-  await page.locator(".chat-step-summary").click();
+  await page.locator(".chat-step-summary").last().click();
   const missingArgsFixture = await page.evaluate(() => {
     const summary = document.querySelector('.chat-response-summary');
     return {

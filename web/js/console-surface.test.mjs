@@ -6,7 +6,7 @@ const index = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8")
 const script = fs.readFileSync(new URL("app.js", import.meta.url), "utf8");
 const styles = fs.readFileSync(new URL("../css/app.css", import.meta.url), "utf8");
 const shell = fs.readFileSync(new URL("shell.js", import.meta.url), "utf8");
-const settings = ["settings.js", "settings-connections.js", "settings-general.js", "settings-workspace.js", "settings-security.js"]
+const settings = ["settings.js", "settings-connections.js", "settings-general.js", "settings-context.js", "settings-run.js", "settings-delivery.js", "settings-about.js", "settings-workspace.js", "settings-security.js"]
   .map((name) => fs.readFileSync(new URL(name, import.meta.url), "utf8"))
   .join("\n");
 const timeline = fs.readFileSync(new URL("timeline.js", import.meta.url), "utf8");

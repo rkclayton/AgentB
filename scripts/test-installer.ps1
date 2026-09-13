@@ -194,7 +194,7 @@ try {
     }
     $chatScript = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'web\js\chat.js')
     $settingsScript = [string]::Join("`n", @(
-        @('settings.js', 'settings-connections.js', 'settings-general.js', 'settings-workspace.js', 'settings-security.js') |
+        @('settings.js', 'settings-connections.js', 'settings-general.js', 'settings-context.js', 'settings-run.js', 'settings-delivery.js', 'settings-about.js', 'settings-workspace.js', 'settings-security.js') |
             ForEach-Object { Get-Content -Raw -LiteralPath (Join-Path $testApplication "web\js\$_") }
     ))
     if ($shellSource -notmatch 'link\.onclick = \(event\) => event\.preventDefault\(\);' -or

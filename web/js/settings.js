@@ -2,7 +2,11 @@ import { api, reduce, setActive, store, subscribe } from "./bus.js";
 import { operatorStatusView } from "./operator-status.js";
 import { navigationSurfaceReady } from "./navigation-telemetry.js";
 import { renderConnectionsPage } from "./settings-connections.js";
+import { renderAboutPage } from "./settings-about.js";
+import { renderContextPage } from "./settings-context.js";
+import { renderDeliveryPage } from "./settings-delivery.js";
 import { renderGeneralPage } from "./settings-general.js";
+import { renderRunPage } from "./settings-run.js";
 import { renderSecurityPage } from "./settings-security.js";
 import { renderWorkspacePage } from "./settings-workspace.js";
 
@@ -157,11 +161,11 @@ function render() {
     workspace: () => renderWorkspacePage(settingsPageContext(active)),
     tools: () => renderGeneralPage("tools", active, settingsPageContext(active)),
     memory: () => renderGeneralPage("memory", active, settingsPageContext(active)),
-    context: () => renderGeneralPage("context", active, settingsPageContext(active)),
-    run: () => renderGeneralPage("run", active, settingsPageContext(active)),
-    delivery: () => renderGeneralPage("delivery", active, settingsPageContext(active)),
+    context: () => renderContextPage(active, settingsPageContext(active)),
+    run: () => renderRunPage(settingsPageContext(active)),
+    delivery: () => renderDeliveryPage(settingsPageContext(active)),
     shell: () => renderSecurityPage("shell", active, settingsPageContext(active)),
-    about: () => renderGeneralPage("about", active, settingsPageContext(active)),
+    about: () => renderAboutPage(settingsPageContext(active)),
     session: () => renderSecurityPage("session", active, settingsPageContext(active)),
   };
   const label = sectionLabels.find(([id]) => id === activeSection)?.[1] || "Settings";

@@ -1,6 +1,6 @@
-let store, expanded, armed, drafts, errors, probeMessages, workspaceState, operatorFileState, shellCredentialMessage, shellCredentialAlarm, serviceAccountStatus, serviceAccountBusy, serviceAccountMessage, serviceAccountAlarm, hardeningStatus, hardeningBusy, hardeningMessage, hardeningAlarm, signingStatus, signingBusy, signingMessage, signingAlarm, serverProfiles, row, field, text, number, numberControl, textarea, secret, toggle, choices, approvalChoices, copyRow, currentValue, issue, profileReason, html, attr, selectedHardeningServerID, operatorStatusView;
+let store, armed, serverProfiles, row, text, number, toggle, copyRow, issue, profileReason, html, attr;
 function useSettingsContext(context) {
-  ({ store, expanded, armed, drafts, errors, probeMessages, workspaceState, operatorFileState, shellCredentialMessage, shellCredentialAlarm, serviceAccountStatus, serviceAccountBusy, serviceAccountMessage, serviceAccountAlarm, hardeningStatus, hardeningBusy, hardeningMessage, hardeningAlarm, signingStatus, signingBusy, signingMessage, signingAlarm, serverProfiles, row, field, text, number, numberControl, textarea, secret, toggle, choices, approvalChoices, copyRow, currentValue, issue, profileReason, html, attr, selectedHardeningServerID, operatorStatusView } = context);
+  ({ store, armed, serverProfiles, row, text, number, toggle, copyRow, issue, profileReason, html, attr } = context);
 }
 
 function sessions() {
@@ -86,58 +86,7 @@ function memory(active) {
     <pre class="memory-content">${html(value || "No notes for this workspace.")}</pre>`;
 }
 
-function context(active) {
-  const profile = serverProfiles().find((x) => x.id === active?.server_id);
-  const choice = store.config.context?.accounting || "auto";
-  let actual = "estimated — no active profile";
-  if (profile) {
-    actual = choice === "estimated"
-      ? "estimated — by choice"
-      : profile.capabilities?.tokenize
-        ? "exact — /tokenize available"
-        : "estimated — no /tokenize on this profile";
-  }
-  const facts = store.serving_facts || {};
-  const blocked = ["yes", "partial"].includes(facts.tokenize_blocks_on_slot);
-  return `${number("context.soft_pct", "soft threshold (%)", Math.round((store.config.context?.soft_pct || 0) * 100), "1", false, "", false, "percent")}
-    ${number("context.summary_pct", "summary threshold (%)", Math.round((store.config.context?.summary_pct || 0) * 100), "1", false, "", false, "percent")}
-    ${choices("context.accounting", "accounting", ["auto", "exact", "estimated"], choice)}
-    <p class="settings-note">${html(actual)}</p>
-    ${blocked ? `<p class="settings-note">/tokenize measured ${html(facts.tokenize_busy_ms || "?")} ms busy and may occupy the generation slot</p>` : ""}
-    ${row("reserve", `<output>${active?.budget?.reserve ?? 0}</output>`)}
-    ${row("ceiling", `<output>${active?.budget?.ceiling ?? 0}</output>`)}
-    <p class="settings-note">from profile ${html(profile?.label || "none")}</p>`;
-}
-
-function run() {
-  const cfg = store.config;
-  return `${toggle("chat.auto_rename", "auto-name chats every 20 turns", cfg.chat?.auto_rename !== false)}
-    ${number("run.cycle_window", "cycle window", cfg.run?.cycle_window)}
-    <p class="settings-note">0 = off</p>
-    ${number("run.max_consecutive_tool_errors", "max tool errors", cfg.run?.max_consecutive_tool_errors)}
-    <p class="settings-note">0 = off</p>
-    ${approvalChoices(cfg.approval?.mode)}
-    <p class="settings-note">With the service identity enabled, run_script still requires confirmation. Shell follows the approval mode; boundary-only runs in-workspace commands silently, while boundary escapes and configured operator commands still ask.</p>
-	${number("run.queue_depth", "queue depth (0 = unbounded)", cfg.run?.queue_depth)}`;
-}
-
-function about() {
-  const build = store.build || {};
-  const tag = build.tag ? (String(build.tag).startsWith("v") ? build.tag : `v${build.tag}`) : "version unknown";
-  const commit = String(build.commit || "unknown").slice(0, 7);
-  return `${row("version", `<code>${html(`${tag} · ${commit}${build.dirty ? " · dirty" : ""}`)}</code>`)}
-    <p class="settings-note">Build and signing details are kept in Settings so the shared application shell stays focused on selection and run state.</p>`;
-}
-
-function delivery() {
-  const cfg = store.config.deliver || {};
-  return `${choices("deliver.mode", "delivery", ["chips", "folder", "both"], cfg.mode || "both")}
-    ${text("deliver.exchange_folder", "exchange folder", cfg.exchange_folder || "")}
-    <p class="settings-note">The folder is created on first delivery. Apply host protections after changing it so the service identity receives Modify access only on this folder.</p>`;
-}
-
-
 export function renderGeneralPage(page, active, pageContext) {
   useSettingsContext(pageContext);
-  return ({ sessions, tools, memory, context, run, delivery, about })[page]?.(active) || "";
+  return ({ sessions, tools, memory })[page]?.(active) || "";
 }
