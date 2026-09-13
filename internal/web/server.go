@@ -37,58 +37,61 @@ import (
 )
 
 type Server struct {
-	mu               sync.RWMutex
-	cfg              *config.Config
-	configPath       string
-	roots            RuntimeRoots
-	bus              *events.Bus
-	registry         *session.Registry
-	webDir           string
-	scheduler        *agent.Scheduler
-	runner           *agent.Runner
-	prompt           *agent.PromptRenderer
-	replay           *projection.Replay
-	projector        *projection.Store
-	writers          *events.Writers
-	credential       *credential.Store
-	shell            *tools.Shell
-	account          serviceaccount.Manager
-	hardening        hardening.Manager
-	hardeningMu      sync.RWMutex
-	hardeningOp      hardeningOperation
-	signing          signing.Manager
-	signingMu        sync.Mutex
-	signingStatus    signing.Status
-	shellTest        func(context.Context) (string, error)
-	accountMu        sync.Mutex
-	mutationToken    string
-	operatorChangeMu sync.Mutex
-	operatorMu       sync.Mutex
-	operatorEnabled  bool
-	operatorExpires  string
-	operatorTimer    operatorTimer
-	operatorEpoch    uint64
-	operatorRequest  func(*http.Request) error
-	operatorNow      func() time.Time
-	operatorAfter    func(time.Duration, func()) operatorTimer
-	openFolder       func(string) error
-	extractClient    *http.Client
-	ocrExtract       func(string) (string, error)
-	detectLocal      func(context.Context, string) (any, error)
-	workspaceState   *workspaceinfo.Manager
-	memoryState      *memory.Manager
-	statsState       *stats.Manager
-	operatorFiles    *operatorfiles.Manager
-	pickFolder       func(string) (string, error)
-	probeMu          sync.Mutex
-	probeCancels     map[string]*probeRun
-	bindMu           sync.Mutex
-	pendingBinds     map[string]pendingBind
-	navigationMu     sync.Mutex
-	navigationIDs    map[string]time.Time
-	agentServerMu    sync.Mutex
-	agentServers     map[string]pendingAgentServer
-	tryAgentIdle     func(string) bool
+	mu                sync.RWMutex
+	cfg               *config.Config
+	configPath        string
+	roots             RuntimeRoots
+	bus               *events.Bus
+	registry          *session.Registry
+	webDir            string
+	scheduler         *agent.Scheduler
+	runner            *agent.Runner
+	prompt            *agent.PromptRenderer
+	replay            *projection.Replay
+	projector         *projection.Store
+	writers           *events.Writers
+	credential        *credential.Store
+	shell             *tools.Shell
+	account           serviceaccount.Manager
+	hardening         hardening.Manager
+	hardeningMu       sync.RWMutex
+	hardeningOp       hardeningOperation
+	signing           signing.Manager
+	signingMu         sync.Mutex
+	signingStatus     signing.Status
+	shellTest         func(context.Context) (string, error)
+	accountMu         sync.Mutex
+	mutationToken     string
+	operatorChangeMu  sync.Mutex
+	operatorMu        sync.Mutex
+	operatorEnabled   bool
+	operatorExpires   string
+	operatorTimer     operatorTimer
+	operatorEpoch     uint64
+	operatorRequest   func(*http.Request) error
+	operatorNow       func() time.Time
+	operatorAfter     func(time.Duration, func()) operatorTimer
+	openFolder        func(string) error
+	extractClient     *http.Client
+	ocrExtract        func(string) (string, error)
+	detectLocal       func(context.Context, string) (any, error)
+	workspaceState    *workspaceinfo.Manager
+	memoryState       *memory.Manager
+	statsState        *stats.Manager
+	operatorFiles     *operatorfiles.Manager
+	pickFolder        func(string) (string, error)
+	probeMu           sync.Mutex
+	probeCancels      map[string]*probeRun
+	reachabilityMu    sync.Mutex
+	reachability      map[string]*reachabilityRetry
+	reachabilityAfter func(time.Duration, func()) operatorTimer
+	bindMu            sync.Mutex
+	pendingBinds      map[string]pendingBind
+	navigationMu      sync.Mutex
+	navigationIDs     map[string]time.Time
+	agentServerMu     sync.Mutex
+	agentServers      map[string]pendingAgentServer
+	tryAgentIdle      func(string) bool
 }
 
 type probeRun struct{ cancel context.CancelFunc }
@@ -118,8 +121,12 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 		operatorAfter: func(duration time.Duration, fn func()) operatorTimer {
 			return time.AfterFunc(duration, fn)
 		},
-		openFolder:    openContainingFolder,
-		probeCancels:  map[string]*probeRun{},
+		openFolder:   openContainingFolder,
+		probeCancels: map[string]*probeRun{},
+		reachability: map[string]*reachabilityRetry{},
+		reachabilityAfter: func(duration time.Duration, fn func()) operatorTimer {
+			return time.AfterFunc(duration, fn)
+		},
 		pendingBinds:  map[string]pendingBind{},
 		navigationIDs: map[string]time.Time{},
 		agentServers:  map[string]pendingAgentServer{},
@@ -158,6 +165,12 @@ func (s *Server) SetRuntime(scheduler *agent.Scheduler, runner *agent.Runner, pr
 		s.tryAgentIdle = scheduler.TryAgentIdle
 	}
 	if runner != nil {
+		runner.SetModelUnreachable(func(sessionID, profileID string) {
+			if scheduler != nil {
+				scheduler.HoldModel(sessionID)
+			}
+			s.scheduleReachabilityProbe(profileID)
+		})
 		runner.SetToolActivity(func(phase string) {
 			s.touchOperatorContext("idle window reset: tool execution " + phase)
 		})
@@ -1145,24 +1158,32 @@ func (s *Server) server(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, reason, "servers."+id)
 		return
 	}
+	s.startProbe(profile)
+	writeJSON(w, 202, map[string]string{"status": "probing", "server_id": id})
+}
+func (s *Server) startProbe(profile *config.Profile) {
+	s.cancelScheduledReachabilityProbe(profile.ID)
 	s.probeMu.Lock()
-	if prior := s.probeCancels[id]; prior != nil {
+	if prior := s.probeCancels[profile.ID]; prior != nil {
 		prior.cancel()
 	}
 	probeContext, cancel := context.WithCancel(context.Background())
 	current := &probeRun{cancel: cancel}
-	s.probeCancels[id] = current
+	s.probeCancels[profile.ID] = current
 	s.probeMu.Unlock()
 	go s.runProbe(probeContext, profile, current)
-	writeJSON(w, 202, map[string]string{"status": "probing", "server_id": id})
 }
 func (s *Server) runProbe(ctx context.Context, profile *config.Profile, current *probeRun) {
 	caps, findings, err := probe.Probe(ctx, profile)
 	probeSucceeded := err == nil
-	s.clearProbe(profile.ID, current)
+	wasCurrent := s.clearProbe(profile.ID, current)
 	if ctx.Err() != nil {
+		if wasCurrent {
+			s.completeReachabilityProbe(profile.ID, false)
+		}
 		return
 	}
+	s.completeReachabilityProbe(profile.ID, probeSucceeded)
 	if err != nil {
 		caps, findings = failedProbeCapabilities(profile, err)
 	}
@@ -1191,12 +1212,15 @@ func (s *Server) runProbe(ctx context.Context, profile *config.Profile, current 
 	}
 }
 
-func (s *Server) clearProbe(profileID string, current *probeRun) {
+func (s *Server) clearProbe(profileID string, current *probeRun) bool {
 	s.probeMu.Lock()
+	cleared := false
 	if s.probeCancels[profileID] == current {
 		delete(s.probeCancels, profileID)
+		cleared = true
 	}
 	s.probeMu.Unlock()
+	return cleared
 }
 
 func failedProbeCapabilities(profile *config.Profile, err error) (config.Capabilities, []string) {

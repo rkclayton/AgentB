@@ -36,6 +36,10 @@ func TestPublishBudgetMarksDialFailureUnreachableAndKeepsBudgetError(t *testing.
 	runner := NewRunner(bus.Bus, tools.New(), &PromptRenderer{text: "system"}, func(id string) (*config.Profile, bool) {
 		return &profile, id == profile.ID
 	}, func() config.Config { return cfg })
+	var reportedSession, reportedProfile string
+	runner.SetModelUnreachable(func(sessionID, profileID string) {
+		reportedSession, reportedProfile = sessionID, profileID
+	})
 	item := &session.Session{
 		ID:             "main",
 		ServerID:       profile.ID,
@@ -60,5 +64,8 @@ func TestPublishBudgetMarksDialFailureUnreachableAndKeepsBudgetError(t *testing.
 	}
 	if !budgetError || !unreachable {
 		t.Fatalf("budget_error=%t model_unreachable=%t events=%#v", budgetError, unreachable, bus.Recent(item.ID))
+	}
+	if reportedSession != item.ID || reportedProfile != profile.ID {
+		t.Fatalf("reachability callback session=%q profile=%q", reportedSession, reportedProfile)
 	}
 }

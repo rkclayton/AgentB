@@ -262,6 +262,15 @@ func (s *Scheduler) ReleaseModel(profileID string) {
 		}
 	}
 }
+
+// HoldModel records reachability discovered outside a running request, such as
+// the initial budget measurement, so submissions wait for the same recovery
+// event as an in-run dial failure.
+func (s *Scheduler) HoldModel(sessionID string) {
+	s.mu.Lock()
+	s.unreachable[sessionID] = true
+	s.mu.Unlock()
+}
 func (s *Scheduler) repositionLocked() {
 	for index, entry := range s.queue {
 		state := entry.s.Snapshot().Run

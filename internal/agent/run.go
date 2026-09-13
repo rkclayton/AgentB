@@ -48,6 +48,7 @@ type Runner struct {
 	flights            *flightBook
 	renameSession      func(string, string, string) error
 	mailboxBoundary    func(context.Context, string, bool) BoundaryAction
+	modelUnreachable   func(string, string)
 	ids                atomic.Int64
 }
 
@@ -76,7 +77,8 @@ func (r *Runner) SetSessionRenamer(fn func(string, string, string) error) { r.re
 func (r *Runner) SetMailboxBoundary(fn func(context.Context, string, bool) BoundaryAction) {
 	r.mailboxBoundary = fn
 }
-func (r *Runner) id(prefix string) string { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
+func (r *Runner) SetModelUnreachable(fn func(string, string)) { r.modelUnreachable = fn }
+func (r *Runner) id(prefix string) string                     { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
 func (r *Runner) AddUser(ctx context.Context, s *session.Session, text string) (events.Message, error) {
 	return r.AddUserAttachments(ctx, s, text, nil)
 }
@@ -829,6 +831,9 @@ func (r *Runner) publishModelUnreachable(s *session.Session, runID string, profi
 		return false
 	}
 	r.bus.Publish(events.New(events.ModelUnreachable, s.ID, runID, map[string]any{"host": host, "detail": err.Error()}))
+	if r.modelUnreachable != nil {
+		r.modelUnreachable(s.ID, profile.ID)
+	}
 	return true
 }
 

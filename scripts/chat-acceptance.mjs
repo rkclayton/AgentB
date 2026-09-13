@@ -974,6 +974,7 @@ if (realModel) {
   const liveToolState = await browser.evaluate(`({ status: document.querySelector('#chat-notice')?.innerText || '', carets: document.querySelectorAll('.stream-caret').length, text: document.querySelector('#chat-log')?.innerText || '' })`);
   assert.match(liveToolState.status, /^tool executing · shell(?: ·|$)/);
   assert.equal(liveToolState.carets, 0, JSON.stringify(liveToolState));
+  assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.agent-tab-wrap.selected .agent-tab-robot')).color`), await browser.evaluate(`(() => { const probe=document.createElement('span'); probe.style.color='var(--trace)'; document.body.append(probe); const value=getComputedStyle(probe).color; probe.remove(); return value; })()`));
   await page.screenshot({ path: join(baselineDirectory, "chat-live-tool.png") });
   await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
   await browser.wait(`document.querySelector('#console-live-state')?.innerText.startsWith('tool executing · shell')`, "Console named slow tool activity");
@@ -1128,6 +1129,7 @@ if (realModel) {
   await page.screenshot({ path: join(args.evidence, "unreachable-no-empty-folds.png") });
   record("model-unreachable-no-empty-fold-groups");
   await browser.wait(`document.querySelector('.agent-tab-wrap.selected .agent-tab-robot')?.classList.contains('offline')`, "offline agent eyes");
+  assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.agent-tab-wrap.selected .agent-tab-robot')).color`), await browser.evaluate(`(() => { const probe=document.createElement('span'); probe.style.color='var(--alarm)'; document.body.append(probe); const value=getComputedStyle(probe).color; probe.remove(); return value; })()`));
   assert.equal(await page.locator("#chat-task").isEnabled(), true);
   assert.equal(await page.locator("#chat-send").isEnabled(), true);
   const unreachableText = await browserText("#chat-status-strip");
@@ -1135,12 +1137,43 @@ if (realModel) {
   await browser.wait(`document.querySelector('#chat-status-strip')?.innerText.includes('queued (1)')`, "recovery queued");
   assert.ok(unreachableText.includes("model unreachable"));
   assert.ok((await browserText("#chat-status-strip")).includes("model unreachable"));
+  const automaticRecoveryStarted = Date.now();
+  await startFake(modelPort);
+  await waitProjectedChatText(sessionID, "Recovered after Retry.", "automatic recovery", 20000);
+  await waitEvent(sessionID, (event) => event.type === "model.reachable", "automatic model.reachable");
+  assert.ok(Date.now() - automaticRecoveryStarted <= 10000, "automatic recovery exceeded the acceptance bound");
+  record("model-unreachable-automatic-release");
+
+  await stopFake();
+  events = await sessionEvents(sessionID);
+  const retryUnreachableAfter = events.at(-1)?.seq || 0;
+  await setTask("acceptance: unreachable retry");
+  await waitEvent(sessionID, (event) => event.seq > retryUnreachableAfter && event.type === "model.unreachable", "Retry fixture model.unreachable");
+  await setTask("acceptance: recovered");
   await startFake(modelPort);
   await page.locator("#chat-retry-model").click();
-  await waitProjectedChatText(sessionID, "Recovered after Retry.", "Retry recovery", 20000);
-  await waitEvent(sessionID, (event) => event.type === "model.reachable", "model.reachable");
+  const retryReachable = await waitEvent(sessionID, (event) => event.seq > retryUnreachableAfter && event.type === "model.reachable", "Retry model.reachable");
+  await waitEvent(sessionID, (event) => event.seq > retryReachable.seq && event.type === "run.stopped" && event.data?.reason === "done", "Retry released run completed", 20000);
   await browser.wait(`!document.querySelector('.agent-tab-wrap.selected .agent-tab-robot')?.classList.contains('offline')`, "recovered agent eyes");
+  await browser.wait(`document.querySelector('.agent-tab-wrap.selected .agent-tab-robot')?.classList.contains('idle')`, "idle recovered eyes");
+  assert.equal(await browser.evaluate(`getComputedStyle(document.querySelector('.agent-tab-wrap.selected .agent-tab-robot')).color`), await browser.evaluate(`(() => { const probe=document.createElement('span'); probe.style.color='var(--mute)'; document.body.append(probe); const value=getComputedStyle(probe).color; probe.remove(); return value; })()`));
+  await page.screenshot({ path: join(args.evidence, "reachable-after-retry.png") });
   record("model-unreachable-retry-release");
+
+  await stopFake();
+  events = await sessionEvents(sessionID);
+  const testUnreachableAfter = events.at(-1)?.seq || 0;
+  await setTask("acceptance: unreachable settings test");
+  await waitEvent(sessionID, (event) => event.seq > testUnreachableAfter && event.type === "model.unreachable", "Settings Test fixture model.unreachable");
+  await startFake(modelPort);
+  await page.locator(".shell-settings").click();
+  await page.locator("#settings-page").waitFor({ state: "visible" });
+  await page.locator('.profile-row:has(.profile-summary[data-id="acceptance"]) [data-action="probe"]').click();
+  await waitEvent(sessionID, (event) => event.seq > testUnreachableAfter && event.type === "model.reachable", "Settings Test model.reachable");
+  await page.locator('.agent-tab-wrap.selected .agent-tab[data-agent="agent_b"]').click();
+  assert.equal(await page.locator("#settings-page").isHidden(), true);
+  assert.equal((await state()).sessions[sessionID].model_unreachable || null, null);
+  record("model-unreachable-settings-test-release");
 
   events = await sessionEvents(sessionID);
   const beforeBusy = events.at(-1)?.seq || 0;
