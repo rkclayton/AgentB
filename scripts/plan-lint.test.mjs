@@ -76,7 +76,7 @@ function prepare(root) {
 }
 
 {
-  const root = makeFixture("\n- W1 **2a closure check.**", [{ id: "2a", where: "archive", text: item("2a", { state: "shipped" }).replace("evidence: Operator-authorized fixture scope.", "shipped: v0.1.0 abcdef0\nevidence: Recorded release evidence.") }]);
+  const root = makeFixture("\n- W1 **2a closure check.**", [{ id: "2a", where: "archive", text: item("2a", { state: "shipped" }).replace("evidence: Operator-authorized fixture scope.", "shipped: v0.1.0 abcdef0\nevidence: Recorded release evidence.") }], { inFlight: "TEST/W1 completed 12:00" });
   prepare(root);
   const result = run(root, "--structural");
   assert.equal(result.status, 0, result.stdout + result.stderr);
@@ -165,6 +165,26 @@ function prepare(root) {
   prepare(root);
   const validation = validateProposal({ ...loadPublishedProposal(root), structuralOnly: true });
   assert.equal(validation.completion[0].status, "complete", "an archived shipped item with acceptance evidence should close");
+}
+
+{
+  const shipped = item("2a", { state: "shipped" }).replace("evidence: Operator-authorized fixture scope.", "shipped: v0.1.0 abcdef0\nevidence: Recorded acceptance evidence.");
+  const root = makeFixture("\n- W1 **2a discovery.**\n- W2 **2a implementation.**", [{ id: "2a", where: "archive", text: shipped }], { inFlight: "TEST/W1 completed 12:00" });
+  const structural = validateProposal({ ...loadPublishedProposal(root), structuralOnly: true });
+  fs.writeFileSync(path.join(root, "PLAN.md"), structural.effectivePlan.replace(/^## Index\s*$[\s\S]*$/m, structural.indexSection));
+  const validation = validateProposal({ ...loadPublishedProposal(root), structuralOnly: true });
+  assert.equal(validation.completion[0].implementationComplete, false);
+  assert.equal(validation.completion[0].status, "partial", "acceptance metadata cannot close an item whose implementation step did not complete");
+  assert.match(validation.errors.join("\n"), /RECONCILE: archived shipped item 2a is missing completed implementation marker\(s\): W2/);
+  assert.notEqual(run(root, "--structural").status, 0, "structural validation must refuse premature archival");
+}
+
+{
+  const root = makeFixture("\n- W1 **2a executable work.**", [{ id: "2a", where: "items", text: item("2a") }], { inFlight: "TEST/W1 completed 12:00", revision: "r1" });
+  prepare(root);
+  fs.writeFileSync(path.join(root, "PLAN.md"), fs.readFileSync(path.join(root, "PLAN.md"), "utf8").replace("- TEST/W1 completed", "TEST/W1 completed"));
+  const validation = validateProposal({ ...loadPublishedProposal(root), structuralOnly: true });
+  assert.deepEqual(validation.completion[0].completedWork, ["W1"], "unbulleted repository markers must count as completed work");
 }
 
 {

@@ -209,7 +209,7 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
     const currentText = currentMatch[2];
     const orderId = currentText.match(/^Order ID:\s*`([^`]+)`/m)?.[1] ?? currentMatch[1].match(/\b(v\d+\.\d+\.\d+|[A-Z][A-Z0-9-]+)\b/)?.[1];
     const inFlight = effectivePlan.match(/^## In flight\s*$\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? "";
-    if (orderId) for (const marker of inFlight.matchAll(/^-\s+`?([^\s`/]+)\/(W\d+)/gm)) if (marker[1] !== orderId) errors.push(`PLAN.md: In flight marker ${marker[1]}/${marker[2]} belongs to another order (current ${orderId})`);
+    if (orderId) for (const marker of inFlight.matchAll(/^(?:-\s*)?`?([^\s`/]+)\/(W\d+)/gm)) if (marker[1] !== orderId) errors.push(`PLAN.md: In flight marker ${marker[1]}/${marker[2]} belongs to another order (current ${orderId})`);
     const workItems = [...currentText.matchAll(/^- (W\d+)\s+\*\*(?:item\s+)?([0-9]+[a-z]*)\b([^\n]*)/gmi)];
     if (!/No product changes/i.test(currentText)) {
       const executable = new Map();
@@ -240,13 +240,25 @@ export function validateProposal({ planText, orderBody = null, itemContents, str
           }
           continue;
         }
-        const completedWork = execution.workIds.filter((workId) => new RegExp(`^-\\s+${orderId?.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/${workId} completed\\b`, "mi").test(inFlight));
+        const completedWork = execution.workIds.filter((workId) => new RegExp(`^(?:-\\s*)?${orderId?.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/${workId} completed\\b`, "mi").test(inFlight));
         const acceptanceEvidence = item.state === "shipped"
           && item.relative.startsWith("plan/archive/")
           && Boolean(item.metadata.get("shipped"))
           && !["", "unknown"].includes(item.metadata.get("evidence") ?? "")
           && !["", "unknown"].includes(item.metadata.get("acceptance") ?? "");
-        completion.push({ itemId: id, workIds: execution.workIds, completedWork, acceptanceEvidence, status: acceptanceEvidence ? "complete" : completedWork.length ? "partial" : "pending" });
+        const implementationComplete = execution.workIds.every((workId) => completedWork.includes(workId));
+        completion.push({
+          itemId: id,
+          workIds: execution.workIds,
+          completedWork,
+          implementationComplete,
+          acceptanceEvidence,
+          status: acceptanceEvidence && implementationComplete ? "complete" : acceptanceEvidence || completedWork.length ? "partial" : "pending",
+        });
+        if (acceptanceEvidence && !implementationComplete) {
+          const missing = execution.workIds.filter((workId) => !completedWork.includes(workId));
+          errors.push(`RECONCILE: archived shipped item ${id} is missing completed implementation marker(s): ${missing.join(", ")}`);
+        }
         if (structuralOnly) continue;
         if (item.state !== "live") {
           const message = `ORDER GATE: executable item ${id} is ${item.state}, expected live`;
@@ -307,7 +319,7 @@ function currentOrderRecord(planText) {
   const revision = text.match(/^\*\*Revision(?::)?\s+(r[0-9]+)\b/im)?.[1].toLowerCase() ?? null;
   const inFlight = String(planText ?? "").match(/^## In flight\s*$\n([\s\S]*?)(?=^## |(?![\s\S]))/m)?.[1] ?? "";
   const work = [...text.matchAll(/^- (W\d+)\s+\*\*(?:item\s+)?([0-9]+[a-z]*)\b/gmi)].map((entry) => ({ workId: entry[1].toUpperCase(), itemId: entry[2].toLowerCase() }));
-  const completedWork = orderId ? [...inFlight.matchAll(new RegExp(`^-\\s+${orderId.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/(W\\d+) completed\\b`, "gmi"))].map((entry) => entry[1].toUpperCase()) : [];
+  const completedWork = orderId ? [...inFlight.matchAll(new RegExp(`^(?:-\\s*)?${orderId.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}/(W\\d+) completed\\b`, "gmi"))].map((entry) => entry[1].toUpperCase()) : [];
   return { orderId, revision, text, work, completedWork };
 }
 
