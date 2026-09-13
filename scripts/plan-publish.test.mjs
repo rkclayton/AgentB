@@ -137,7 +137,7 @@ function expectPrepareFailure(root, candidate, pattern) {
   const root = makeRoot();
   fs.writeFileSync(path.join(root, "plan", "archive", "2z.md"), item("2z", { state: "shipped" }));
   const candidate = makeCandidate(root, "- W1 **2z stale archived work.**");
-  expectPrepareFailure(root, candidate, /executable item 2z is shipped, expected live/);
+  expectPrepareFailure(root, candidate, /RECONCILE: archived shipped item 2z is missing completed implementation marker\(s\): W1/);
 }
 
 assert.equal(workerStopped(plan("- W1 **2a work.**", "TEST/W1 started 12:00")).stopped, false);
