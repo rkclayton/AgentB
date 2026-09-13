@@ -36,7 +36,10 @@ test("each open chat gets an agent tab whose robot eyes expose that chat state",
   assert.match(tokens, /\.agent-tab-robot\.waiting\{color:var\(--alarm\)\}/);
   assert.match(shell, /session\?\.model_unreachable\) return "offline"/);
   assert.match(shell, /\(store\.servers \|\| \[\]\)\.find/);
-  assert.match(shell, /button\("\+", `New chat with \$\{agentID\}`, "agent-tab-new"\)/);
+  assert.match(shell, /left\.append\(newChatButton, tabs\)/);
+  assert.match(shell, /newChatButton\.onclick = \(\) => void createChat\(selectedSession\?\.workspace \|\| store\.config\.workspace, newChatAgentID\)/);
+  assert.doesNotMatch(shell, /wrap\.append\([^\n]*(?:agent-tab-new|newChatButton)/);
+  assert.match(shell, /newChatButton\.disabled = store\.replay \|\| !\(store\.config\.agents \|\| \[\]\)\.length/);
   assert.match(tokens, /--agent-tab-width:118px/);
   assert.match(tokens, /\.agent-tab-wrap\{[^}]*flex:0 0 var\(--agent-tab-width\)/);
   assert.match(tokens, /\.agent-tab\{[^}]*flex:1 1 auto;[^}]*min-width:69px/);

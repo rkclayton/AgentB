@@ -29,9 +29,10 @@ export function initShell(options = {}) {
   root.replaceChildren();
 
   const left = node("div", "shell-left");
+  const newChatButton = button("+", "New chat with agent_b", "agent-tab-new");
   const tabs = node("nav", "agent-tabs");
   tabs.setAttribute("aria-label", "Chats");
-  left.append(tabs);
+  left.append(newChatButton, tabs);
 
   const right = node("div", "shell-right");
   const pages = node("nav", "shell-pages");
@@ -109,6 +110,12 @@ export function initShell(options = {}) {
     tabs.replaceChildren();
     const agentID = "agent_b";
     const open = sessionsFor(agentID, false);
+    const selectedSession = store.sessions[store.selection.session_id];
+    const newChatAgentID = selectedSession?.agent_id || agentKey(store.config.agents?.[0]) || agentID;
+    newChatButton.title = `New chat with ${newChatAgentID}`;
+    newChatButton.setAttribute("aria-label", newChatButton.title);
+    newChatButton.disabled = store.replay || !(store.config.agents || []).length;
+    newChatButton.onclick = () => void createChat(selectedSession?.workspace || store.config.workspace, newChatAgentID);
     if ((page === "chat" || page === "console") && store.selection.agent_id) rememberAgentSide(store.selection.agent_id, page);
     const rendered = open.length ? open : [null];
     for (const session of rendered) {
@@ -159,15 +166,6 @@ export function initShell(options = {}) {
         close.disabled = store.replay || isRunning(session);
         close.onclick = (event) => { event.stopPropagation(); void closeChat(session, menu, agentID); };
         wrap.append(close);
-      }
-      if (selected || !session) {
-        const add = button("+", `New chat with ${agentID}`, "agent-tab-new");
-        add.disabled = store.replay || !(store.config.agents || []).length;
-        add.onclick = (event) => {
-          event.stopPropagation();
-          void createChat(session?.workspace || store.config.workspace, agentID);
-        };
-        wrap.append(add);
       }
       wrap.append(menu);
       tabs.append(wrap);

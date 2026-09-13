@@ -94,16 +94,17 @@ test("No-agent and blank Plan wells are explicit and Console links to active too
   assert.match(consoleHTML, /id="console-tools-link"[^>]*>0 tools active<\/a>/);
 });
 
-test("New chat uses the in-tab plus and history uses the agent right-click menu", () => {
+test("New chat uses the fixed left plus and history uses the agent right-click menu", () => {
   assert.match(html, /id="app-shell"[^>]+data-page="console"/);
-  assert.match(shell, /button\("\+", `New chat with \$\{agentID\}`, "agent-tab-new"\)/);
+  assert.match(shell, /left\.append\(newChatButton, tabs\)/);
+  assert.match(shell, /newChatButton\.onclick = \(\) => void createChat\(selectedSession\?\.workspace \|\| store\.config\.workspace, newChatAgentID\)/);
+  assert.doesNotMatch(shell, /wrap\.append\(newChatButton\)|wrap\.append\(add\)/);
   assert.match(shell, /oncontextmenu/);
   assert.match(shell, /agent-chat-rename/);
   assert.match(shell, /agent-chat-delete/);
   assert.doesNotMatch(html + css, /chat-list|chat-list-toggle/);
   assert.doesNotMatch(html, /chat-clear-conversation|Clear conversation/);
   assert.match(shell, /source_session_id: source\.id, workspace/);
-  assert.match(shell, /createChat\(session\?\.workspace \|\| store\.config\.workspace, agentID\)/);
   assert.match(shell, /button\("", chatName/);
   assert.match(shell, /Stop it before closing the chat/);
 });

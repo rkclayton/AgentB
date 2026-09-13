@@ -910,7 +910,7 @@ if (realModel) {
   await browser.evaluate(`(async () => { const bus = await import('/static/js/bus.js'); bus.reduce({ type: 'snapshot', data: await fetch('/api/state', { cache: 'no-store' }).then(response => response.json()) }); return true; })()`);
   await browser.wait(`document.querySelector('#chat-log') && !document.querySelector('#chat-log').innerText.includes('FIRST PROSE BLOCK')`, "prose fixture restored");
 
-  const geometry = await browser.evaluate(`(() => { const textarea=document.querySelector('#chat-task').getBoundingClientRect(); const row=document.querySelector('.chat-composer-row').getBoundingClientRect(); const expand=document.querySelector('#chat-expand').getBoundingClientRect(); const robot=document.querySelector('.agent-tab-wrap.selected .agent-tab-robot').getBoundingClientRect(); const tab=document.querySelector('.agent-tab-wrap.selected').getBoundingClientRect(); const plus=document.querySelector('.agent-tab-wrap.selected .agent-tab-new').getBoundingClientRect(); const send=document.querySelector('#chat-send').getBoundingClientRect(); const stop=document.querySelector('#chat-stop').getBoundingClientRect(); return {textarea:textarea.width,row:row.width,rowHeight:row.height,expandTop:expand.top-textarea.top,expandRight:textarea.right-expand.right,robot:robot.width,tab:tab.width,plus:{width:plus.width,height:plus.height},send:{width:send.width,height:send.height},stop:{width:stop.width,height:stop.height}}; })()`);
+  const geometry = await browser.evaluate(`(() => { const textarea=document.querySelector('#chat-task').getBoundingClientRect(); const row=document.querySelector('.chat-composer-row').getBoundingClientRect(); const expand=document.querySelector('#chat-expand').getBoundingClientRect(); const robot=document.querySelector('.agent-tab-wrap.selected .agent-tab-robot').getBoundingClientRect(); const tab=document.querySelector('.agent-tab-wrap.selected').getBoundingClientRect(); const plus=document.querySelector('.shell-left > .agent-tab-new').getBoundingClientRect(); const send=document.querySelector('#chat-send').getBoundingClientRect(); const stop=document.querySelector('#chat-stop').getBoundingClientRect(); return {textarea:textarea.width,row:row.width,rowHeight:row.height,expandTop:expand.top-textarea.top,expandRight:textarea.right-expand.right,robot:robot.width,tab:tab.width,plus:{width:plus.width,height:plus.height},send:{width:send.width,height:send.height},stop:{width:stop.width,height:stop.height}}; })()`);
   assert.ok(geometry.textarea >= geometry.row - 50, JSON.stringify(geometry));
   assert.ok(geometry.expandTop >= 0 && geometry.expandTop <= 8 && geometry.expandRight >= 0 && geometry.expandRight <= 8, JSON.stringify(geometry));
   assert.ok(geometry.robot > 0, JSON.stringify(geometry));
@@ -1242,20 +1242,26 @@ if (realModel) {
   }
   assert.equal((await state()).sessions[sessionID], undefined, "confirmed trash control must remove the session registry entry");
   record("agent-menu-inline-delete-keeps-memory-default");
+  await page.setViewportSize({ width: 320, height: 975 });
   for (let index = 0; index < 10; index++) {
     const before = await page.locator(".agent-tab-wrap[data-session]").count();
-    await page.locator(".agent-tab-wrap.selected .agent-tab-new").click();
+    await page.locator(".shell-left > .agent-tab-new").click();
     await page.waitForFunction((count) => document.querySelectorAll(".agent-tab-wrap[data-session]").length === count + 1, before);
   }
   const tabOverflow = await page.evaluate(() => {
     const strip = document.querySelector(".agent-tabs");
     const widths = [...document.querySelectorAll(".agent-tab-wrap[data-session]")].map((item) => item.getBoundingClientRect().width);
-    return { count: widths.length, minimum: Math.min(...widths), scroll: strip.scrollWidth - strip.clientWidth, document: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+    const plus = document.querySelector(".shell-left > .agent-tab-new").getBoundingClientRect();
+    return { count: widths.length, minimum: Math.min(...widths), scroll: strip.scrollWidth - strip.clientWidth, document: document.documentElement.scrollWidth - document.documentElement.clientWidth, plusCount: document.querySelectorAll(".agent-tab-new").length, nestedPlusCount: document.querySelectorAll(".agent-tab-wrap .agent-tab-new").length, plusLeft: plus.left, stripLeft: strip.getBoundingClientRect().left };
   });
   assert.ok(tabOverflow.count >= 10, JSON.stringify(tabOverflow));
   assert.ok(tabOverflow.minimum >= 118, JSON.stringify(tabOverflow));
   assert.ok(tabOverflow.scroll > 0, JSON.stringify(tabOverflow));
   assert.equal(tabOverflow.document, 0, JSON.stringify(tabOverflow));
+  assert.equal(tabOverflow.plusCount, 1, JSON.stringify(tabOverflow));
+  assert.equal(tabOverflow.nestedPlusCount, 0, JSON.stringify(tabOverflow));
+  assert.ok(tabOverflow.plusLeft < tabOverflow.stripLeft, JSON.stringify(tabOverflow));
+  await page.setViewportSize({ width: 1250, height: 975 });
   record("per-chat-tabs-scroll-without-shrinking-or-page-overflow");
   const retainedBeforeRestart = Object.keys((await state()).sessions).length;
   app.kill();
