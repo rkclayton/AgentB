@@ -138,25 +138,31 @@ func TestAttachmentsImageOCRNoTextIsNotSuccessfulExtraction(t *testing.T) {
 
 func TestAttachmentHandlingRoutesImageAgainstProbe(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		handling   string
-		capability bool
-		wantTier   string
+		name     string
+		handling string
+		vision   string
+		wantTier string
+		wantNote string
 	}{
-		{"auto text-only extracts", "auto", false, "ocr"},
-		{"auto vision stays native", "auto", true, "native"},
-		{"native overrides absent capability", "native", false, "native"},
-		{"extract overrides present capability", "extract", true, "ocr"},
+		{"auto rejected extracts", "auto", config.VisionRejected, "ocr", ""},
+		{"auto accepted but unread extracts", "auto", config.VisionAcceptsUnreadable, "ocr", "accepts images but does not read them"},
+		{"auto vision stays native", "auto", config.VisionReadsImages, "native", ""},
+		{"native overrides absent capability", "native", config.VisionRejected, "native", ""},
+		{"extract overrides present capability", "extract", config.VisionReadsImages, "ocr", ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			server, _ := attachmentTestServer(t, func(cfg *config.Config) {
 				cfg.Servers[0].AttachmentHandling = test.handling
-				cfg.Servers[0].Capabilities.ImageInput = test.capability
+				cfg.Servers[0].Capabilities.ImageInput = test.vision != config.VisionRejected
+				cfg.Servers[0].Capabilities.Vision = test.vision
 			})
 			server.ocrExtract = func(string) (string, error) { return "words", nil }
 			result := postAttachment(t, server, "screen.png", []byte("image bytes"))
 			if result.Tier != test.wantTier {
 				t.Fatalf("tier=%q, want %q; result=%+v", result.Tier, test.wantTier, result)
+			}
+			if test.wantNote != "" && !strings.Contains(result.Note, test.wantNote) {
+				t.Fatalf("note=%q, want substring %q", result.Note, test.wantNote)
 			}
 		})
 	}

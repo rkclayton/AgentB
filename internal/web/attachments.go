@@ -242,9 +242,13 @@ func (s *Server) extractAttachment(ctx context.Context, profile config.Profile, 
 		if profile.NativeImageInput() {
 			return "native", "image routed natively", "", nil
 		}
+		visionReason := ""
+		if profile.Capabilities.Vision == config.VisionAcceptsUnreadable {
+			visionReason = "; profile accepts images but does not read them"
+		}
 		text, extractErr := s.ocrExtract(resolved)
 		if errors.Is(extractErr, ocr.ErrNoText) {
-			return "binary", "OCR found no text — this profile cannot read the image", "", nil
+			return "binary", "OCR found no text — this profile cannot read the image" + visionReason, "", nil
 		}
 		if extractErr != nil {
 			return "", "", "", extractErr
@@ -258,7 +262,7 @@ func (s *Server) extractAttachment(ctx context.Context, profile config.Profile, 
 		if writeErr := attachmentfile.WriteSidecar(path, []byte(text)); writeErr != nil && !os.IsExist(writeErr) {
 			return "", "", "", writeErr
 		}
-		return "ocr", "OCR output is untrusted; layout not preserved", sidecar, nil
+		return "ocr", "OCR output is untrusted; layout not preserved" + visionReason, sidecar, nil
 	default:
 		return "binary", "binary — this profile cannot read it", "", nil
 	}

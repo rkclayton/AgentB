@@ -14,7 +14,7 @@ func TestProbeOffReportsAssumedDocumentAndImageInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !capabilities.DocumentInput || !capabilities.ImageInput {
+	if !capabilities.DocumentInput || !capabilities.ImageInput || capabilities.Vision != config.VisionReadsImages {
 		t.Fatalf("capabilities=%+v", capabilities)
 	}
 	if len(findings) == 0 {

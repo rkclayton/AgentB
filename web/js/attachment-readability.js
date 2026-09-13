@@ -6,8 +6,10 @@ export function attachmentReadability(session, profiles, attachment) {
   if (attachment?.sidecar) return null;
   if (attachment?.kind === "image" && handling === "extract")
     return "This image needs OCR before the profile can read it";
-  if (attachment?.kind === "image" && handling === "auto" && !capabilities.image_input)
-    return "This profile cannot read images · probe found no image input";
+  if (attachment?.kind === "image" && handling === "auto" && capabilities.vision !== "reads images")
+    return capabilities.vision === "accepts images but does not read them"
+      ? "This image needs OCR · the profile accepts images but does not read them"
+      : "This profile cannot read images · probe did not verify image reading";
   if (attachment?.kind === "pdf" && handling === "extract")
     return "This PDF needs extraction before the profile can read it";
   if (attachment?.kind === "pdf" && handling === "auto" && !capabilities.document_input)

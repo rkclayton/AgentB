@@ -25,6 +25,7 @@ func TestAttachmentRequestKeepsStoredTextAndNativeBytesOutOfDiagnosticBody(t *te
 	}
 	profile := config.Defaults(workspace).Servers[0]
 	profile.Capabilities.ImageInput = true
+	profile.Capabilities.Vision = config.VisionReadsImages
 	profile.Context.NCtx, profile.Context.ReserveOutput = 32768, 10240
 	item := &session.Session{Workspace: workspace}
 	message := events.Message{Role: "user", Content: "describe this", Attachments: []events.Attachment{{Path: "attachments/pixel.png", Bytes: 9, SHA256: strings.Repeat("a", 64)}}}
@@ -82,6 +83,7 @@ func TestNativeAttachmentsEachHaveAnImmediatelyAdjacentFrame(t *testing.T) {
 	}
 	profile := config.Defaults(workspace).Servers[0]
 	profile.Capabilities.ImageInput = true
+	profile.Capabilities.Vision = config.VisionReadsImages
 	profile.Context.NCtx, profile.Context.ReserveOutput = 32768, 10240
 	message := events.Message{Role: "user", Content: "compare", Attachments: []events.Attachment{
 		{Path: "attachments/first.png", Bytes: 9},
@@ -111,6 +113,7 @@ func TestNativeAttachmentOverContextBudgetHasVisibleOutcomeAndNoPayload(t *testi
 	}
 	profile := config.Defaults(workspace).Servers[0]
 	profile.Capabilities.ImageInput = true
+	profile.Capabilities.Vision = config.VisionReadsImages
 	profile.Context.NCtx, profile.Context.ReserveOutput = 32, 8
 	attachments := prepareNativeAttachments(&profile, []events.Attachment{{Path: "attachments/pixel.png", Bytes: 9}})
 	if !strings.Contains(attachments[0].Outcome, "not sent inline") || !strings.Contains(attachments[0].Outcome, "only 24 remain") {
@@ -134,6 +137,7 @@ func TestNativeAttachmentBudgetIsCumulativeAcrossQueuedHistory(t *testing.T) {
 	workspace := t.TempDir()
 	profile := config.Defaults(workspace).Servers[0]
 	profile.Capabilities.ImageInput = true
+	profile.Capabilities.Vision = config.VisionReadsImages
 	profile.Context.NCtx, profile.Context.ReserveOutput = 100, 8
 	cfg := config.Defaults(workspace)
 	cfg.Servers[0] = profile

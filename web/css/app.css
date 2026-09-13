@@ -1848,6 +1848,10 @@
 .console-actions span { color: var(--mute); }
 .console-selector select { min-width: 180px; }
 .console-selector #console-agent-server { min-width: 180px; }
+.console-agent-vision { position:relative; flex:none; width:18px; height:12px; color:var(--mute); border:1px solid currentColor; border-radius:50%; }
+.console-agent-vision::before { content:""; position:absolute; width:4px; height:4px; left:6px; top:3px; background:currentColor; border-radius:50%; }
+.console-agent-vision.reads { color:var(--ink); }
+.console-agent-vision.does-not-read::after { content:""; position:absolute; width:21px; height:1px; left:-2px; top:5px; background:var(--alarm); transform:rotate(-34deg); transform-origin:center; }
 .console-selector #console-agent-server-state { font:12px/20px var(--mono); white-space:nowrap; }
 .console-selector #console-agent-server-state.pending { color:var(--trace); }
 .console-selector #console-agent-server-cancel { min-height:26px; }

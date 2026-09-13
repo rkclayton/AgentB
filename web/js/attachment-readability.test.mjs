@@ -4,10 +4,10 @@ import test from "node:test";
 import { attachmentReadability } from "./attachment-readability.js";
 
 const session = { server_id: "text-only" };
-const profiles = [{ id: "text-only", capabilities: { probed_at: "2026-09-12T00:00:00Z", image_input: false, document_input: false } }];
+const profiles = [{ id: "text-only", capabilities: { probed_at: "2026-09-12T00:00:00Z", image_input: false, vision: "rejected", document_input: false } }];
 
 test("marks an image unreadable for the active probed profile", () => {
-  assert.equal(attachmentReadability(session, profiles, { kind: "image" }), "This profile cannot read images · probe found no image input");
+  assert.equal(attachmentReadability(session, profiles, { kind: "image" }), "This profile cannot read images · probe did not verify image reading");
 });
 
 test("keeps readable kinds and extracted PDFs unmarked", () => {
@@ -31,6 +31,11 @@ test("does not invent a capability verdict before probing", () => {
 });
 
 test("uses the currently selected session profile", () => {
-  const capable = [...profiles, { id: "vision", capabilities: { probed_at: "2026-09-12T00:00:00Z", image_input: true, document_input: true } }];
+  const capable = [...profiles, { id: "vision", capabilities: { probed_at: "2026-09-12T00:00:00Z", image_input: true, vision: "reads images", document_input: true } }];
   assert.equal(attachmentReadability({ server_id: "vision" }, capable, { kind: "image" }), null);
+});
+
+test("routes accepted-but-unread images to OCR with the probe reason", () => {
+  const tolerant = [{ ...profiles[0], capabilities: { ...profiles[0].capabilities, image_input: true, vision: "accepts images but does not read them" } }];
+  assert.equal(attachmentReadability(session, tolerant, { kind: "image" }), "This image needs OCR · the profile accepts images but does not read them");
 });

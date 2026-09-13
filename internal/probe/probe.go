@@ -3,11 +3,18 @@ package probe
 import (
 	"bytes"
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
+	"math/big"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,8 +24,8 @@ import (
 
 func Probe(ctx context.Context, profile *config.Profile) (config.Capabilities, []string, error) {
 	if profile.ProbeMode == "off" {
-		findings := []string{"probe mode off: all capabilities assumed", "server: assumed openai-compatible", "n_ctx: taken from profile context", "tokenize/apply-template/cached tokens/timings/prompt progress: assumed unavailable", "streaming/tool calls/document input/image input: assumed available", "overflow: assumed unknown"}
-		caps := config.Capabilities{Server: "openai-compatible", NCtx: profile.Context.NCtx, Streaming: true, ToolCalls: true, DocumentInput: true, ImageInput: true, ReasoningControl: "none", ValidEfforts: []string{}, OverflowBehavior: "unknown", Findings: findings, ProbedAt: time.Now().UTC().Format(time.RFC3339)}
+		findings := []string{"probe mode off: all capabilities assumed", "server: assumed openai-compatible", "n_ctx: taken from profile context", "tokenize/apply-template/cached tokens/timings/prompt progress: assumed unavailable", "streaming/tool calls/document input/image input: assumed available", "vision: reads images (assumed; probe mode off)", "overflow: assumed unknown"}
+		caps := config.Capabilities{Server: "openai-compatible", NCtx: profile.Context.NCtx, Streaming: true, ToolCalls: true, DocumentInput: true, ImageInput: true, Vision: config.VisionReadsImages, ReasoningControl: "none", ValidEfforts: []string{}, OverflowBehavior: "unknown", Findings: findings, ProbedAt: time.Now().UTC().Format(time.RFC3339)}
 		return caps, findings, nil
 	}
 	caps := config.Capabilities{Server: "unknown", ReasoningControl: "none", OverflowBehavior: "unknown", ValidEfforts: []string{}}
@@ -100,7 +107,8 @@ func Probe(ctx context.Context, profile *config.Profile) (config.Capabilities, [
 
 	if profile.ProbeMode == "minimal" {
 		caps.ToolCalls = true
-		findings = append(findings, "tool calls: not probed in minimal mode; assumed available", "document input: not probed in minimal mode; assumed unavailable", "image input: not probed in minimal mode; assumed unavailable", "reasoning control: not probed in minimal mode; assumed none", "valid efforts: not probed in minimal mode; assumed empty", "overflow: not probed in minimal mode; assumed unknown")
+		caps.Vision = config.VisionRejected
+		findings = append(findings, "tool calls: not probed in minimal mode; assumed available", "document input: not probed in minimal mode; assumed unavailable", "image input: not probed in minimal mode; assumed unavailable", "vision: rejected (assumed; not probed in minimal mode)", "reasoning control: not probed in minimal mode; assumed none", "valid efforts: not probed in minimal mode; assumed empty", "overflow: not probed in minimal mode; assumed unknown")
 		return finish(caps, findings)
 	}
 
@@ -115,8 +123,8 @@ func Probe(ctx context.Context, profile *config.Profile) (config.Capabilities, [
 	findings = append(findings, "tool calls: "+availability(caps.ToolCalls), "grammar constrained: "+availability(caps.GrammarConstrained))
 
 	caps.DocumentInput = probeContentPart(ctx, client, map[string]any{"type": "file", "file": map[string]any{"filename": "probe.pdf", "file_data": "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(probePDF())}})
-	caps.ImageInput = probeContentPart(ctx, client, map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}})
-	findings = append(findings, "document input: "+availability(caps.DocumentInput), "image input: "+availability(caps.ImageInput))
+	caps.Vision, caps.ImageInput = probeVision(ctx, client)
+	findings = append(findings, "document input: "+availability(caps.DocumentInput), "image input: "+availability(caps.ImageInput), "vision: "+caps.Vision)
 
 	probeReasoning(ctx, client, profile, &caps, &findings)
 	probeOverflow(ctx, client, profile, &caps, &findings)
@@ -151,6 +159,47 @@ func probeContentPart(ctx context.Context, client *llm.Client, part map[string]a
 	defer cancel()
 	_, err := client.Chat(check, llm.Request{Messages: []llm.Message{{Role: "user", Content: []any{map[string]any{"type": "text", "text": "Say OK."}, part}}}, MaxTokens: 16})
 	return err == nil
+}
+
+func probeVision(ctx context.Context, client *llm.Client) (string, bool) {
+	chosen, err := cryptorand.Int(cryptorand.Reader, big.NewInt(10))
+	if err != nil {
+		return config.VisionRejected, false
+	}
+	digit := int(chosen.Int64())
+	pngBytes := probeDigitPNG(digit)
+	part := map[string]any{"type": "image_url", "image_url": map[string]any{"url": "data:image/png;base64," + base64.StdEncoding.EncodeToString(pngBytes)}}
+	check, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	response, err := client.Chat(check, llm.Request{Messages: []llm.Message{{Role: "user", Content: []any{map[string]any{"type": "text", "text": "What single digit is shown in this image? Reply with the digit only."}, part}}}, MaxTokens: 8})
+	if err != nil {
+		return config.VisionRejected, false
+	}
+	if strings.TrimSpace(response.Content) == strconv.Itoa(digit) {
+		return config.VisionReadsImages, true
+	}
+	return config.VisionAcceptsUnreadable, true
+}
+
+func probeDigitPNG(digit int) []byte {
+	canvas := image.NewRGBA(image.Rect(0, 0, 96, 96))
+	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
+	segments := []image.Rectangle{
+		image.Rect(24, 8, 72, 18), image.Rect(68, 14, 78, 47), image.Rect(68, 49, 78, 82),
+		image.Rect(24, 78, 72, 88), image.Rect(18, 49, 28, 82), image.Rect(18, 14, 28, 47), image.Rect(24, 43, 72, 53),
+	}
+	masks := [...]byte{0x3f, 0x06, 0x5b, 0x4f, 0x66, 0x6d, 0x7d, 0x07, 0x7f, 0x6f}
+	if digit < 0 || digit >= len(masks) {
+		digit = 0
+	}
+	for index, rectangle := range segments {
+		if masks[digit]&(1<<index) != 0 {
+			draw.Draw(canvas, rectangle, image.NewUniform(color.Black), image.Point{}, draw.Src)
+		}
+	}
+	var encoded bytes.Buffer
+	_ = png.Encode(&encoded, canvas)
+	return encoded.Bytes()
 }
 
 func probeReasoning(ctx context.Context, client *llm.Client, profile *config.Profile, caps *config.Capabilities, findings *[]string) {

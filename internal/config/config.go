@@ -124,7 +124,7 @@ func defaultProfile() Profile {
 }
 
 func (p Profile) NativeImageInput() bool {
-	return p.AttachmentHandling == "native" || (p.AttachmentHandling == "auto" && p.Capabilities.ImageInput)
+	return p.AttachmentHandling == "native" || (p.AttachmentHandling == "auto" && p.Capabilities.Vision == VisionReadsImages)
 }
 
 func (p Profile) NativeDocumentInput() bool {
@@ -198,6 +198,7 @@ type Capabilities struct {
 	PromptProgress     bool     `json:"prompt_progress"`
 	DocumentInput      bool     `json:"document_input"`
 	ImageInput         bool     `json:"image_input"`
+	Vision             string   `json:"vision"`
 	ReasoningControl   string   `json:"reasoning_control"`
 	ReasoningEmission  string   `json:"reasoning_emission,omitempty"`
 	ValidEfforts       []string `json:"valid_efforts"`
@@ -205,6 +206,13 @@ type Capabilities struct {
 	ProbedAt           string   `json:"probed_at"`
 	Findings           []string `json:"findings"`
 }
+
+const (
+	VisionReadsImages       = "reads images"
+	VisionAcceptsUnreadable = "accepts images but does not read them"
+	VisionRejected          = "rejected"
+)
+
 type RunConfig struct {
 	MaxTurns                 int `json:"max_turns"`
 	CycleWindow              int `json:"cycle_window"`

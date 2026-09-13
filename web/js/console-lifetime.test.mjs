@@ -17,7 +17,9 @@ test("Lifetime rows expose all six per-brief reliability fields", () => {
 test("Console body exposes selectors tools lifetime instruments and maintenance together", () => {
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const script = fs.readFileSync(new URL("app.js", import.meta.url), "utf8");
-  for (const value of ["console-agent", "console-tools", "console-stats", "clear-stats", "flush-memory", "console-live", "console-live-content", "console-maintenance-title"]) assert.match(html, new RegExp(value));
+  for (const value of ["console-agent", "console-agent-vision", "console-tools", "console-stats", "clear-stats", "flush-memory", "console-live", "console-live-content", "console-maintenance-title"]) assert.match(html, new RegExp(value));
+  assert.match(script, /vision === "reads images" \? "reads" : "does-not-read"/);
+  assert.match(script, /visionFinding \|\| `vision: \$\{vision\}`/);
   assert.doesNotMatch(html + script, /console-closed|renderClosed|deleteChat/);
   assert.match(script, /liveContent\.hidden = !hasSelectedChat/);
   assert.doesNotMatch(script, /lifetime\.hidden|live\.hidden/);
