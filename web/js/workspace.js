@@ -1,6 +1,6 @@
 import { store } from "./bus.js";
 import { initShell } from "./shell.js";
-import { initSettings } from "./settings.js";
+import { closeSettings, initSettings } from "./settings.js";
 import { mountConsole, unmountConsole } from "./app.js";
 import { mountChat, unmountChat } from "./chat.js";
 import { beginNavigation } from "./navigation-telemetry.js";
@@ -24,6 +24,7 @@ function pathFor(next) {
 
 function show(next, { history = "push", measure = false } = {}) {
   if (next !== "chat" && next !== "console") return;
+  closeSettings(next);
   const previous = page;
   if (measure && previous !== next) beginNavigation({
     kind: "flip", from: previous, to: next, fullDocument: false,

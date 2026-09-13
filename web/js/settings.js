@@ -124,7 +124,8 @@ function openSettings(section = "") {
   requestAnimationFrame(() => sheet.querySelector(".settings-nav button.selected")?.focus());
 }
 
-function closeSettings() {
+export function closeSettings(surface = "console") {
+  if (!open) return;
   open = false;
   sheet.hidden = true;
   sheet.setAttribute("aria-hidden", "true");
@@ -134,7 +135,7 @@ function closeSettings() {
   gear.classList.remove("selected");
   history.replaceState(null, "", `${location.pathname}${location.search}`);
   (lastFocus || gear).focus();
-  navigationSurfaceReady("console", store);
+  navigationSurfaceReady(surface, store);
 }
 
 function render() {

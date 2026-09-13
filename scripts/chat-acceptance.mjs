@@ -535,7 +535,19 @@ if (realModel) {
 
   const baselineDirectory = join(args.evidence, "baseline-initial");
   await mkdir(baselineDirectory, { recursive: true });
-  await page.screenshot({ path: join(baselineDirectory, "chat-idle.png") });
+  const chatIdleScreenshot = await page.screenshot({ path: join(baselineDirectory, "chat-idle.png") });
+  await page.locator(".shell-settings").click();
+  await page.locator("#settings-page").waitFor({ state: "visible" });
+  const profileState = page.locator('.profile-summary[data-id="acceptance"] .profile-state');
+  await page.locator('.profile-row:has(.profile-summary[data-id="acceptance"]) [data-action="probe"]').click();
+  await browser.wait(`document.querySelector('.profile-summary[data-id="acceptance"] .profile-state')?.textContent.includes('Test passed')`, "Settings Test passed before Chat return");
+  assert.match(await profileState.innerText(), /Test passed/);
+  await page.locator('.agent-tab-wrap.selected .agent-tab[data-agent="agent_b"]').click();
+  await page.locator("#chat-task").waitFor({ state: "visible" });
+  assert.equal(await page.locator("#settings-page").isHidden(), true);
+  assert.equal(await page.locator("#settings-page").getAttribute("aria-hidden"), "true");
+  assert.deepEqual(await page.screenshot(), chatIdleScreenshot, "Chat idle changed after Settings → Test → Chat round trip");
+  record("settings-test-chat-round-trip");
   await page.locator(".agent-tab").first().click({ button: "right" });
   await page.locator(".agent-chat-count").waitFor({ state: "visible" });
   await page.locator(`.agent-chat-row[data-session="${sessionID}"] .agent-chat-open`).waitFor({ state: "visible" });
