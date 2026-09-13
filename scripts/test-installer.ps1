@@ -71,7 +71,7 @@ function Get-RootFingerprint {
             files = @($(if (Test-Path -LiteralPath $root -PathType Container) {
                 Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object {
                     [ordered]@{ path = $_.FullName.Substring($root.Length).TrimStart('\'); length = $_.Length; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
-                }
+                } | Sort-Object { $_['path'] }
             }))
         }
     } | ConvertTo-Json -Depth 6 -Compress)
