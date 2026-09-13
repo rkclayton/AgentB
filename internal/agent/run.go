@@ -696,10 +696,24 @@ func (r *Runner) executeTool(ctx context.Context, s *session.Session, runID, cal
 			overrideContent = "the tool completed with no output"
 		}
 		outcome.Content, outcome.OK, outcome.OperatorContext = "operator-identity override succeeded; exact "+subject+" rerun once:\n"+overrideContent, true, true
+		outcome.Metadata = mergeResultMetadata(outcome.Metadata, sandboxResultMetadata(cfg, s, name, args))
 		return outcome
 	}
 	outcome.Content, outcome.OK, outcome.OperatorContext = outcome.Content+"\n\noperator-identity override was attempted but failed:\n"+overrideContent, false, true
 	return outcome
+}
+
+func sandboxResultMetadata(cfg config.Config, s *session.Session, name string, args map[string]any) map[string]any {
+	if name != "shell" {
+		language, _ := args["language"].(string)
+		if name != "run_script" || !strings.EqualFold(strings.TrimSpace(language), "bash") {
+			return nil
+		}
+	}
+	if target, ok := cfg.SandboxForWorkspace(s.Workspace); ok {
+		return map[string]any{"target": "sandbox " + target}
+	}
+	return nil
 }
 
 func repoRunGrantMatches(defaults []string, args map[string]any) bool {

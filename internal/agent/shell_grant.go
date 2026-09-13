@@ -251,5 +251,5 @@ func (r *Runner) callShellAsOperator(ctx context.Context, s *session.Session, na
 	if ok && strings.TrimSpace(content) == "" {
 		content = "the tool completed with no output"
 	}
-	return tools.CallOutcome{Content: content, OK: ok, OperatorContext: true}
+	return tools.CallOutcome{Content: content, OK: ok, OperatorContext: true, Metadata: sandboxResultMetadata(r.cfg(), s, name, args)}
 }

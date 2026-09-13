@@ -197,11 +197,12 @@ function toolRow(session, call, callEvent, resultEvent, state, modelEvent = null
   row.head.children[2].textContent = keyArgument(args);
   row.head.children[3].textContent = formatDuration(result.ms);
   const serviceStatus = callServiceStatus(call.name, result);
-  row.head.children[4].textContent = serviceStatus || (result.operator_context
+  const executionTarget = result.target ? `${result.target} · ` : "";
+  row.head.children[4].textContent = executionTarget + (serviceStatus || (result.operator_context
     ? `Operator · ${result.ok === false ? "Failed" : "Done"}`
     : result.ok === false
       ? "Failed"
-      : "Done");
+      : "Done"));
   if (result.untrusted) {
     row.node.classList.add("untrusted");
     row.head.children[4].textContent = `Untrusted · ${result.ok === false ? "Failed" : "Done"}`;

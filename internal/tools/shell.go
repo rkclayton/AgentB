@@ -28,6 +28,9 @@ type Shell struct {
 	cfg               config.Shell
 	operatorCommands  []string
 	workspace         string
+	sandbox           config.Sandbox
+	sandboxStatus     SandboxStatus
+	sandboxCreateMu   sync.Mutex
 	fileCoordinator   *FileCoordinator
 	credential        shellCredentialReader
 	startService      serviceProcessStarter
@@ -157,6 +160,29 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 	}
 	if reason := forbiddenShellCommand(command, item, s.fileCoordinatorSnapshot()); reason != "" {
 		return CallDetail{Err: fmt.Errorf("command blocked: %s", reason)}
+	}
+	sandboxID, sandboxStatus, sandboxed := s.sandboxExecution(item.Workspace)
+	if sandboxed && !sandboxStatus.Available {
+		return CallDetail{Err: fmt.Errorf("target: sandbox %s; sandbox setting is inert: %s", sandboxID, sandboxStatus.Reason), Metadata: map[string]any{"target": "sandbox " + sandboxID}}
+	}
+	if sandboxed && !forceOperator && !cfg.OperatorContext {
+		reason := "sandbox execution uses the operator's Docker session, outside the agentb-svc identity and firewall boundary"
+		return CallDetail{Content: reason, OperatorOverrideReason: reason, Metadata: map[string]any{"target": "sandbox " + sandboxID}}
+	}
+	if sandboxed {
+		for _, denied := range cfg.Deny {
+			if denied != "" && strings.Contains(strings.ToLower(command), strings.ToLower(denied)) {
+				return CallDetail{Err: fmt.Errorf("command blocked by deny list"), Metadata: map[string]any{"target": "sandbox " + sandboxID}}
+			}
+		}
+		timeout := number(args["timeout_s"], cfg.TimeoutS)
+		if timeout <= 0 {
+			timeout = cfg.TimeoutS
+		}
+		if timeout > cfg.MaxTimeoutS {
+			timeout = cfg.MaxTimeoutS
+		}
+		return s.callSandbox(ctx, item, sandboxStatus.Executable, sandboxID, []string{sandboxID, "bash", "-lc", command}, nil, timeout, cfg)
 	}
 	if cfg.FileRoutingGuardEnabled() {
 		refusal, ambiguous := inspectShellFileRouting(command)
@@ -503,8 +529,11 @@ func (s *Shell) Configure(value config.Config) {
 	if absolute, err := filepath.Abs(workspace); err == nil {
 		workspace = absolute
 	}
+	sandboxStatus := probeSandboxStatus()
 	s.mu.Lock()
 	s.cfg = value.Shell
+	s.sandbox = value.Sandbox
+	s.sandboxStatus = sandboxStatus
 	s.operatorCommands = append([]string(nil), value.Tools.Shell.OperatorCommands...)
 	s.workspace = workspace
 	s.mu.Unlock()

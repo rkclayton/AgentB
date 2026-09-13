@@ -15,13 +15,13 @@ type RunScript struct{ shell *Shell }
 func NewRunScript(shell *Shell) *RunScript { return &RunScript{shell: shell} }
 func (*RunScript) Name() string            { return "run_script" }
 func (*RunScript) Description() string {
-	return "Run source from standard input without creating a script file. Use powershell for multi-line PowerShell, or python/node for interpreter source; script files are not created or executed."
+	return "Run source from standard input without creating a script file. Use powershell for multi-line PowerShell, python/node for host interpreter source, or bash for a workspace configured with a Docker Sandbox; script files are not created or executed."
 }
 func (*RunScript) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"language":  map[string]any{"type": "string", "enum": []string{"powershell", "python", "node"}},
+			"language":  map[string]any{"type": "string", "enum": []string{"powershell", "python", "node", "bash"}},
 			"source":    map[string]any{"type": "string"},
 			"timeout_s": map[string]any{"type": "integer"},
 		},
@@ -56,6 +56,32 @@ func (t *RunScript) call(ctx context.Context, item *session.Session, args map[st
 	if reason := forbiddenSigningCommand(source); reason != "" {
 		return CallDetail{Err: fmt.Errorf("source blocked: %s", reason)}
 	}
+	if strings.EqualFold(strings.TrimSpace(language), "bash") {
+		sandboxID, sandboxStatus, sandboxed := t.shell.sandboxExecution(item.Workspace)
+		if !sandboxed {
+			return CallDetail{Err: fmt.Errorf("bash requires this workspace to declare a Docker Sandbox target")}
+		}
+		if !sandboxStatus.Available {
+			return CallDetail{Err: fmt.Errorf("target: sandbox %s; sandbox setting is inert: %s", sandboxID, sandboxStatus.Reason), Metadata: map[string]any{"target": "sandbox " + sandboxID}}
+		}
+		if !forceOperator && !cfg.OperatorContext {
+			reason := "sandbox execution uses the operator's Docker session, outside the agentb-svc identity and firewall boundary"
+			return CallDetail{Content: reason, OperatorOverrideReason: reason, Metadata: map[string]any{"target": "sandbox " + sandboxID}}
+		}
+		for _, denied := range cfg.Deny {
+			if denied != "" && strings.Contains(strings.ToLower(source), strings.ToLower(denied)) {
+				return CallDetail{Err: fmt.Errorf("source blocked by deny list"), Metadata: map[string]any{"target": "sandbox " + sandboxID}}
+			}
+		}
+		timeout := number(args["timeout_s"], cfg.TimeoutS)
+		if timeout <= 0 {
+			timeout = cfg.TimeoutS
+		}
+		if timeout > cfg.MaxTimeoutS {
+			timeout = cfg.MaxTimeoutS
+		}
+		return t.shell.callSandbox(ctx, item, sandboxStatus.Executable, sandboxID, []string{"-i", sandboxID, "bash", "-s"}, []byte(source), timeout, cfg)
+	}
 	var executable string
 	var argv []string
 	switch strings.ToLower(strings.TrimSpace(language)) {
@@ -70,7 +96,7 @@ func (t *RunScript) call(ctx context.Context, item *session.Session, args map[st
 	case "node":
 		executable, argv = resolvedInterpreter("node"), []string{"-"}
 	default:
-		return CallDetail{Err: fmt.Errorf("language must be powershell, python, or node")}
+		return CallDetail{Err: fmt.Errorf("language must be powershell, python, node, or bash")}
 	}
 	timeout := number(args["timeout_s"], cfg.TimeoutS)
 	if timeout <= 0 {

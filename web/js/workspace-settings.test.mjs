@@ -27,3 +27,11 @@ test("Settings Workspace owns operator attachments mailbox approvals retention a
 	assert.match(settings, /Cleanup is destructive and is off by default/);
 	assert.match(settings, /\/api\/operator-files/);
 });
+
+test("Settings Workspace exposes Docker Sandbox capability and a staged per-directory target", () => {
+  assert.match(settings, /Docker Sandbox execution/);
+  assert.match(settings, /sandboxStatus\.reason/);
+  assert.match(settings, /sandboxStatus\.findings/);
+  assert.match(settings, /data-action="sandbox-workspace-toggle"/);
+  assert.match(settings, /drafts\.set\("sandbox\.workspaces",workspaces\)/);
+});

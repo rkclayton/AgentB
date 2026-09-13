@@ -422,12 +422,16 @@ function about() {
 }
 
 function workspaces() {
+	const sandboxWorkspaces=currentValue("sandbox.workspaces",store.config.sandbox?.workspaces||{});
+	const sandboxStatus=store.sandbox||{reason:"sandbox capability has not been checked",findings:[]};
 	const directories = workspaceState.length ? workspaceState.map((item) => {
 		const policyKey=`policy:${item.dir}`; const policy=item.policy;
-		return `<div class="session-row workspace-row"><span class="path" title="${attr(item.dir)}">${html(item.dir)}</span><span>${item.memory_count} memory ${item.memory_count===1?"entry":"entries"}</span><span>${html(relativeDate(item.last_used))}</span></div>
+		const sandboxed=sandboxWorkspaces[item.dir]===true;
+		return `<div class="session-row workspace-row"><span class="path" title="${attr(item.dir)}">${html(item.dir)}</span><span>${item.memory_count} memory ${item.memory_count===1?"entry":"entries"}</span><span>${html(relativeDate(item.last_used))}</span><button type="button" role="switch" aria-checked="${sandboxed}" class="switch ${sandboxed?"on":""}" data-action="sandbox-workspace-toggle" data-id="${attr(item.dir)}" title="Run shell and bash in Docker Sandbox"></button></div>
 		${policy ? `<div class="session-row workspace-policy-row"><span class="path" title="${attr(policy.path)}">${html(policy.path)}</span><code title="${attr(policy.hash)}">${html((policy.hash||"").slice(0,12))}</code><span>${html(policy.approved_at||"not approved")}</span><button type="button" class="${armed.has(policyKey)?"confirm":""}" data-action="revoke-workspace-policy" data-id="${attr(item.dir)}" ${policy.approved?"":"disabled"}>${armed.has(policyKey)?"Confirm revoke":"Revoke"}</button></div>`:""}`;
 	}).join("") : '<p class="settings-note">No known workspace directories.</p>';
-	return operatorFilesWorkspace() + directories;
+	const findings=(sandboxStatus.findings||[]).map((finding)=>`<p class="settings-note">${html(finding)}</p>`).join("");
+	return `${operatorFilesWorkspace()}<div class="settings-subhead">Docker Sandbox execution</div><p class="settings-note">${html(sandboxStatus.reason||"capability unavailable")}</p>${findings}<div class="settings-subhead">Known directories · right switch selects the execution target</div>${directories}`;
 }
 
 function operatorFilesWorkspace() {
@@ -769,6 +773,15 @@ async function click(event) {
 	try{await api("/api/operator-files",{action:"empty_attachments",confirm:true});await refreshOperatorFileState()}
 	catch(error){errors.set("workspace",error.message);render()}
 	return;
+  }
+  if (action === "sandbox-workspace-toggle") {
+	const workspaces={...currentValue("sandbox.workspaces",store.config.sandbox?.workspaces||{})};
+	workspaces[id]=workspaces[id]!==true;
+	drafts.set("sandbox.workspaces",workspaces);
+	draftKinds.set("sandbox.workspaces","object");
+	settingsSaveMessage="Unsaved changes";
+	settingsSaveAlarm=false;
+	return render();
   }
   if (action === "adopt-instructions") {
 	const cleanup=sheet.querySelector("#adopt-instruction-cleanup")?.checked===true;

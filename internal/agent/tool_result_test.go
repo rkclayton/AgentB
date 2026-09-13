@@ -60,3 +60,20 @@ func TestProducedFileMetadataTracksOnlyJailedFileTools(t *testing.T) {
 		t.Fatalf("outside path unexpectedly tracked: %#v", metadata)
 	}
 }
+
+func TestSandboxExecutionTargetIsToolResultMetadata(t *testing.T) {
+	workspace := t.TempDir()
+	cfg := config.Defaults(workspace)
+	cfg.Sandbox.Workspaces[workspace] = true
+	s := &session.Session{Workspace: workspace}
+	for _, test := range []struct {
+		name string
+		args map[string]any
+	}{{"shell", map[string]any{"command": "uname -s"}}, {"run_script", map[string]any{"language": "bash", "source": "uname -s"}}} {
+		metadata := sandboxResultMetadata(cfg, s, test.name, test.args)
+		data := toolResultEventData(1, "call", test.name, "target", true, true, false, 1, 1, metadata)
+		if target, ok := data["target"].(string); !ok || !strings.HasPrefix(target, "sandbox agentb-") {
+			t.Fatalf("%s data=%#v", test.name, data)
+		}
+	}
+}

@@ -7,6 +7,7 @@ const script = fs.readFileSync(new URL("app.js", import.meta.url), "utf8");
 const styles = fs.readFileSync(new URL("../css/app.css", import.meta.url), "utf8");
 const shell = fs.readFileSync(new URL("shell.js", import.meta.url), "utf8");
 const settings = fs.readFileSync(new URL("settings.js", import.meta.url), "utf8");
+const timeline = fs.readFileSync(new URL("timeline.js", import.meta.url), "utf8");
 
 test("Console uses the shared shell without retaining a task composer", () => {
   assert.match(index, /id="app-shell"[^>]+data-page="console"/);
@@ -59,6 +60,10 @@ test("Console pins the current approval and shows waiting for you in state colou
 test("Console live state uses the same named stage and tool readout as Chat", () => {
 	assert.match(script, /import \{ liveActivityText \} from "\.\/chat-activity\.js"/);
 	assert.match(script, /liveActivityText\(session\) \|\| session\.run\?\.status \|\| "idle"/);
+});
+
+test("Console tool rows show an execution target carried by tool.result", () => {
+  assert.match(timeline, /result\.target \? `\$\{result\.target\} · `/);
 });
 
 test("Drop last message is relocated beside the latest History turn and Clear is absent", () => {

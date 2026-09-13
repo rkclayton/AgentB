@@ -349,18 +349,20 @@ func (s *Server) snapshotWithSessions(sessions any, replay bool) map[string]any 
 	shellDescription := describedShell.Description()
 	credentialStatus := credential.Status{}
 	identityStatus := tools.ShellIdentityStatus{}
+	sandboxStatus := tools.SandboxStatus{Reason: "sandbox runtime is unavailable"}
 	if s.credential != nil {
 		credentialStatus = s.credential.Status()
 	}
 	if s.shell != nil {
 		identityStatus = s.shell.IdentityStatus()
+		sandboxStatus = s.shell.SandboxStatus()
 	}
 	return map[string]any{
 		"sessions": sessions, "servers": masked.Servers, "config": masked, "replay": replay,
 		"agent_server_changes": s.agentServerChanges(),
 		"build":                buildinfo.Current(),
 		"signature":            s.signingState(),
-		"mutation_token":       s.mutationToken, "shell_credential": credentialStatus, "shell_identity": identityStatus,
+		"mutation_token":       s.mutationToken, "shell_credential": credentialStatus, "shell_identity": identityStatus, "sandbox": sandboxStatus,
 		"serving_facts": servingFacts(filepath.Join(s.roots.Application, "SERVING.md")),
 		"flow":          map[string]any{"stages": events.Stages, "edges": [][2]string{{"assemble", "call_model"}, {"call_model", "parse"}, {"parse", "dispatch"}, {"dispatch", "execute"}, {"execute", "append"}, {"append", "assemble"}}},
 		"tools": []map[string]string{

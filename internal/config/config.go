@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -30,6 +31,7 @@ type Config struct {
 	Memory        Memory             `json:"memory"`
 	Tools         Tools              `json:"tools"`
 	Shell         Shell              `json:"shell"`
+	Sandbox       Sandbox            `json:"sandbox"`
 	Deliver       Deliver            `json:"deliver"`
 	OperatorFiles OperatorFiles      `json:"operator_files"`
 	Signing       Signing            `json:"signing"`
@@ -348,6 +350,21 @@ type ShellServiceAccount struct {
 	Domain  string `json:"domain"`
 }
 
+type Sandbox struct {
+	Workspaces map[string]bool `json:"workspaces"`
+}
+
+func (c Config) SandboxForWorkspace(workspace string) (string, bool) {
+	wanted := filepath.Clean(workspace)
+	for configured, enabled := range c.Sandbox.Workspaces {
+		if enabled && strings.EqualFold(filepath.Clean(configured), wanted) {
+			digest := sha256.Sum256([]byte(strings.ToLower(wanted)))
+			return fmt.Sprintf("agentb-%x", digest[:6]), true
+		}
+	}
+	return "", false
+}
+
 type Signing struct {
 	Thumbprint   string `json:"thumbprint"`
 	TimestampURL string `json:"timestamp_url"`
@@ -365,6 +382,7 @@ func Defaults(workspace string) Config {
 		Listen:        "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
 		Servers: []Profile{profile}, Agents: []Agent{{Name: profile.Label, B: "local", Toolset: FullToolset()}}, Chat: defaultChat(),
 		Services: map[string]Service{},
+		Sandbox:  Sandbox{Workspaces: map[string]bool{}},
 		Run:      RunConfig{MaxTurns: DefaultMaxTurns, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(), OperatorFiles: OperatorFiles{LogRetentionDays: 30},
 		Tools:   Tools{ReadFile: ReadFileTool{DefaultLimit: 16 << 10, MaxLimit: 64 << 10}, Attachments: AttachmentTool{MaxBytes: 8 << 20}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Shell: ShellTool{OperatorCommands: []string{"git"}}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, DenyDomains: []string{"ipinfo.io", "ipapi.co", "ip-api.com", "ifconfig.me", "ipify.org", "geojs.io", "ipgeolocation.io", "icanhazip.com"}, AllowInternalHosts: []string{}}, FindFiles: FindFilesTool{SkipRoots: []string{"Windows", "$Recycle.Bin", "System Volume Information", `ProgramData\Microsoft\Windows Defender*`, `Program Files\Windows Defender*`}}},
 		Shell:   Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextIdleTimeoutMinutes: 20, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
@@ -558,6 +576,11 @@ func (c Config) Validate() error {
 	}
 	if c.Workspace == "" {
 		return fmt.Errorf("workspace: required")
+	}
+	for workspace, enabled := range c.Sandbox.Workspaces {
+		if enabled && !filepath.IsAbs(workspace) {
+			return fmt.Errorf("sandbox.workspaces: %q must be an absolute path", workspace)
+		}
 	}
 	seen := map[string]bool{}
 	for i, p := range c.Servers {
@@ -837,6 +860,9 @@ func applyDefaults(c *Config) {
 	}
 	if c.Services == nil {
 		c.Services = map[string]Service{}
+	}
+	if c.Sandbox.Workspaces == nil {
+		c.Sandbox.Workspaces = map[string]bool{}
 	}
 	if len(c.Servers) == 0 {
 		c.Agents = []Agent{}
