@@ -221,6 +221,17 @@ const clickText = async (selector, text) => {
   await page.locator(selector).filter({ hasText: exact }).click();
   return true;
 };
+const clickPendingApproval = async (text, expectedCallID, previousCard = null) => {
+  if (previousCard) await page.waitForFunction((element) => !element.isConnected, previousCard);
+  const card = page.locator("#chat-pending-approval .approval-card");
+  await card.waitFor({ state: "visible" });
+  const handle = await card.elementHandle();
+  const requestPromise = page.waitForRequest((request) => request.url().endsWith("/api/approve") && request.method() === "POST");
+  await card.locator("button").filter({ hasText: new RegExp(`^${text}$`) }).click();
+  const body = JSON.parse((await requestPromise).postData() || "{}");
+  assert.equal(body.call_id, expectedCallID, `approval card submitted ${body.call_id} instead of ${expectedCallID}`);
+  return handle;
+};
 const state = () => json(`http://127.0.0.1:${appPort}/api/state`);
 const sessionEvents = async (sessionID) => {
   const files = (await readdir(join(args.data, "logs"))).filter((name) => name.endsWith(".jsonl"));
@@ -1157,11 +1168,11 @@ if (realModel) {
   const beforeRunScriptGrant = events.at(-1)?.seq || 0;
   await setTask("acceptance: run-script grant");
   const scriptApproval = await waitEvent(scriptSessionID, (event) => event.seq > beforeRunScriptGrant && event.type === "approval.required" && event.data?.name === "run_script", "first run_script approval");
-  await page.locator("#chat-pending-approval button").filter({ hasText: /^Yes, for this chat$/ }).click();
+  const scriptApprovalCard = await clickPendingApproval("Yes, for this chat", scriptApproval.data.call_id);
   const firstScriptOverride = await waitEvent(scriptSessionID, (event) => event.seq > scriptApproval.seq && event.type === "approval.required" && event.data?.name === "run_script.operator_override", "first run_script identity override");
-  await page.locator("#chat-pending-approval button").filter({ hasText: /^Just once$/ }).click();
+  const firstOverrideCard = await clickPendingApproval("Just once", firstScriptOverride.data.call_id, scriptApprovalCard);
   const secondScriptOverride = await waitEvent(scriptSessionID, (event) => event.seq > firstScriptOverride.seq && event.type === "approval.required" && event.data?.name === "run_script.operator_override", "second run_script identity override");
-  await page.locator("#chat-pending-approval button").filter({ hasText: /^Just once$/ }).click();
+  await clickPendingApproval("Just once", secondScriptOverride.data.call_id, firstOverrideCard);
   await waitProjectedChatText(scriptSessionID, "RUN SCRIPT SESSION GRANT COMPLETE", "two run_script calls under one chat grant");
   await waitEvent(scriptSessionID, (event) => event.seq > secondScriptOverride.seq && event.type === "run.stopped" && event.data?.reason === "done", "run_script grant scenario stopped");
   events = await sessionEvents(scriptSessionID);
