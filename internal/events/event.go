@@ -34,6 +34,7 @@ const (
 	SigningApplied        = "signing.applied"
 	OperatorContext       = "operator.context"
 	Error                 = "error"
+	UIError               = "ui.error"
 	RunQueued             = "run.queued"
 	RunStarted            = "run.started"
 	RunStopping           = "run.stopping"

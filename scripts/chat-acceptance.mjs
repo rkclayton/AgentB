@@ -736,9 +736,9 @@ if (realModel) {
   assert.doesNotMatch(throwingFixture.text, /No agent connected/);
   assert.equal(throwingFixture.responseAlarm, false);
   assert.equal(throwingFixture.failureAlarm, false);
-  await waitEvent(sessionID, (event) => event.type === "error" && event.seq > beforeRenderFailure && event.data?.where === "ui" && event.data?.capped === true, "capped UI render failure", 6000);
+  await waitEvent(sessionID, (event) => event.type === "ui.error" && event.seq > beforeRenderFailure && event.data?.capped === true, "capped UI render failure", 6000);
   events = await sessionEvents(sessionID);
-  const relayedRenderFailures = events.filter((event) => event.type === "error" && event.seq > beforeRenderFailure && event.data?.where === "ui" && event.data?.message?.includes("tool shell deliberate render failure"));
+  const relayedRenderFailures = events.filter((event) => event.type === "ui.error" && event.seq > beforeRenderFailure && event.data?.message?.includes("tool shell deliberate render failure"));
   assert.equal(relayedRenderFailures.length, 2, JSON.stringify(relayedRenderFailures.map((event) => event.data)));
   assert.deepEqual(relayedRenderFailures.map((event) => [event.data.repeat_count, event.data.capped]), [[1, false], [25, true]]);
   record("render-failure-empty-state-and-bounded-relay-2");
@@ -1045,8 +1045,12 @@ if (realModel) {
 	events = await sessionEvents(sessionID);
 	const beforeUIError = events.at(-1)?.seq || 0;
 	await browser.evaluate(`(() => { console.error('acceptance UI relay'); return true; })()`);
-	await waitEvent(sessionID, (event) => event.type === "error" && event.seq > beforeUIError && event.data?.where === "ui" && event.data?.message?.includes("acceptance UI relay"), "UI error relay");
-	record("ui-error-relay-session-jsonl");
+	await browser.evaluate(`(() => { setTimeout(() => { throw new Error('acceptance unhandled exception'); }, 0); return true; })()`);
+	await browser.evaluate(`(() => { Promise.reject(new Error('acceptance unhandled rejection')); return true; })()`);
+	for (const [kind, message] of [["console.error", "acceptance UI relay"], ["unhandled exception", "acceptance unhandled exception"], ["unhandled rejection", "acceptance unhandled rejection"]]) {
+		await waitEvent(sessionID, (event) => event.type === "ui.error" && event.seq > beforeUIError && event.data?.kind === kind && event.data?.message?.includes(message) && event.data?.location?.includes(`/chat?session=${sessionID}`), `UI error relay: ${kind}`);
+	}
+	record("ui-error-relay-three-sources-session-location-jsonl");
 
   await setTask("acceptance: stop");
   await browser.wait(`!document.querySelector('#chat-stop').disabled`, "stop enabled");

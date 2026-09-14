@@ -13,7 +13,7 @@ export function installUIErrorRelay(context = {}) {
 			fetch("/api/ui-errors", {
 				method: "POST",
 				headers: { "Content-Type": "application/json", "X-AgentB-Mutation-Token": token },
-				body: JSON.stringify({ session_id: context.sessionID?.() || "", kind, message, stack, repeat_count: repeatCount, capped }),
+				body: JSON.stringify({ session_id: context.sessionID?.() || "", kind, message, stack, location: window.location.href, repeat_count: repeatCount, capped }),
 				keepalive: true,
 			}).catch(() => {});
 		} catch {}

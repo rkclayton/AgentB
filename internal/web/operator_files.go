@@ -126,6 +126,7 @@ func (s *Server) uiError(w http.ResponseWriter, r *http.Request) {
 		Kind        string `json:"kind"`
 		Message     string `json:"message"`
 		Stack       string `json:"stack"`
+		Location    string `json:"location"`
 		RepeatCount int    `json:"repeat_count"`
 		Capped      bool   `json:"capped"`
 	}
@@ -138,6 +139,9 @@ func (s *Server) uiError(w http.ResponseWriter, r *http.Request) {
 	if len(body.Stack) > 8192 {
 		body.Stack = body.Stack[:8192]
 	}
+	if len(body.Location) > 4096 {
+		body.Location = body.Location[:4096]
+	}
 	if body.SessionID != "" && s.registry != nil {
 		if _, ok := s.registry.Get(body.SessionID); !ok {
 			body.SessionID = ""
@@ -146,6 +150,6 @@ func (s *Server) uiError(w http.ResponseWriter, r *http.Request) {
 	if body.RepeatCount < 1 {
 		body.RepeatCount = 1
 	}
-	s.bus.Publish(events.New(events.Error, body.SessionID, "", map[string]any{"where": "ui", "kind": body.Kind, "message": body.Message, "stack": body.Stack, "repeat_count": body.RepeatCount, "capped": body.Capped}))
+	s.bus.Publish(events.New(events.UIError, body.SessionID, "", map[string]any{"kind": body.Kind, "message": body.Message, "stack": body.Stack, "location": body.Location, "repeat_count": body.RepeatCount, "capped": body.Capped}))
 	w.WriteHeader(http.StatusNoContent)
 }

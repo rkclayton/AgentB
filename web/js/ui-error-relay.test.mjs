@@ -21,7 +21,7 @@ test("an identical repeating error emits one event and one capped summary", asyn
 	const previousWindow = globalThis.window;
 	const previousFetch = globalThis.fetch;
 	const previousError = console.error;
-	globalThis.window = { addEventListener() {} };
+	globalThis.window = { addEventListener() {}, location: { href: "http://127.0.0.1/chat?session=main" } };
 	globalThis.fetch = async (_url, options) => { requests.push(JSON.parse(options.body)); return { ok: true }; };
 	console.error = () => {};
 	try {
