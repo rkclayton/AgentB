@@ -106,3 +106,19 @@ func TestFitWindowResultLeavesFittingAndNonWindowResultsUnchanged(t *testing.T) 
 		}
 	}
 }
+
+func TestFitWindowResultRefusesOversizedReadBatchWithBatchGuidance(t *testing.T) {
+	cfg := config.Defaults(t.TempDir())
+	runner := &Runner{cfg: func() config.Config { return cfg }}
+	profile := &cfg.Servers[0]
+	content, ok, metadata, tokens := runner.fitWindowResult(context.Background(), &session.Session{}, profile, "read_file", map[string]any{
+		"path": "large.txt",
+		"windows": []any{map[string]any{"offset": float64(1), "limit": float64(65536)}},
+	}, strings.Repeat("x", 65536), true, nil, 32000, 1000, false)
+	if ok || tokens < 1 || !strings.Contains(content, "fewer or smaller windows") || strings.Contains(content, "same offset=") {
+		t.Fatalf("content=%q ok=%t tokens=%d", content, ok, tokens)
+	}
+	if metadata["result_too_large"] != true || metadata["retry_windows"] != "fewer_or_smaller" {
+		t.Fatalf("metadata=%#v", metadata)
+	}
+}

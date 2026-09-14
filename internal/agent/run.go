@@ -901,21 +901,13 @@ func (r *Runner) withoutToolSystems(p *config.Profile, s *session.Session, enabl
 func (r *Runner) compactAfterTurn(ctx context.Context, s *session.Session, runID string, turn int, p *config.Profile, current map[string]bool) {
 	cfg := r.cfg()
 	readDefaultLimit := min(cfg.Tools.ReadFile.DefaultLimit, cfg.Tools.ReadFile.MaxLimit)
-	changed := false
+	changed := r.compact.Supersede(s, runID, turn, readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
 	budget, err := r.measureSession(ctx, p, s, current, false)
 	if err != nil {
 		r.operationalError(s, runID, "compaction_budget", err)
 		return
 	}
 	if shouldBatchElide(budget.UsedEst, budget.Ceiling, cfg.Context, r.budget.ColdPrefill(s.ID)) {
-		changed = r.compact.Supersede(s, runID, turn, readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
-		if changed {
-			budget, err = r.measureSession(ctx, p, s, current, false)
-			if err != nil {
-				r.operationalError(s, runID, "compaction_budget", err)
-				return
-			}
-		}
 		did, _ := r.compact.ElideOld(s, runID, budget.UsedEst, int(float64(budget.Ceiling)*.60), readDefaultLimit, func(text string) (int, bool) { return r.count(ctx, p, text) })
 		changed = changed || did
 		if did {

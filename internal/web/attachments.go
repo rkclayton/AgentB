@@ -26,11 +26,10 @@ import (
 
 type attachmentResponse struct {
 	events.Attachment
-	Kind    attachmentfile.Kind `json:"kind"`
-	Reused  bool                `json:"reused,omitempty"`
-	Tier    string              `json:"tier,omitempty"`
-	Sidecar string              `json:"sidecar,omitempty"`
-	Note    string              `json:"note,omitempty"`
+	Reused  bool   `json:"reused,omitempty"`
+	Tier    string `json:"tier,omitempty"`
+	Sidecar string `json:"sidecar,omitempty"`
+	Note    string `json:"note,omitempty"`
 }
 
 func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
@@ -105,7 +104,7 @@ func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error(), "file")
 		return
 	}
-	kind := attachmentfile.Classify(name)
+	kind := attachmentfile.ClassifyContent(name, content)
 	if kind == attachmentfile.ZIP {
 		writeError(w, http.StatusBadRequest, "zip attachments are refused; extract and attach individual files", "file")
 		return
@@ -115,12 +114,12 @@ func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "profile not found", "session_id")
 		return
 	}
-	result, resolved, created, err := storeAttachment(item.Workspace, name, content, profile)
+	result, resolved, created, err := storeAttachment(item.Workspace, name, content, profile, kind)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error(), "file")
 		return
 	}
-	result.Kind = kind
+	result.Kind = string(kind)
 	reuseNote := result.Note
 	result.Tier, result.Note, result.Sidecar, err = s.extractAttachment(r.Context(), *profile, resolved, result.Path, kind, maxBytes)
 	if err != nil {
@@ -133,7 +132,7 @@ func (s *Server) attachments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-func storeAttachment(workspace, name string, content []byte, profile *config.Profile) (attachmentResponse, string, bool, error) {
+func storeAttachment(workspace, name string, content []byte, profile *config.Profile, kind attachmentfile.Kind) (attachmentResponse, string, bool, error) {
 	dir, err := tools.Resolve(workspace, "attachments")
 	if err != nil {
 		return attachmentResponse{}, "", false, err
@@ -144,7 +143,6 @@ func storeAttachment(workspace, name string, content []byte, profile *config.Pro
 	sum := sha256.Sum256(content)
 	digest := hex.EncodeToString(sum[:])
 	stem, extension := strings.TrimSuffix(name, filepath.Ext(name)), filepath.Ext(name)
-	kind := attachmentfile.Classify(name)
 	needsSidecar := kind == attachmentfile.Office || (kind == attachmentfile.PDF && !profile.NativeDocumentInput() && profile.ExtractURL != "") || (kind == attachmentfile.Image && !profile.NativeImageInput())
 	for index := 1; ; index++ {
 		candidate := name
@@ -439,7 +437,7 @@ func (s *Server) validateMessageAttachments(sessionID string, values []events.At
 		if info.Size() != value.Bytes || !strings.EqualFold(digest, value.SHA256) {
 			return nil, fmt.Errorf("attachment metadata does not match %s", clean)
 		}
-		result = append(result, events.Attachment{Path: clean, Bytes: info.Size(), SHA256: digest})
+		result = append(result, events.Attachment{Path: clean, Bytes: info.Size(), SHA256: digest, Kind: string(attachmentfile.ClassifyFile(resolved))})
 	}
 	return result, nil
 }

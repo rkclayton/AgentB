@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -31,6 +33,90 @@ func TestFetchExtractsReadableHTMLAndKeepsLinks(t *testing.T) {
 			t.Fatalf("extracted text retained %q: %q", unwanted, page)
 		}
 	}
+}
+
+func TestFetchFeedFixturesHaveExactDeterministicOutput(t *testing.T) {
+	for _, name := range []string{"rss-cdata", "atom"} {
+		data := fetchFixture(t, name+".xml")
+		want := strings.TrimSuffix(string(fetchFixture(t, name+".expected.txt")), "\n")
+		got, dropped, err := extractFeed(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual := fmt.Sprintf("dropped: %d\n%s", dropped, got)
+		if actual != want {
+			t.Fatalf("%s output:\n%s\nwant:\n%s", name, actual, want)
+		}
+	}
+}
+
+func TestFetchMalformedFeedReportsExactParsePosition(t *testing.T) {
+	_, _, err := extractFeed(fetchFixture(t, "malformed.xml"))
+	want := strings.TrimSuffix(string(fetchFixture(t, "malformed.expected.txt")), "\n")
+	if err == nil || err.Error() != want {
+		t.Fatalf("error=%q want=%q", err, want)
+	}
+}
+
+func TestFetchArticleFixturesHaveExactDeterministicOutput(t *testing.T) {
+	base := mustURL(t, "https://example.test/base")
+	for _, name := range []string{"news", "docs", "main", "none"} {
+		got, dropped, fallback, err := extractArticle(fetchFixture(t, name+".html"), base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		actual := fmt.Sprintf("dropped: %d\nfallback: %t\n%s", dropped, fallback, got)
+		want := strings.TrimSuffix(string(fetchFixture(t, name+".expected.txt")), "\n")
+		if actual != want {
+			t.Fatalf("%s output:\n%s\nwant:\n%s", name, actual, want)
+		}
+	}
+}
+
+func TestFetchModesUseSameWindowEnvelopeAndReportDroppedContent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/feed" {
+			w.Header().Set("Content-Type", "application/xml")
+			_, _ = w.Write(fetchFixture(t, "rss-cdata.xml"))
+			return
+		}
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write(fetchFixture(t, "main.html"))
+	}))
+	defer server.Close()
+	for _, test := range []struct {
+		path, mode, want string
+		dropped          int
+	}{
+		{"/feed", "feed", "# Alpha & Beta", 1},
+		{"/article", "article", "Main fixture", 1},
+	} {
+		detail := NewFetch(fetchTestConfig()).CallDetailed(context.Background(), &session.Session{}, map[string]any{"url": server.URL + test.path, "mode": test.mode, "limit": 64 << 10})
+		if detail.Err != nil || !strings.Contains(detail.Content, "extraction_mode: "+test.mode) || !strings.Contains(detail.Content, "> "+test.want) || detail.Metadata["dropped"] != test.dropped {
+			t.Fatalf("%s detail=%+v", test.mode, detail)
+		}
+	}
+}
+
+func TestFetchArticleNoMainFallsBackToDefaultWindowExplicitly(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		_, _ = w.Write(fetchFixture(t, "none.html"))
+	}))
+	defer server.Close()
+	detail := NewFetch(fetchTestConfig()).CallDetailed(context.Background(), &session.Session{}, map[string]any{"url": server.URL, "mode": "article"})
+	if detail.Err != nil || detail.Metadata["extraction_fallback"] != true || !strings.Contains(detail.Content, "no identifiable main content; returned the default byte window") || !strings.Contains(detail.Content, "> Loose heading") {
+		t.Fatalf("fallback detail=%+v", detail)
+	}
+}
+
+func fetchFixture(t *testing.T, name string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "fetch", name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }
 
 func TestFetchSingleLineByteWindowsDoNotRepeat(t *testing.T) {

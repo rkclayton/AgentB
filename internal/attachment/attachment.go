@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 type Kind string
@@ -53,7 +54,7 @@ func SanitizeName(name string) (string, error) {
 
 func Classify(path string) Kind {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".txt", ".text", ".go", ".c", ".h", ".cc", ".cpp", ".cs", ".java", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".rb", ".rs", ".sh", ".ps1", ".json", ".jsonl", ".csv", ".tsv", ".md", ".markdown", ".log", ".yaml", ".yml", ".xml", ".html", ".htm", ".css", ".sql", ".toml", ".ini", ".cfg", ".conf":
+	case ".txt", ".text", ".go", ".c", ".h", ".cc", ".cpp", ".cs", ".java", ".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx", ".py", ".rb", ".rs", ".sh", ".ps1", ".bat", ".cmd", ".vbs", ".json", ".jsonl", ".webmanifest", ".map", ".csv", ".tsv", ".md", ".markdown", ".log", ".yaml", ".yml", ".xml", ".svg", ".html", ".htm", ".css", ".sql", ".toml", ".ini", ".cfg", ".conf", ".rtf", ".ics", ".vcf":
 		return Text
 	case ".docx", ".xlsx", ".pptx":
 		return Office
@@ -66,6 +67,29 @@ func Classify(path string) Kind {
 	default:
 		return Binary
 	}
+}
+
+func ClassifyContent(path string, content []byte) Kind {
+	kind := Classify(path)
+	if kind != Binary {
+		return kind
+	}
+	if utf8.Valid(content) && !bytes.ContainsRune(content, '\x00') {
+		return Text
+	}
+	return Binary
+}
+
+func ClassifyFile(path string) Kind {
+	kind := Classify(path)
+	if kind != Binary {
+		return kind
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return Binary
+	}
+	return ClassifyContent(path, content)
 }
 
 func SidecarPath(path string) string { return path + ".txt" }

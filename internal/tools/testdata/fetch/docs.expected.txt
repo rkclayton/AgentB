@@ -1,0 +1,6 @@
+dropped: 1
+fallback: false
+Install
+Run the verified installer.
+Check
+Read the transcript.

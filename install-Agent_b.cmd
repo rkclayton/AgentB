@@ -63,7 +63,7 @@ if not exist "%AGENT_B_INSTALLED_LAUNCHER%" (
 
 set "AGENT_B_AUTOSTART_BROWSER="
 if defined AGENT_B_INSTALL_NO_BROWSER set "AGENT_B_AUTOSTART_BROWSER=-NoBrowser"
-powershell.exe -NoLogo -NoProfile -Command "$launchArgs=@('-Console','-Detached','-NoPause','-DataDirectory',$env:AGENT_B_INSTALLED_DATA); if($env:AGENT_B_AUTOSTART_BROWSER){$launchArgs += $env:AGENT_B_AUTOSTART_BROWSER}; $output = @(& $env:AGENT_B_INSTALLED_LAUNCHER @launchArgs 2>&1 | ForEach-Object { $_.ToString() }); $code=$LASTEXITCODE; $output | Write-Output; if($output.Count){[IO.File]::AppendAllText($env:AGENT_B_INSTALL_LOG, (($output -join [Environment]::NewLine) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))}; exit $code"
+powershell.exe -NoLogo -NoProfile -Command "$launchArgs=@('-Detached','-NoPause','-DataDirectory',$env:AGENT_B_INSTALLED_DATA); if($env:AGENT_B_AUTOSTART_BROWSER){$launchArgs += $env:AGENT_B_AUTOSTART_BROWSER}; $output = @(& $env:AGENT_B_INSTALLED_LAUNCHER @launchArgs 2>&1 | ForEach-Object { $_.ToString() }); $code=$LASTEXITCODE; $output | Write-Output; if($output.Count){[IO.File]::AppendAllText($env:AGENT_B_INSTALL_LOG, (($output -join [Environment]::NewLine) + [Environment]::NewLine), [Text.UTF8Encoding]::new($false))}; exit $code"
 set "AGENT_B_START_EXIT=%ERRORLEVEL%"
 if not "%AGENT_B_START_EXIT%"=="0" (
   echo Agent_b was installed but failed to start with exit code %AGENT_B_START_EXIT%. Transcript: %AGENT_B_INSTALL_LOG%
@@ -76,7 +76,6 @@ if not "%AGENT_B_START_EXIT%"=="0" (
 echo Agent_b installation is complete and Agent_b started. Transcript: %AGENT_B_INSTALL_LOG%
 set "AGENT_B_INSTALL_RECORD=AUTOSTART COMPLETE: Agent_b started through %AGENT_B_INSTALLED_LAUNCHER%."
 call :append_install_record
-if not defined AGENT_B_INSTALL_NO_PAUSE pause
 exit /b 0
 
 :append_install_record

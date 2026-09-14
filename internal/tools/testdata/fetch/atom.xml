@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+<title>Fixture Atom</title>
+<entry><title>Atom One</title><link rel="self" href="https://example.test/feed"/><link rel="alternate" href="https://example.test/one"/><updated>2026-09-13T12:00:00Z</updated><summary>Atom summary.</summary></entry>
+<entry><title>Atom Two</title><link href="https://example.test/two"/><published>2026-09-12T08:00:00Z</published><content>Fallback content.</content></entry>
+</feed>

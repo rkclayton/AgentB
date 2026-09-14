@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { agentAuthor, chatRowText, closeConfirmText, openSessions, sessionTitle } from "./chat-lifecycle.js";
+import { agentAuthor, chatRowText, openSessions, sessionTitle } from "./chat-lifecycle.js";
 
 const idle = {
   id: "s2",
@@ -36,8 +36,4 @@ test("Assistant labels use only role while the title carries profile and d plan"
   assert.equal(agentAuthor(idle, "c"), "agent_c");
   assert.equal(sessionTitle(idle), "Coder · Home API");
   assert.equal(sessionTitle({ ...idle, role: "d", plan_name: "Release map" }), "Coder · Home API · plan: Release map");
-});
-
-test("Close confirmation counts changed files and memory entries without deleting either", () => {
-  assert.equal(closeConfirmText(idle), "Close “Summarize the attached contract”?\n\nThis session changed 2 files and wrote 1 memory entry. Closing keeps the chat, logs, workspace files, memory, profile, and enabled tools.");
 });

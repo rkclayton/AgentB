@@ -6,7 +6,7 @@ import { renderState } from "./state.js";
 import { renderTimeline } from "./timeline.js";
 import { createMessageDropController } from "./message-drop.js";
 import { createApprovalCard } from "./approval.js";
-import { agentKey, lifetimeRows, ratio } from "./console-lifetime.js";
+import { agentKey, compactionFigures, lifetimeRows, ratio } from "./console-lifetime.js";
 import { renderStopState } from "./stop-state.js";
 import { navigationSurfaceReady } from "./navigation-telemetry.js";
 import { liveActivityText } from "./chat-activity.js";
@@ -27,6 +27,7 @@ const agentServerState = document.getElementById("console-agent-server-state");
 const agentServerCancel = document.getElementById("console-agent-server-cancel");
 const feedback = document.getElementById("console-feedback");
 const consoleStop = document.getElementById("console-stop");
+const consoleLiveCompactions = document.getElementById("console-live-compactions");
 
 const dropControl = createMessageDropController(dropLastMessage, {
   session: () => store.sessions[store.active], interactive: () => !store.replay,
@@ -105,6 +106,8 @@ function renderConsole() {
   liveContent.hidden = !hasSelectedChat;
   liveEmpty.hidden = hasSelectedChat;
   renderStopState(consoleStop, hasSelectedChat ? session : null, store.replay);
+  consoleLiveCompactions.textContent = hasSelectedChat ? compactionFigures(session) : "";
+  consoleLiveCompactions.hidden = !hasSelectedChat;
   document.getElementById("console-live-state").textContent = !hasSelectedChat ? "no open chat" : session.pending_approval ? "waiting for you" : liveActivityText(session) || session.run?.status || "idle";
   if (hasSelectedChat) {
     renderRail(); renderFlow(); renderRack(); renderState(); renderTimeline(); placeDropLastMessage(); dropControl.render(); renderPendingApproval(session);

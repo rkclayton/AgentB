@@ -21,9 +21,11 @@ func New(bus *events.Bus) *Compactor { return &Compactor{bus: bus} }
 func (c *Compactor) Supersede(s *session.Session, runID string, turn, readDefaultLimit int, count Counter) bool {
 	messages := s.MessagesCopy()
 	changed := false
+	affected := []string{}
+	before := tokenSum(messages)
 	for current := range messages {
 		item := messages[current]
-		if item.Role != "tool" || item.Turn != turn || item.Elided || (item.Name != "read_file" && item.Name != "search_text") {
+		if item.Role != "tool" || item.Turn != turn || item.Elided || !successful(item) || (item.Name != "read_file" && item.Name != "search_text") {
 			continue
 		}
 		currentCall, ok := callFor(messages, item.ToolCallID)
@@ -32,7 +34,7 @@ func (c *Compactor) Supersede(s *session.Session, runID string, turn, readDefaul
 		}
 		for prior := 0; prior < current; prior++ {
 			older := messages[prior]
-			if older.Role != "tool" || older.Name != item.Name || older.Elided {
+			if older.Role != "tool" || older.Name != item.Name || older.Elided || !successful(older) {
 				continue
 			}
 			olderCall, ok := callFor(messages, older.ToolCallID)
@@ -41,13 +43,27 @@ func (c *Compactor) Supersede(s *session.Session, runID string, turn, readDefaul
 			}
 			messages[prior] = elide(older, olderCall.Arguments, readDefaultLimit, count)
 			c.updated(s, runID, messages[prior])
+			affected = append(affected, older.ID)
 			changed = true
 		}
 	}
 	if changed {
 		s.ReplaceMessages(messages)
+		after := tokenSum(messages)
+		s.RecordCompaction(after - before)
+		c.bus.Publish(events.New(events.Compaction, s.ID, runID, map[string]any{"kind": "elide", "before": before, "after": after, "affected_ids": affected}))
 	}
 	return changed
+}
+
+func successful(message events.Message) bool { return message.OK != nil && *message.OK }
+
+func eligibleOldElision(message events.Message) bool {
+	if message.OK != nil {
+		return *message.OK
+	}
+	prefix := strings.ToLower(strings.TrimSpace(message.Content))
+	return !strings.HasPrefix(prefix, "error:") && !strings.HasPrefix(prefix, "note:")
 }
 
 func (c *Compactor) ElideOld(s *session.Session, runID string, used, target, readDefaultLimit int, count Counter) (bool, int) {
@@ -68,7 +84,7 @@ func (c *Compactor) ElideOld(s *session.Session, runID string, used, target, rea
 		if used <= target {
 			break
 		}
-		if skip[index] || item.Elided || (item.Category != "files" && item.Category != "results" && item.Category != "fetched") {
+		if skip[index] || item.Elided || !eligibleOldElision(item) || (item.Category != "files" && item.Category != "results" && item.Category != "fetched") {
 			continue
 		}
 		call, _ := callFor(messages, item.ToolCallID)
@@ -146,13 +162,14 @@ func supersedes(name, older, current string, readDefaultLimit int) bool {
 		return canonical(older) == canonical(current)
 	}
 	var a, b struct {
-		Path   string `json:"path"`
-		Offset int    `json:"offset"`
-		Limit  int    `json:"limit"`
-		Line   int    `json:"line"`
-		Lines  int    `json:"lines"`
+		Path    string          `json:"path"`
+		Offset  int             `json:"offset"`
+		Limit   int             `json:"limit"`
+		Line    int             `json:"line"`
+		Lines   int             `json:"lines"`
+		Windows json.RawMessage `json:"windows"`
 	}
-	if json.Unmarshal([]byte(older), &a) != nil || json.Unmarshal([]byte(current), &b) != nil || a.Path != b.Path {
+	if json.Unmarshal([]byte(older), &a) != nil || json.Unmarshal([]byte(current), &b) != nil || a.Path != b.Path || len(a.Windows) > 0 || len(b.Windows) > 0 {
 		return false
 	}
 	if a.Line > 0 || b.Line > 0 {

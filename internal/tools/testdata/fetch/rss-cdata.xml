@@ -1,0 +1,6 @@
+<?xml version="1.0"?>
+<rss version="2.0"><channel><title>Fixture</title>
+<item><title>Alpha &amp; Beta</title><link>https://example.test/alpha</link><pubDate>Sat, 13 Sep 2026 12:00:00 GMT</pubDate><description><![CDATA[First <b>summary</b>.]]></description></item>
+<item><title>Second</title><link>https://example.test/second</link><description>Plain summary.</description></item>
+<item><title> </title><description> </description></item>
+</channel></rss>

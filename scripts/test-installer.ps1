@@ -146,6 +146,12 @@ try {
         $batchLauncherSource -notmatch 'AGENT_B_AUTO_CLOSE') {
         throw 'Installed batch launcher does not hide by default with -Console opt-in, or can still wait indefinitely after a failure.'
     }
+    $installedInstallerSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'scripts\install-Agent_b.ps1')
+    if ($installedInstallerSource -notmatch '\$installedAclScript[^\r\n]+apply-acls\.ps1' -or
+        $installedInstallerSource -notmatch '& \$installedAclScript[^\r\n]+-Verify' -or
+        $installedInstallerSource -notmatch 'PASS: installed root, plans-directory exception, workspace, and exchange-folder ACL policy') {
+        throw 'Installed elevated installer does not self-verify the plans-directory host-policy exception.'
+    }
     $sourceBatchLauncher = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'start-Agent_b.cmd')
     if ($sourceBatchLauncher -notmatch 'AGENTB_HIDDEN_REENTRY' -or
         $sourceBatchLauncher -notmatch '"-Console"' -or
@@ -217,12 +223,21 @@ try {
         throw 'Installed Console still contains the removed task composer.'
     }
 
-    $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $testStart 'Agent_b.lnk'))
-    if (-not $shortcut.TargetPath.Equals((Join-Path $testApplication 'Agent_b.cmd'), [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Shortcut target does not point to Agent_b.cmd.'
+    $shortcutPath = Join-Path $testStart 'Agent_b.lnk'
+    $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+    $expectedWScript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+    if (-not $shortcut.TargetPath.Equals($expectedWScript, [StringComparison]::OrdinalIgnoreCase) -or
+        $shortcut.Arguments -notmatch [regex]::Escape((Join-Path $testApplication 'scripts\launch-hidden.vbs')) -or
+        $shortcut.Arguments -notmatch [regex]::Escape((Join-Path $testApplication 'Agent_b.cmd'))) {
+        throw 'Shortcut does not enter the installed launcher through the hidden host.'
     }
     if (-not $shortcut.IconLocation.StartsWith((Join-Path $testApplication 'web\assets\Agent_b.ico'), [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Shortcut does not use the Agent_b icon.'
+    }
+    $wrapperSource = Get-Content -Raw -LiteralPath $installerWrapper
+    if ($wrapperSource -match [regex]::Escape("`$launchArgs=@('-Console'") -or
+        $wrapperSource -match 'AUTOSTART COMPLETE:[^\r\n]+\r?\ncall :append_install_record\r?\nif not defined AGENT_B_INSTALL_NO_PAUSE pause') {
+        throw 'Installer autostart still opts into a visible console or pauses after a successful launch.'
     }
 
     $registration = Get-ItemProperty -LiteralPath $testRegistry
@@ -281,6 +296,10 @@ try {
     $aclBeforeUpgrade = (Get-Acl -LiteralPath $webDirectory).Sddl
     $staleFile = Join-Path $webDirectory 'stale-upgrade-test.txt'
     Set-Content -LiteralPath $staleFile -Value 'removed by upgrade'
+    $staleShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+    $staleShortcut.TargetPath = 'powershell.exe'
+    $staleShortcut.Arguments = '-NoExit -File C:\stale\launch-Agent_b.ps1'
+    $staleShortcut.Save()
 
     $installedBinary = Join-Path $testApplication 'Agent_b.exe'
     $beforeStdout = Join-Path $testRoot 'running-before-stdout.log'
@@ -337,6 +356,12 @@ try {
         $upgradeTranscript -match 'Next: open Agent_b from Start' -or
         $upgradeTranscript -notmatch [regex]::Escape("Transcript: $upgradeTranscriptPath")) {
         throw 'Running-instance transcript is missing its UTF-8 autostart record/path or retains contradictory closing guidance.'
+    }
+    $repairedShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+    if (-not $repairedShortcut.TargetPath.Equals($expectedWScript, [StringComparison]::OrdinalIgnoreCase) -or
+        $repairedShortcut.Arguments -notmatch [regex]::Escape((Join-Path $testApplication 'Agent_b.cmd')) -or
+        $repairedShortcut.Arguments -match 'stale') {
+        throw 'Upgrade did not repair the deliberately stale Start Menu launch target.'
     }
     $beforeProcess.WaitForExit(15000) | Out-Null
     if (-not $beforeProcess.HasExited) { throw 'The pre-upgrade Agent_b process did not exit.' }

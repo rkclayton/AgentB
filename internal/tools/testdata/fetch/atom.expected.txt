@@ -1,0 +1,10 @@
+dropped: 0
+# Atom One
+link: https://example.test/one
+date: 2026-09-13T12:00:00Z
+summary: Atom summary.
+
+# Atom Two
+link: https://example.test/two
+date: 2026-09-12T08:00:00Z
+summary: Fallback content.

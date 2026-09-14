@@ -1884,6 +1884,7 @@
 .settings-operator-status img { display:block; width:24px; height:24px; }
 .console-live { display:grid; grid-template-rows:32px minmax(0,1fr); }
 .console-live-actions { margin-left:auto; display:flex; align-items:center; gap:8px; }
+#console-live-compactions { flex:0 1 auto; min-width:0; overflow:hidden; color:var(--mute); text-overflow:ellipsis; white-space:nowrap; }
 .console-live-content { min-height:0; display:grid; grid-template-rows:40px minmax(0,1fr); }
 .console-live-content[hidden] { display:none; }
 .console-live > .console-empty { margin:0; }

@@ -40,6 +40,26 @@ func TestAttachmentsCollisionNumericSuffixAndSHA256Dedupe(t *testing.T) {
 	}
 }
 
+func TestSVGAndUnknownUTF8AttachmentsStayTextAcrossMessageValidation(t *testing.T) {
+	server, _ := attachmentTestServer(t, nil)
+	for _, item := range []struct {
+		name string
+		data []byte
+	}{
+		{"agent.svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg"><text>Agent_b</text></svg>`)},
+		{"operator.unknown", []byte("strict UTF-8 text: café\n")},
+	} {
+		uploaded := postAttachment(t, server, item.name, item.data)
+		if uploaded.Kind != "text" || uploaded.Tier != "text" || strings.Contains(uploaded.Note, "binary") {
+			t.Fatalf("%s upload=%+v", item.name, uploaded)
+		}
+		validated, err := server.validateMessageAttachments("main", []events.Attachment{uploaded.Attachment})
+		if err != nil || len(validated) != 1 || validated[0].Kind != "text" {
+			t.Fatalf("%s validated=%+v err=%v", item.name, validated, err)
+		}
+	}
+}
+
 func TestAttachmentsRefusesOversizeAndZIP(t *testing.T) {
 	server, _ := attachmentTestServer(t, func(cfg *config.Config) { cfg.Tools.Attachments.MaxBytes = 4 })
 	for _, item := range []struct {

@@ -51,6 +51,20 @@ func TestAttachmentRequestKeepsStoredTextAndNativeBytesOutOfDiagnosticBody(t *te
 	}
 }
 
+func TestSVGRemainsReadableTextOnTextOnlyAndVisionProfiles(t *testing.T) {
+	message := events.Message{Role: "user", Attachments: []events.Attachment{{Path: "attachments/agent.svg", Bytes: 64, Kind: "text"}}}
+	for _, vision := range []string{config.VisionRejected, config.VisionReadsImages} {
+		profile := config.Defaults(t.TempDir()).Servers[0]
+		profile.Capabilities.ImageInput = vision == config.VisionReadsImages
+		profile.Capabilities.Vision = vision
+		converted := requestMessage(&profile, &session.Session{}, message)
+		text, ok := converted.Content.(string)
+		if !ok || !strings.Contains(text, "read it with read_file") || strings.Contains(text, "binary") {
+			t.Fatalf("vision=%q content=%#v", vision, converted.Content)
+		}
+	}
+}
+
 func TestAttachmentNativeOverrideSendsImageWhenProbeSaysAbsent(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.Mkdir(filepath.Join(workspace, "attachments"), 0o700); err != nil {

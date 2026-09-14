@@ -487,7 +487,12 @@ if ($config.signing -and -not [string]::IsNullOrWhiteSpace([string]$config.signi
 
 if ($Alpha -or ($config.shell.service_account -and [bool]$config.shell.service_account.enabled)) {
 	$aclAccount = if ($config.shell.service_account.account) { [string]$config.shell.service_account.account } else { 'agentb-svc' }
-	& (Join-Path $applicationRoot 'scripts\apply-acls.ps1') -AccountName $aclAccount -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -NoPrompt -Confirm:$false
+	$installedAclScript = Join-Path $applicationRoot 'scripts\apply-acls.ps1'
+	& $installedAclScript -AccountName $aclAccount -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -NoPrompt -Confirm:$false
+	Write-Host 'VERIFY: installed root, plans-directory exception, workspace, and exchange-folder ACL policy'
+	& $installedAclScript -AccountName $aclAccount -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -Verify
+	if ($LASTEXITCODE -ne 0) { throw "Installed ACL policy verification failed with exit code $LASTEXITCODE." }
+	Write-Host 'PASS: installed root, plans-directory exception, workspace, and exchange-folder ACL policy'
 }
 
 $iconPath = Join-Path $applicationRoot 'web\assets\Agent_b.ico'
@@ -496,8 +501,10 @@ $null = New-Item -ItemType Directory -Path $StartMenuDirectory -Force
 $shortcutPath = Join-Path $StartMenuDirectory 'Agent_b.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = Join-Path $applicationRoot 'Agent_b.cmd'
-$shortcut.Arguments = $(if ($Alpha) { '-DataDirectory "' + $dataRoot + '"' } else { '' })
+$shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\wscript.exe'
+$hiddenLauncher = Join-Path $applicationRoot 'scripts\launch-hidden.vbs'
+$batchLauncher = Join-Path $applicationRoot 'Agent_b.cmd'
+$shortcut.Arguments = '//B "' + $hiddenLauncher + '" "' + $batchLauncher + '"' + $(if ($Alpha) { ' "-DataDirectory" "' + $dataRoot + '"' } else { '' })
 $shortcut.WorkingDirectory = $dataRoot
 $shortcut.IconLocation = "$iconPath,0"
 $shortcut.Description = 'Open Agent_b'

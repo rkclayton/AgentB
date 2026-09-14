@@ -2,10 +2,15 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
 
-import { agentKey, lifetimeRows } from "./console-lifetime.js";
+import { agentKey, compactionFigures, lifetimeRows } from "./console-lifetime.js";
 
 test("Console agent selector keys named objects", () => {
   assert.equal(agentKey({ name: "Home Coder" }), "home-coder");
+});
+
+test("Live compaction figures distinguish compactions from summary model calls", () => {
+  assert.equal(compactionFigures({ compaction_count: 7, compaction_model_calls: 3 }), "7 compactions · 3 summaries");
+  assert.equal(compactionFigures(), "0 compactions · 0 summaries");
 });
 
 test("Lifetime rows expose all six per-brief reliability fields", () => {
@@ -17,7 +22,7 @@ test("Lifetime rows expose all six per-brief reliability fields", () => {
 test("Console body exposes selectors tools lifetime instruments and maintenance together", () => {
   const html = fs.readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const script = fs.readFileSync(new URL("app.js", import.meta.url), "utf8");
-  for (const value of ["console-agent", "console-agent-vision", "console-tools", "console-stats", "clear-stats", "flush-memory", "console-live", "console-live-content", "console-maintenance-title"]) assert.match(html, new RegExp(value));
+  for (const value of ["console-agent", "console-agent-vision", "console-tools", "console-stats", "clear-stats", "flush-memory", "console-live", "console-live-compactions", "console-live-content", "console-maintenance-title"]) assert.match(html, new RegExp(value));
   assert.match(script, /vision === "reads images" \? "reads" : "does-not-read"/);
   assert.match(script, /visionFinding \|\| `vision: \$\{vision\}`/);
   assert.doesNotMatch(html + script, /console-closed|renderClosed|deleteChat/);

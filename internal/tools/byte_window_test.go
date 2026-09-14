@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"harness/internal/config"
 	"harness/internal/session"
@@ -114,6 +115,60 @@ func TestReadFileDefaultWindowNumbersLongSource(t *testing.T) {
 	}
 	if !strings.HasPrefix(result, "[byte window: offset=1 bytes=3200 total=3200 more=false start_line=1 start_mid_line=false end_mid_line=false]\n1: source line 001\n") || !strings.HasSuffix(result, "200: source line 200\n") {
 		t.Fatalf("unexpected numbered source window: %q", result)
+	}
+}
+
+func TestReadFileBatchReturnsOrderedLabelledIndependentWindows(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "batch.txt")
+	if err := os.WriteFile(path, []byte("alpha\nbravo\ncharlie\ndelta\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewReadFile(config.ReadFileTool{DefaultLimit: 8, MaxLimit: 64})
+	got, err := tool.Call(context.Background(), &session.Session{Workspace: root, LastSeen: map[string]time.Time{}}, map[string]any{
+		"path": path,
+		"windows": []any{
+			map[string]any{"label": "opening", "line": float64(1), "lines": float64(2)},
+			map[string]any{"label": "bad region", "line": float64(99), "lines": float64(1)},
+			map[string]any{"label": "tail", "offset": float64(21), "limit": float64(8)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "[read_file opening]\n[line window: line=1 lines=2 total_lines=4 more=true next_line=3]\n1: alpha\n2: bravo\n\n" +
+		"[read_file bad region error]\nline 99 is past end of file (4 lines)\n\n" +
+		"[read_file tail]\n[byte window: offset=21 bytes=6 total=26 more=false start_line=4 start_mid_line=false end_mid_line=false]\n4: delta\n"
+	if got != want {
+		t.Fatalf("batch=%q\nwant=%q", got, want)
+	}
+}
+
+func TestReadFileBatchRefusesMixedTopLevelWindowWithoutChangingSingleShape(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "batch.txt")
+	if err := os.WriteFile(path, []byte("content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewReadFile(config.ReadFileTool{DefaultLimit: 8, MaxLimit: 64})
+	_, err := tool.Call(context.Background(), &session.Session{Workspace: root, LastSeen: map[string]time.Time{}}, map[string]any{"path": path, "offset": 1, "windows": []any{map[string]any{}}})
+	if err == nil || !strings.Contains(err.Error(), "cannot be combined") {
+		t.Fatalf("mixed batch err=%v", err)
+	}
+}
+
+func TestReadFileBatchTruncatesUnicodeLabelsOnRuneBoundary(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "batch.txt")
+	if err := os.WriteFile(path, []byte("content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tool := NewReadFile(config.ReadFileTool{DefaultLimit: 8, MaxLimit: 64})
+	got, err := tool.Call(context.Background(), &session.Session{Workspace: root, LastSeen: map[string]time.Time{}}, map[string]any{
+		"path": path, "windows": []any{map[string]any{"label": strings.Repeat("é", 81)}},
+	})
+	if err != nil || !utf8.ValidString(got) || !strings.HasPrefix(got, "[read_file "+strings.Repeat("é", 80)+"]") {
+		t.Fatalf("result=%q err=%v", got, err)
 	}
 }
 

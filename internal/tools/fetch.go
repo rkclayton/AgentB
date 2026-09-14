@@ -39,7 +39,7 @@ func NewFetch(cfg config.FetchTool) *Fetch {
 
 func (*Fetch) Name() string { return "fetch_url" }
 func (*Fetch) Description() string {
-	return "Fetch untrusted public HTTP(S) text by byte offset and limit. When more is true, pass returned next_offset as offset to advance. Unlike read_file, it uses the network."
+	return "Fetch untrusted public HTTP(S) text by byte offset and limit. Mode feed deterministically parses RSS/Atom items; mode article selects readable HTML main content and reports removed boilerplate. When more is true, pass returned next_offset as offset to advance. Unlike read_file, it uses the network."
 }
 func (*Fetch) ResultCategory() string { return "fetched" }
 func (*Fetch) ResultUntrusted() bool  { return true }
@@ -52,6 +52,7 @@ func (f *Fetch) Schema() map[string]any {
 			"url":    map[string]any{"type": "string", "description": "HTTP or HTTPS URL"},
 			"offset": map[string]any{"type": "integer", "description": "One-based byte offset", "default": 1},
 			"limit":  map[string]any{"type": "integer", "description": "Maximum bytes to return", "default": min(cfg.DefaultLimit, cfg.MaxLimit), "maximum": cfg.MaxLimit},
+			"mode":   map[string]any{"type": "string", "enum": []string{"feed", "article"}, "description": "Optional deterministic extraction: feed parses RSS/Atom items; article selects readable HTML main content"},
 		},
 		"required": []string{"url"},
 	}
@@ -94,6 +95,13 @@ func (f *Fetch) CallDetailed(ctx context.Context, s *session.Session, args map[s
 	}
 	offset := number(args["offset"], 1)
 	limit := number(args["limit"], cfg.DefaultLimit)
+	mode, _ := args["mode"].(string)
+	mode = strings.ToLower(strings.TrimSpace(mode))
+	if mode != "" && mode != "feed" && mode != "article" {
+		detail.Err = fmt.Errorf("mode must be feed or article")
+		f.audit(rawURL, 0, 0, false, detail.Err)
+		return detail
+	}
 	if offset < 1 {
 		detail.Err = fmt.Errorf("offset must be at least 1")
 		f.audit(rawURL, 0, 0, false, detail.Err)
@@ -158,7 +166,19 @@ func (f *Fetch) CallDetailed(ctx context.Context, s *session.Session, args map[s
 	meta["content_type"] = mediaType
 
 	var readable string
+	dropped := 0
+	fallback := false
 	switch {
+	case mode == "feed":
+		readable, dropped, err = extractFeed(data)
+	case mode == "article" && (mediaType == "text/html" || mediaType == "application/xhtml+xml"):
+		base := target
+		if response.Request != nil && response.Request.URL != nil {
+			base = response.Request.URL
+		}
+		readable, dropped, fallback, err = extractArticle(data, base)
+	case mode == "article":
+		err = fmt.Errorf("article mode requires HTML content, got %s", mediaType)
 	case mediaType == "text/html" || mediaType == "application/xhtml+xml":
 		base := target
 		if response.Request != nil && response.Request.URL != nil {
@@ -185,6 +205,11 @@ func (f *Fetch) CallDetailed(ctx context.Context, s *session.Session, args map[s
 	meta["window_bytes"] = window.Bytes
 	meta["total_bytes"] = window.TotalBytes
 	meta["more"] = window.More
+	if mode != "" {
+		meta["extraction_mode"] = mode
+		meta["dropped"] = dropped
+		meta["extraction_fallback"] = fallback
+	}
 	if window.More {
 		meta["next_offset"] = window.NextOffset
 	}
@@ -192,7 +217,7 @@ func (f *Fetch) CallDetailed(ctx context.Context, s *session.Session, args map[s
 	if finalURL == "" {
 		finalURL = target.String()
 	}
-	detail.Content = untrustedFetchEnvelope(finalURL, status, mediaType, len(data), truncated, window)
+	detail.Content = untrustedFetchEnvelope(finalURL, status, mediaType, len(data), truncated, window, mode, dropped, fallback)
 	f.audit(rawURL, status, len(data), truncated, nil)
 	return detail
 }
@@ -458,7 +483,7 @@ func writeHTMLBreak(out *strings.Builder) {
 	}
 }
 
-func untrustedFetchEnvelope(source string, status int, mediaType string, bytes int, truncated bool, window byteWindow) string {
+func untrustedFetchEnvelope(source string, status int, mediaType string, bytes int, truncated bool, window byteWindow, mode string, dropped int, fallback bool) string {
 	lines := strings.Split(window.Content, "\n")
 	for index := range lines {
 		lines[index] = "> " + lines[index]
@@ -466,6 +491,15 @@ func untrustedFetchEnvelope(source string, status int, mediaType string, bytes i
 	nextOffset := ""
 	if window.More {
 		nextOffset = "next_offset: " + strconv.Itoa(window.NextOffset) + "\n"
+	}
+	extraction := ""
+	if mode != "" {
+		extraction = "extraction_mode: " + mode + "\n" +
+			"dropped: " + strconv.Itoa(dropped) + "\n" +
+			"extraction_fallback: " + strconv.FormatBool(fallback) + "\n"
+		if fallback {
+			extraction += "extraction_note: no identifiable main content; returned the default byte window\n"
+		}
 	}
 	return "[BEGIN UNTRUSTED FETCHED CONTENT]\n" +
 		fetchWarning + "\n" +
@@ -479,6 +513,7 @@ func untrustedFetchEnvelope(source string, status int, mediaType string, bytes i
 		"total_bytes: " + strconv.Itoa(window.TotalBytes) + "\n" +
 		"more: " + strconv.FormatBool(window.More) + "\n" +
 		nextOffset +
+		extraction +
 		strings.Join(lines, "\n") + "\n" +
 		"[END UNTRUSTED FETCHED CONTENT]"
 }

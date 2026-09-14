@@ -85,6 +85,7 @@ test("agent menu is the counted open and closed chat history with glyph controls
   assert.match(shell, /delete-confirm/);
   assert.match(shell, /confirm: true, drop_memory: dropMemory\.checked/);
   assert.doesNotMatch(shell, /window\.confirm\([^)]*Delete/);
+  assert.doesNotMatch(shell, /window\.confirm\([^)]*closeConfirmText|closeConfirmText/);
   assert.match(shell, /revealMenu\(menu, tab\)/);
   assert.match(tokens, /\.shell-menu\{position:fixed/);
   assert.match(tokens, /max-height:calc\(100vh - 50px\);overflow-x:hidden;overflow-y:auto/);

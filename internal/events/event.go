@@ -97,6 +97,7 @@ type Attachment struct {
 	Path    string `json:"path"`
 	Bytes   int64  `json:"bytes"`
 	SHA256  string `json:"sha256"`
+	Kind    string `json:"kind,omitempty"`
 	Outcome string `json:"outcome,omitempty"`
 }
 type Message struct {

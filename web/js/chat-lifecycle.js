@@ -58,24 +58,6 @@ export function chatRowText(session, now = Date.now(), limit = 64) {
   return `${relativeTime(session?.created_at, now)} · ${title} · ${runs} ${runs === 1 ? "run" : "runs"} · ${stateGlyph(session)}`;
 }
 
-export function closeSummary(session) {
-  const files = new Set();
-  let memory = 0;
-  for (const entry of session?.chat || []) {
-    if (entry.type === "tool" && ["write_file", "edit_file"].includes(entry.name) && entry.result?.ok) {
-      const path = entry.result?.path || entry.args?.path;
-      if (path) files.add(String(path).toLowerCase());
-    }
-    if (entry.type === "notice" && entry.event?.type === "memory.noted") memory++;
-  }
-  return { files: files.size, memory };
-}
-
-export function closeConfirmText(session) {
-  const summary = closeSummary(session);
-  return `Close “${firstUserLine(session)}”?\n\nThis session changed ${summary.files} ${summary.files === 1 ? "file" : "files"} and wrote ${summary.memory} memory ${summary.memory === 1 ? "entry" : "entries"}. Closing keeps the chat, logs, workspace files, memory, profile, and enabled tools.`;
-}
-
 export function isRunning(session) {
   return activeStates.has(session?.run?.status);
 }

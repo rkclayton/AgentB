@@ -31,6 +31,15 @@ func (r *Runner) fitWindowResult(
 		return content, ok, metadata, resultTokens
 	}
 	if name == "read_file" && s != nil {
+		if _, batch := args["windows"]; batch {
+			bounded := fmt.Sprintf("error: read_file returned a windows batch too large for the current model context (%d tokens; %d available before the output reserve). Retry read_file with fewer or smaller windows.", resultTokens, availableTokens)
+			boundedMetadata := cloneMetadata(metadata)
+			boundedMetadata["result_too_large"] = true
+			boundedMetadata["original_result_tokens"] = resultTokens
+			boundedMetadata["result_token_limit"] = availableTokens
+			boundedMetadata["retry_windows"] = "fewer_or_smaller"
+			return bounded, false, boundedMetadata, r.textTokens(ctx, profile, bounded)
+		}
 		if clamped, clampedMetadata, clampedTokens, found := r.clampReadFileResult(ctx, s, profile, args, metadata, availableTokens, operatorContext); found {
 			return clamped, true, clampedMetadata, clampedTokens
 		}

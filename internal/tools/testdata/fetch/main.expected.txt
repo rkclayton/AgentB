@@ -1,0 +1,4 @@
+dropped: 1
+fallback: false
+Main fixture
+Main content wins.

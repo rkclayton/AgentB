@@ -1,0 +1,6 @@
+dropped: 2
+fallback: false
+Machines Reach Harbor
+A precise deck.
+The first reported paragraph.
+The second paragraph has details (https://example.test/detail).

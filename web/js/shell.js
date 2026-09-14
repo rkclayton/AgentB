@@ -1,5 +1,5 @@
 import { api, reduce, setSelection, store, subscribe } from "./bus.js";
-import { chatRowText, closeConfirmText, firstUserLine, isRunning, sessionTitle } from "./chat-lifecycle.js";
+import { chatRowText, firstUserLine, isRunning, sessionTitle } from "./chat-lifecycle.js";
 import { installUIErrorRelay } from "./ui-error-relay.js";
 import { requestNavigation } from "./navigation-guard.js";
 import { beginNavigation } from "./navigation-telemetry.js";
@@ -299,7 +299,6 @@ export function initShell(options = {}) {
 
   async function closeChat(session, menu, agentID) {
     if (isRunning(session)) return report("This chat has a running run. Stop it before closing the chat.");
-    if (!window.confirm(closeConfirmText(session))) return;
     try {
       await api(`/api/sessions/${encodeURIComponent(session.id)}`, undefined, "DELETE");
       reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });

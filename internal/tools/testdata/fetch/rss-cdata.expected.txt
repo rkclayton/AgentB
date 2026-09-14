@@ -1,0 +1,10 @@
+dropped: 1
+# Alpha & Beta
+link: https://example.test/alpha
+date: Sat, 13 Sep 2026 12:00:00 GMT
+summary: First summary.
+
+# Second
+link: https://example.test/second
+date:
+summary: Plain summary.

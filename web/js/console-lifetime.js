@@ -13,6 +13,10 @@ export function duration(milliseconds) {
   return `${(ms / 60000).toFixed(1)} min`;
 }
 
+export function compactionFigures(session = {}) {
+  return `${Number(session.compaction_count || 0)} compactions · ${Number(session.compaction_model_calls || 0)} summaries`;
+}
+
 export function lifetimeRows(counters = {}, percentile = () => 0) {
   const reliability = counters.worker_reliability || {};
   const briefs = Number(reliability.briefs || counters.runs || 0);

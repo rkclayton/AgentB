@@ -20,12 +20,13 @@ type ReadFile struct {
 func NewReadFile(cfg config.ReadFileTool) *ReadFile { return &ReadFile{cfg: cfg} }
 func (*ReadFile) Name() string                      { return "read_file" }
 func (*ReadFile) Description() string {
-	return "Read numbered local UTF-8 text. Use byte mode with byte offset/limit, or line mode with one-based line/lines. In byte mode, when more is true, pass returned next_offset as offset to advance; in line mode, pass returned next_line as line. Unlike fetch_url, it reads the filesystem."
+	return "Read numbered local UTF-8 text. Use byte mode with byte offset/limit, line mode with one-based line/lines, or windows for multiple ordered labelled windows on one file. In byte mode, when more is true, pass returned next_offset as offset to advance; in line mode, pass returned next_line as line. Unlike fetch_url, it reads the filesystem."
 }
 func (r *ReadFile) Schema() map[string]any {
 	cfg := r.config()
 	defaultLimit := min(cfg.DefaultLimit, cfg.MaxLimit)
-	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "description": "One-based byte offset; byte mode only", "default": 1}, "limit": map[string]any{"type": "integer", "description": "Maximum bytes to return; byte mode only", "default": defaultLimit, "maximum": cfg.MaxLimit}, "line": map[string]any{"type": "integer", "description": "One-based starting line; line mode only", "minimum": 1}, "lines": map[string]any{"type": "integer", "description": "Maximum lines to return; line mode only", "default": 200, "minimum": 1, "maximum": 2000}}, "required": []string{"path"}}
+	window := map[string]any{"type": "object", "properties": map[string]any{"label": map[string]any{"type": "string", "description": "Short result label"}, "offset": map[string]any{"type": "integer", "description": "One-based byte offset", "default": 1}, "limit": map[string]any{"type": "integer", "description": "Maximum bytes", "default": defaultLimit, "maximum": cfg.MaxLimit}, "line": map[string]any{"type": "integer", "description": "One-based starting line", "minimum": 1}, "lines": map[string]any{"type": "integer", "description": "Maximum lines", "default": 200, "minimum": 1, "maximum": 2000}}}
+	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "offset": map[string]any{"type": "integer", "description": "One-based byte offset; byte mode only", "default": 1}, "limit": map[string]any{"type": "integer", "description": "Maximum bytes to return; byte mode only", "default": defaultLimit, "maximum": cfg.MaxLimit}, "line": map[string]any{"type": "integer", "description": "One-based starting line; line mode only", "minimum": 1}, "lines": map[string]any{"type": "integer", "description": "Maximum lines to return; line mode only", "default": 200, "minimum": 1, "maximum": 2000}, "windows": map[string]any{"type": "array", "description": "Ordered byte or line windows on this file", "items": window, "minItems": 1, "maxItems": 32}}, "required": []string{"path"}}
 }
 func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
 	cfg := r.config()
@@ -52,6 +53,56 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 	if bytes.IndexByte(sample, 0) >= 0 {
 		return "", fmt.Errorf("binary file refused: %s", path)
 	}
+	if rawWindows, batch := args["windows"]; batch {
+		for _, key := range []string{"offset", "limit", "line", "lines"} {
+			if _, mixed := args[key]; mixed {
+				return "", fmt.Errorf("windows cannot be combined with top-level %s", key)
+			}
+		}
+		windows, ok := rawWindows.([]any)
+		if !ok || len(windows) < 1 || len(windows) > 32 {
+			return "", fmt.Errorf("windows must contain between 1 and 32 entries")
+		}
+		results := make([]string, 0, len(windows))
+		succeeded := false
+		for index, rawWindow := range windows {
+			windowArgs, ok := rawWindow.(map[string]any)
+			label := fmt.Sprintf("window %d", index+1)
+			if ok {
+				if value, exists := windowArgs["label"].(string); exists && strings.TrimSpace(value) != "" {
+					label = strings.TrimSpace(strings.ReplaceAll(strings.ReplaceAll(value, "\r", " "), "\n", " "))
+					labelRunes := []rune(label)
+					if len(labelRunes) > 80 {
+						label = string(labelRunes[:80])
+					}
+				}
+			}
+			if !ok {
+				results = append(results, fmt.Sprintf("[read_file %s error]\nwindow must be an object", label))
+				continue
+			}
+			result, windowErr := readFileWindow(string(data), windowArgs, cfg)
+			if windowErr != nil {
+				results = append(results, fmt.Sprintf("[read_file %s error]\n%s", label, windowErr))
+				continue
+			}
+			succeeded = true
+			results = append(results, fmt.Sprintf("[read_file %s]\n%s", label, result))
+		}
+		if succeeded {
+			s.Touch(workspaceRel(root, resolved))
+		}
+		return strings.Join(results, "\n\n"), nil
+	}
+	result, err := readFileWindow(string(data), args, cfg)
+	if err != nil {
+		return "", err
+	}
+	s.Touch(workspaceRel(root, resolved))
+	return result, nil
+}
+
+func readFileWindow(text string, args map[string]any, cfg config.ReadFileTool) (string, error) {
 	if _, lineMode := args["line"]; lineMode {
 		if _, byteOffset := args["offset"]; byteOffset {
 			return "", fmt.Errorf("line mode cannot be combined with byte offset")
@@ -59,11 +110,10 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 		if _, byteLimit := args["limit"]; byteLimit {
 			return "", fmt.Errorf("line mode cannot be combined with byte limit")
 		}
-		result, lineErr := numberedReadFileLines(string(data), number(args["line"], 1), number(args["lines"], 200))
+		result, lineErr := numberedReadFileLines(text, number(args["line"], 1), number(args["lines"], 200))
 		if lineErr != nil {
 			return "", lineErr
 		}
-		s.Touch(workspaceRel(root, resolved))
 		return result, nil
 	}
 	if _, linesOnly := args["lines"]; linesOnly {
@@ -72,13 +122,11 @@ func (r *ReadFile) Call(ctx context.Context, s *session.Session, args map[string
 	offset := number(args["offset"], 1)
 	limit := number(args["limit"], cfg.DefaultLimit)
 	limit = min(limit, cfg.MaxLimit)
-	window, err := windowUTF8(string(data), offset, limit)
+	window, err := windowUTF8(text, offset, limit)
 	if err != nil {
 		return "", err
 	}
-	result := numberedReadFileWindow(string(data), window)
-	s.Touch(workspaceRel(root, resolved))
-	return result, nil
+	return numberedReadFileWindow(text, window), nil
 }
 
 func numberedReadFileLines(text string, line, count int) (string, error) {
