@@ -285,7 +285,8 @@ func (s *Server) hardeningRequest(serverID string) (hardening.Request, error) {
 	return hardening.Request{
 		AccountName: cfg.Shell.ServiceAccount.Account, ApplicationDirectory: s.roots.Application,
 		DataDirectory: s.roots.Data, WorkspaceDirectory: s.roots.Workspace, ExchangeDirectory: exchange,
-		ModelAddress: host, ModelPort: port,
+		ModelAddress: host, ModelPort: port, AllowLocalNetwork: cfg.Shell.AllowLocalNetwork,
+		LocalSubnets: append([]string(nil), cfg.Shell.ConfirmedLocalSubnets...),
 	}, nil
 }
 

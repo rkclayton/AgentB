@@ -342,6 +342,13 @@ async function click(event) {
     catch (error) { errors.set("shell", error.message); render(); }
     return;
   }
+	if (action === "local-network-toggle") {
+		const enabled = button.getAttribute("aria-checked") !== "true";
+		button.setAttribute("aria-checked", String(enabled));
+		button.classList.toggle("on", enabled);
+		for (const input of sheet.querySelectorAll("[data-local-subnet]")) input.disabled = !enabled;
+		return;
+	}
   if (action === "open-setup") { location.href = "/setup?from=settings"; return; }
   if (action === "config-toggle" || action === "config-choice") {
     const path = button.dataset.path;
@@ -518,8 +525,17 @@ async function hardeningAction(action) {
 			: "Windows elevation requested. Respond if a UAC prompt appears.";
 	render();
 	try {
-		const result = await api("/api/hardening", { action, server_id: serverID });
+		const lanSwitch = sheet.querySelector('[data-action="local-network-toggle"]');
+		const allowLocalNetwork = action === "apply" ? lanSwitch?.getAttribute("aria-checked") === "true" : !!store.config.shell?.allow_local_network;
+		const localSubnets = action === "apply" && allowLocalNetwork
+			? [...sheet.querySelectorAll("[data-local-subnet]:checked")].map((input) => input.value)
+			: store.config.shell?.confirmed_local_subnets || [];
+		const result = await api("/api/hardening", { action, server_id: serverID, allow_local_network: allowLocalNetwork, local_subnets: localSubnets });
 		hardeningStatus = { ...(result.status || hardeningStatus), loaded: true };
+		if (action === "apply" && result.ok !== false) {
+			store.config.shell.allow_local_network = allowLocalNetwork;
+			store.config.shell.confirmed_local_subnets = allowLocalNetwork ? localSubnets : [];
+		}
 		if (result.operation) hardeningStatus.operation = result.operation;
 		hardeningMessage = result.operation?.message || result.message;
 		hardeningAlarm = result.ok === false || result.operation?.state === "failed" || (action === "apply" && !hardeningStatus.applied);

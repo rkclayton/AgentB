@@ -125,7 +125,7 @@ func (r *Registry) Restore(saved Snapshot) (*Session, error) {
 	}
 	s := &Session{
 		ID: saved.ID, Label: saved.Label, AgentID: saved.AgentID, ServerID: saved.ServerID,
-		AgentName: saved.AgentName, BProfile: saved.BProfile, Role: role, PlanID: planID, PlanName: saved.PlanName, PlanDir: planDir, PlanRepo: planRepo, PlansRoot: r.plansRoot, PromptAddendum: agent.PromptAddendum,
+		AgentName: saved.AgentName, BProfile: saved.BProfile, Role: role, PlanID: planID, PlanName: saved.PlanName, PlanDir: planDir, PlanRepo: planRepo, PlansRoot: r.plansRoot, PromptAddendum: agent.PromptAddendum, NetworkBoundary: saved.NetworkBoundary,
 		Workspace: firstNonempty(saved.WorkspaceDir, saved.Workspace), WorkspaceMissing: saved.WorkspaceMissing, Scratch: saved.Scratch,
 		ProjectBlock: saved.ProjectContent, ProjectFiles: append([]string(nil), saved.ProjectFiles...), ProjectNotes: append([]string(nil), saved.ProjectNotes...),
 		PendingRepoPolicy: clonePolicyState(saved.PendingRepoPolicy), RepoPolicy: clonePolicyState(saved.RepoPolicy),
@@ -136,6 +136,9 @@ func (r *Registry) Restore(saved Snapshot) (*Session, error) {
 		SchemaTokens: schemaTokens, MarginalTokens: marginalTokens, queuedMessages: saved.QueuedMessages,
 		modelTurns: saved.ModelTurns, compactionCount: saved.CompactionCount, compactionTokenDelta: saved.CompactionTokenDelta,
 		compactionModelCalls: saved.CompactionModelCalls, compactionPrompt: saved.CompactionPrompt, compactionCompletion: saved.CompactionCompletion,
+	}
+	if s.NetworkBoundary == "" {
+		s.NetworkBoundary = NetworkBoundary(r.config())
 	}
 	if r.workspaces != nil && !s.WorkspaceMissing {
 		s.ProjectTouch = r.projectTouch(s)
@@ -328,7 +331,8 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 			return nil, err
 		}
 	}
-	session := &Session{ID: id, Label: label, AgentID: agentID, ServerID: profileID, AgentName: agent.Name, BProfile: profile.Label, Role: role, PlanID: planID, PlanName: planName, PlanDir: planDir, PlanRepo: selectedRepo, PlansRoot: r.plansRoot, PromptAddendum: agent.PromptAddendum, Workspace: abs, WorkspaceMissing: setup.Missing, Scratch: scratch, ProjectBlock: setup.Instructions.Block, ProjectFiles: setup.Instructions.Files, ProjectNotes: setup.Instructions.Notes, PendingRepoPolicy: pendingPolicy, RepoPolicy: activePolicy, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, AgentMemoryBlock: agentMemoryBlock, AgentMemoryPath: agentMemoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	settings := r.config()
+	session := &Session{ID: id, Label: label, AgentID: agentID, ServerID: profileID, AgentName: agent.Name, BProfile: profile.Label, Role: role, PlanID: planID, PlanName: planName, PlanDir: planDir, PlanRepo: selectedRepo, PlansRoot: r.plansRoot, PromptAddendum: agent.PromptAddendum, NetworkBoundary: NetworkBoundary(settings), Workspace: abs, WorkspaceMissing: setup.Missing, Scratch: scratch, ProjectBlock: setup.Instructions.Block, ProjectFiles: setup.Instructions.Files, ProjectNotes: setup.Instructions.Notes, PendingRepoPolicy: pendingPolicy, RepoPolicy: activePolicy, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, AgentMemoryBlock: agentMemoryBlock, AgentMemoryPath: agentMemoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
 	if r.workspaces != nil && !setup.Missing {
 		session.ProjectTouch = r.projectTouch(session)
 	}
@@ -341,6 +345,17 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 		r.bus.Publish(events.New(events.ProjectInstructions, id, "", map[string]any{"block": setup.Instructions.Block, "files": setup.Instructions.Files, "notes": setup.Instructions.Notes, "lazy": false}))
 	}
 	return session, nil
+}
+
+func NetworkBoundary(settings config.Config) string {
+	reachable := "loopback and Tailscale (100.64.0.0/10)"
+	fetch := "public addresses and exact tools.fetch.allow_internal_hosts entries"
+	if settings.Shell.AllowLocalNetwork && len(settings.Shell.ConfirmedLocalSubnets) > 0 {
+		subnets := strings.Join(settings.Shell.ConfirmedLocalSubnets, ", ")
+		reachable += ", plus the operator-confirmed LAN subnets " + subnets
+		fetch += ", plus the operator-confirmed LAN subnets " + subnets
+	}
+	return "Network boundary: service-context shell may reach " + reachable + "; fetch_url may reach " + fetch + " and always refuses link-local, cloud metadata, and this Agent_b listener; when another target is needed, offer Run as you for operator approval under the operator's non-elevated identity."
 }
 
 func hasAgentFile(dir string) bool {

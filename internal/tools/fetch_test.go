@@ -318,6 +318,37 @@ func TestFetchSSRFGuardAndSpecificInternalException(t *testing.T) {
 	}
 }
 
+func TestFetchLANPolicyKeepsPermanentRefusals(t *testing.T) {
+	cfg := config.Defaults(t.TempDir())
+	cfg.Shell.AllowLocalNetwork = true
+	cfg.Shell.ConfirmedLocalSubnets = []string{"192.168.50.0/24"}
+	fetch := NewFetch(cfg.Tools.Fetch)
+	fetch.Configure(cfg)
+	prefixes := fetch.localNetworkPrefixes()
+	if err := validateFetchTarget(mustURL(t, "http://192.168.50.10/"), cfg.Tools.Fetch, prefixes); err != nil {
+		t.Fatalf("confirmed LAN refused: %v", err)
+	}
+	for _, raw := range []string{"http://127.0.0.1:8790/", "http://169.254.1.1/", "http://169.254.169.254/"} {
+		var err error
+		if strings.Contains(raw, ":8790") {
+			cfg.Listen = "127.0.0.1:8790"
+			fetch.Configure(cfg)
+			err = fetch.validateTarget(mustURL(t, raw), cfg.Tools.Fetch)
+		} else {
+			err = validateFetchTarget(mustURL(t, raw), cfg.Tools.Fetch, prefixes)
+		}
+		if err == nil {
+			t.Fatalf("permanent refusal accepted: %s", raw)
+		}
+	}
+	cfg.Tools.Fetch.AllowInternalHosts = []string{"169.254.1.1", "169.254.169.254"}
+	for _, raw := range []string{"http://169.254.1.1/", "http://169.254.169.254/"} {
+		if err := validateFetchTarget(mustURL(t, raw), cfg.Tools.Fetch, prefixes); err == nil || !strings.Contains(err.Error(), "always refuses") {
+			t.Fatalf("internal-host exception bypassed permanent refusal: %s err=%v", raw, err)
+		}
+	}
+}
+
 func fetchTestConfig() config.FetchTool {
 	return config.FetchTool{TimeoutS: 5, MaxBytes: 1 << 20, MaxRedirects: 3, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, AllowInternalHosts: []string{"127.0.0.1"}}
 }

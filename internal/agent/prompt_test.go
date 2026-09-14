@@ -45,3 +45,14 @@ func TestAgentAddendumAndTwoMemoryLayersHaveStableOrder(t *testing.T) {
 		t.Fatalf("prompt order=%q", value)
 	}
 }
+
+func TestNetworkBoundaryIsSessionStable(t *testing.T) {
+	renderer := &PromptRenderer{text: "{{network_boundary}}\n{{date}}"}
+	item := &session.Session{NetworkBoundary: "Network boundary: exact session policy."}
+	before := renderer.RenderMemoryParts(&config.Profile{}, item, nil, "", "", "")
+	item.NetworkBoundary = "Network boundary: exact session policy."
+	after := renderer.RenderMemoryParts(&config.Profile{}, item, nil, "", "", "")
+	if before != after || !strings.Contains(before, "Network boundary: exact session policy.") {
+		t.Fatalf("session prompt changed: before=%q after=%q", before, after)
+	}
+}

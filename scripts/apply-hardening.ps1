@@ -16,12 +16,15 @@ param(
     [string]$ModelAddress,
     [ValidateRange(1, 65535)]
 	[int]$ModelPort,
+	[switch]$AllowLocalNetwork,
+	[string[]]$LocalSubnet = @(),
 	# Internal result channel used by the non-elevated web process. The elevated
 	# process cannot return its PowerShell streams through Start-Process reliably.
 	[string]$ResultPath
 )
 
 $ErrorActionPreference = 'Stop'
+$LocalSubnet = @(($LocalSubnet -join ',') -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 
 trap {
     $message = $_.Exception.Message
@@ -62,6 +65,8 @@ $aclScript = Join-Path $PSScriptRoot 'apply-acls.ps1'
 $firewallScript = Join-Path $PSScriptRoot 'apply-firewall-rule.ps1'
 $aclArguments = @('-AccountName', $AccountName, '-ApplicationDirectory', $ApplicationDirectory, '-DataDirectory', $DataDirectory, '-WorkspaceDirectory', $WorkspaceDirectory, '-ExchangeDirectory', $ExchangeDirectory, '-NoPrompt')
 $firewallArguments = @('-AccountName', $AccountName, '-ModelAddress', $ModelAddress, '-ModelPort', $ModelPort.ToString(), '-NoPrompt')
+if ($AllowLocalNetwork) { $firewallArguments += '-AllowLocalNetwork' }
+if ($LocalSubnet.Count) { $firewallArguments += @('-LocalSubnet', ($LocalSubnet -join ',')) }
 
 if ($WhatIfPreference) {
     $aclArguments += '-WhatIf'
@@ -91,7 +96,10 @@ if ($Mode -eq 'Remove') {
 
 if ($Mode -eq 'Apply' -and -not $WhatIfPreference) {
     Invoke-HardeningScript -Path $aclScript -Arguments @('-AccountName', $AccountName, '-ApplicationDirectory', $ApplicationDirectory, '-DataDirectory', $DataDirectory, '-WorkspaceDirectory', $WorkspaceDirectory, '-ExchangeDirectory', $ExchangeDirectory, '-Verify')
-    Invoke-HardeningScript -Path $firewallScript -Arguments @('-AccountName', $AccountName, '-ModelAddress', $ModelAddress, '-ModelPort', $ModelPort.ToString(), '-Verify')
+    $firewallVerifyArguments = @('-AccountName', $AccountName, '-ModelAddress', $ModelAddress, '-ModelPort', $ModelPort.ToString(), '-Verify')
+    if ($AllowLocalNetwork) { $firewallVerifyArguments += '-AllowLocalNetwork' }
+    if ($LocalSubnet.Count) { $firewallVerifyArguments += @('-LocalSubnet', ($LocalSubnet -join ',')) }
+    Invoke-HardeningScript -Path $firewallScript -Arguments $firewallVerifyArguments
 }
 
 Write-Host "AGENTB_HARDENING_COMPLETE=$Mode"

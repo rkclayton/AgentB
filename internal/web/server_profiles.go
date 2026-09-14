@@ -234,7 +234,18 @@ func (s *Server) clearProbe(profileID string, current *probeRun) bool {
 
 func failedProbeCapabilities(profile *config.Profile, err error) (config.Capabilities, []string) {
 	caps := profile.Capabilities
-	findings := []string{"probe failed: " + err.Error()}
+	message := err.Error()
+	detail := ""
+	if friendly, ok := err.(interface {
+		OperatorMessage() string
+		Diagnostic() string
+	}); ok {
+		message, detail = friendly.OperatorMessage(), friendly.Diagnostic()
+	}
+	findings := []string{"probe failed: " + message}
+	if detail != "" {
+		findings = append(findings, "probe detail: "+detail)
+	}
 	caps.Findings = findings
 	return caps, findings
 }
@@ -257,6 +268,10 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !s.requireOperatorConfigRequest(w, r, patch) {
+			return
+		}
+		if field := directNetworkPolicyField(patch); field != "" {
+			writeError(w, http.StatusBadRequest, "apply the LAN policy through Settings > Security so Windows policy is verified before configuration is saved", field)
 			return
 		}
 		if s.applyOperatorContextPatch(w, r, patch) {

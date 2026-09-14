@@ -15,6 +15,8 @@ type Request struct {
 	ExchangeDirectory    string
 	ModelAddress         string
 	ModelPort            int
+	AllowLocalNetwork    bool
+	LocalSubnets         []string
 }
 
 type ComponentStatus struct {
@@ -26,13 +28,16 @@ type ComponentStatus struct {
 }
 
 type Status struct {
-	Supported       bool            `json:"supported"`
-	HarnessElevated bool            `json:"harness_elevated"`
-	ModelAddress    string          `json:"model_address"`
-	ModelPort       int             `json:"model_port"`
-	ACL             ComponentStatus `json:"acl"`
-	Firewall        ComponentStatus `json:"firewall"`
-	Applied         bool            `json:"applied"`
+	Supported             bool            `json:"supported"`
+	HarnessElevated       bool            `json:"harness_elevated"`
+	ModelAddress          string          `json:"model_address"`
+	ModelPort             int             `json:"model_port"`
+	ACL                   ComponentStatus `json:"acl"`
+	Firewall              ComponentStatus `json:"firewall"`
+	Applied               bool            `json:"applied"`
+	AllowLocalNetwork     bool            `json:"allow_local_network"`
+	ConfirmedLocalSubnets []string        `json:"confirmed_local_subnets"`
+	DetectedLocalSubnets  []string        `json:"detected_local_subnets,omitempty"`
 }
 
 type RunResult struct {

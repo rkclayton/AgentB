@@ -65,6 +65,7 @@ type Snapshot struct {
 	AgentMemoryPath      string                     `json:"agent_memory_path"`
 	AgentMemoryContent   string                     `json:"agent_memory_content"`
 	PromptAddendum       string                     `json:"-"`
+	NetworkBoundary      string                     `json:"network_boundary"`
 	LogPath              string                     `json:"log_path"`
 	ModelTurns           int                        `json:"model_turns"`
 	CompactionCount      int                        `json:"compaction_count"`
@@ -103,6 +104,7 @@ type Session struct {
 	AgentMemoryBlock                                     string
 	AgentMemoryPath                                      string
 	PromptAddendum                                       string
+	NetworkBoundary                                      string
 	SchemaTokens                                         map[string]int
 	MarginalTokens                                       map[string]int
 	queuedMessages                                       int
@@ -131,7 +133,7 @@ func (s *Session) SnapshotUnlocked() Snapshot {
 			tools = append(tools, ToolState{Name: name, Enabled: enabled, Calls: s.ToolCalls[name], SchemaTokens: s.SchemaTokens[name], MarginalTokens: s.MarginalTokens[name]})
 		}
 	}
-	return Snapshot{ID: s.ID, Label: s.Label, AgentID: s.AgentID, ServerID: s.ServerID, AgentName: s.AgentName, BProfile: s.BProfile, Role: s.Role, PlanID: s.PlanID, PlanName: s.PlanName, PlanDir: s.PlanDir, PlanRepo: s.PlanRepo, CreatedAt: s.CreatedAt.Format(time.RFC3339Nano), Closed: s.Closed, NamePinned: s.NamePinned, Workspace: s.Workspace, WorkspaceDir: s.Workspace, WorkspaceMissing: s.WorkspaceMissing, Scratch: s.Scratch, ProjectContent: s.ProjectBlock, ProjectFiles: append([]string(nil), s.ProjectFiles...), ProjectNotes: append([]string(nil), s.ProjectNotes...), PendingRepoPolicy: clonePolicyState(s.PendingRepoPolicy), RepoPolicy: clonePolicyState(s.RepoPolicy), Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, AgentMemoryPath: s.AgentMemoryPath, AgentMemoryContent: s.AgentMemoryBlock, PromptAddendum: s.PromptAddendum, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
+	return Snapshot{ID: s.ID, Label: s.Label, AgentID: s.AgentID, ServerID: s.ServerID, AgentName: s.AgentName, BProfile: s.BProfile, Role: s.Role, PlanID: s.PlanID, PlanName: s.PlanName, PlanDir: s.PlanDir, PlanRepo: s.PlanRepo, CreatedAt: s.CreatedAt.Format(time.RFC3339Nano), Closed: s.Closed, NamePinned: s.NamePinned, Workspace: s.Workspace, WorkspaceDir: s.Workspace, WorkspaceMissing: s.WorkspaceMissing, Scratch: s.Scratch, ProjectContent: s.ProjectBlock, ProjectFiles: append([]string(nil), s.ProjectFiles...), ProjectNotes: append([]string(nil), s.ProjectNotes...), PendingRepoPolicy: clonePolicyState(s.PendingRepoPolicy), RepoPolicy: clonePolicyState(s.RepoPolicy), Run: s.Run, Tools: tools, Messages: append([]events.Message{}, s.Messages...), Budget: s.Budget, QueuedMessages: s.queuedMessages, Runnable: s.Runnable, NotRunnableReason: s.NotRunnableReason, MemoryPath: s.MemoryPath, MemoryContent: s.MemoryBlock, AgentMemoryPath: s.AgentMemoryPath, AgentMemoryContent: s.AgentMemoryBlock, PromptAddendum: s.PromptAddendum, NetworkBoundary: s.NetworkBoundary, LogPath: s.LogPath, ModelTurns: s.modelTurns, CompactionCount: s.compactionCount, CompactionTokenDelta: s.compactionTokenDelta, CompactionModelCalls: s.compactionModelCalls, CompactionPrompt: s.compactionPrompt, CompactionCompletion: s.compactionCompletion}
 }
 
 func (s *Session) ReadRoot(path string) (string, error) {

@@ -178,7 +178,24 @@ func protectedShellConfigField(patch map[string]any) string {
 	if !ok {
 		return ""
 	}
-	for _, field := range []string{"operator_context", "operator_context_idle_timeout_minutes", "service_account"} {
+	for _, field := range []string{"operator_context", "operator_context_idle_timeout_minutes", "service_account", "allow_local_network", "confirmed_local_subnets"} {
+		if _, present := shell[field]; present {
+			return "shell." + field
+		}
+	}
+	return ""
+}
+
+func directNetworkPolicyField(patch map[string]any) string {
+	raw, ok := patch["shell"]
+	if !ok {
+		return ""
+	}
+	shell, ok := raw.(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, field := range []string{"allow_local_network", "confirmed_local_subnets"} {
 		if _, present := shell[field]; present {
 			return "shell." + field
 		}

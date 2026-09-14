@@ -22,6 +22,20 @@ type Client struct {
 	http    *http.Client
 }
 
+type ResponseShapeError struct {
+	Endpoint, ContentType, FinalURL, Prefix string
+	Status                                  int
+	Cause                                   error
+}
+
+func (e *ResponseShapeError) Error() string {
+	detail := ""
+	if e.Cause != nil {
+		detail = ": " + e.Cause.Error()
+	}
+	return fmt.Sprintf("%s response was not usable JSON (status %d, content_type %q, final_url %q, prefix %q)%s", e.Endpoint, e.Status, e.ContentType, e.FinalURL, e.Prefix, detail)
+}
+
 const dialTimeout = 2500 * time.Millisecond
 
 var sharedTransport = func() *http.Transport {
@@ -224,25 +238,34 @@ func contentString(value any) string {
 }
 
 func (c *Client) DoJSON(ctx context.Context, method, path string, body any) ([]byte, int, error) {
+	raw, status, _, _, err := c.doJSONDetailed(ctx, method, path, body)
+	return raw, status, err
+}
+
+func (c *Client) doJSONDetailed(ctx context.Context, method, path string, body any) ([]byte, int, string, string, error) {
 	var reader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
 		if err != nil {
-			return nil, 0, err
+			return nil, 0, "", "", err
 		}
 		reader = bytes.NewReader(data)
 	}
 	req, err := c.newRequest(ctx, method, path, reader)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, "", "", err
 	}
 	response, err := c.http.Do(req)
 	if err != nil {
-		return nil, 0, &TransportError{Kind: requestTransportKind(req), Err: err}
+		return nil, 0, "", "", &TransportError{Kind: requestTransportKind(req), Err: err}
 	}
 	defer response.Body.Close()
 	raw, err := readBounded(response.Body, 64<<20)
-	return raw, response.StatusCode, err
+	finalURL := ""
+	if response.Request != nil && response.Request.URL != nil {
+		finalURL = response.Request.URL.String()
+	}
+	return raw, response.StatusCode, response.Header.Get("Content-Type"), finalURL, err
 }
 
 func transportKind(connected bool) TransportKind {
@@ -346,24 +369,26 @@ func (c *Client) ApplyTemplate(ctx context.Context, messages []Message, tools []
 	return out.Prompt, nil
 }
 func (c *Client) Props(ctx context.Context) (Props, error) {
-	raw, status, err := c.DoJSON(ctx, http.MethodGet, "/props", nil)
+	raw, status, contentType, finalURL, err := c.doJSONDetailed(ctx, http.MethodGet, "/props", nil)
 	if err != nil {
 		return Props{}, err
 	}
 	if status != 200 {
-		return Props{}, fmt.Errorf("props HTTP %d", status)
+		return Props{}, responseShapeError("props", raw, status, contentType, finalURL, fmt.Errorf("HTTP %d", status))
 	}
 	var out Props
-	err = json.Unmarshal(raw, &out)
+	if err = json.Unmarshal(raw, &out); err != nil {
+		err = responseShapeError("props", raw, status, contentType, finalURL, err)
+	}
 	return out, err
 }
 func (c *Client) Models(ctx context.Context) ([]string, error) {
-	raw, status, err := c.DoJSON(ctx, http.MethodGet, "/v1/models", nil)
+	raw, status, contentType, finalURL, err := c.doJSONDetailed(ctx, http.MethodGet, "/v1/models", nil)
 	if err != nil {
 		return nil, err
 	}
 	if status != 200 {
-		return nil, fmt.Errorf("models HTTP %d", status)
+		return nil, responseShapeError("models", raw, status, contentType, finalURL, fmt.Errorf("HTTP %d", status))
 	}
 	var out struct {
 		Data []struct {
@@ -371,11 +396,19 @@ func (c *Client) Models(ctx context.Context) ([]string, error) {
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
-		return nil, err
+		return nil, responseShapeError("models", raw, status, contentType, finalURL, err)
 	}
 	values := make([]string, 0, len(out.Data))
 	for _, v := range out.Data {
 		values = append(values, v.ID)
 	}
 	return values, nil
+}
+
+func responseShapeError(endpoint string, raw []byte, status int, contentType, finalURL string, cause error) error {
+	prefix := strings.Join(strings.Fields(string(raw)), " ")
+	if len(prefix) > 160 {
+		prefix = prefix[:160]
+	}
+	return &ResponseShapeError{Endpoint: endpoint, Status: status, ContentType: contentType, FinalURL: finalURL, Prefix: prefix, Cause: cause}
 }

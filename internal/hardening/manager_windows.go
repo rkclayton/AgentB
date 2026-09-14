@@ -47,18 +47,26 @@ func (m *windowsManager) Status(ctx context.Context, request Request) (Status, e
 	if err != nil {
 		return Status{}, fmt.Errorf("inspect ACL policy: %w", err)
 	}
-	firewall, err := inspectComponent(ctx, m.powershell, m.firewallScript, firewallStatusMarker, []string{
+	firewallArguments := []string{
 		"-AccountName", request.AccountName,
 		"-ModelAddress", request.ModelAddress,
 		"-ModelPort", fmt.Sprint(request.ModelPort),
-		"-Inspect",
-	})
+	}
+	if request.AllowLocalNetwork {
+		firewallArguments = append(firewallArguments, "-AllowLocalNetwork")
+	}
+	if len(request.LocalSubnets) > 0 {
+		firewallArguments = append(firewallArguments, "-LocalSubnet", strings.Join(request.LocalSubnets, ","))
+	}
+	firewallArguments = append(firewallArguments, "-Inspect")
+	firewall, err := inspectComponent(ctx, m.powershell, m.firewallScript, firewallStatusMarker, firewallArguments)
 	if err != nil {
 		return Status{}, fmt.Errorf("inspect firewall policy: %w", err)
 	}
 	return Status{
 		Supported: true, HarnessElevated: isUserAnAdmin(), ModelAddress: request.ModelAddress, ModelPort: request.ModelPort,
 		ACL: acl, Firewall: firewall, Applied: acl.Applied && firewall.Applied,
+		AllowLocalNetwork: request.AllowLocalNetwork, ConfirmedLocalSubnets: append([]string(nil), request.LocalSubnets...),
 	}, nil
 }
 
@@ -118,6 +126,12 @@ func (m *windowsManager) Run(ctx context.Context, action string, request Request
 		"-ExchangeDirectory", request.ExchangeDirectory,
 		"-ModelAddress", request.ModelAddress,
 		"-ModelPort", fmt.Sprint(request.ModelPort),
+	}
+	if request.AllowLocalNetwork {
+		arguments = append(arguments, "-AllowLocalNetwork")
+	}
+	if len(request.LocalSubnets) > 0 {
+		arguments = append(arguments, "-LocalSubnet", strings.Join(request.LocalSubnets, ","))
 	}
 	resultFile, err := os.CreateTemp("", "agentb-hardening-result-*.txt")
 	if err != nil {

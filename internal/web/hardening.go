@@ -28,6 +28,7 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, err.Error(), "shell.service_account")
 			return
 		}
+		status.DetectedLocalSubnets = detectLocalSubnets()
 		s.writeHardeningStatus(w, status)
 		return
 	}
@@ -41,8 +42,10 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 	}
 	defer s.accountMu.Unlock()
 	var body struct {
-		Action   string `json:"action"`
-		ServerID string `json:"server_id"`
+		Action            string   `json:"action"`
+		ServerID          string   `json:"server_id"`
+		AllowLocalNetwork bool     `json:"allow_local_network"`
+		LocalSubnets      []string `json:"local_subnets"`
 	}
 	if !decode(w, r, &body) {
 		return
@@ -65,6 +68,17 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		fail(http.StatusBadRequest, err.Error(), "servers")
 		return
+	}
+	if body.Action == "apply" {
+		request.AllowLocalNetwork = body.AllowLocalNetwork
+		request.LocalSubnets = nil
+		if body.AllowLocalNetwork {
+			request.LocalSubnets, err = validateConfirmedLocalSubnets(body.LocalSubnets, detectLocalSubnets())
+			if err != nil {
+				fail(http.StatusBadRequest, err.Error(), "shell.confirmed_local_subnets")
+				return
+			}
+		}
 	}
 	if body.Action == "apply" {
 		if s.registry != nil {
@@ -121,6 +135,7 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 		fail(http.StatusInternalServerError, "operation completed but status inspection failed: "+statusErr.Error(), "shell.service_account")
 		return
 	}
+	status.DetectedLocalSubnets = detectLocalSubnets()
 	message := map[string]string{
 		"apply":  "host protections applied and verified",
 		"verify": "host-protection verification complete",
@@ -141,6 +156,10 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 			message = "host protections were applied, but service-account folder access failed: " + testMessage
 			s.finishHardening("failed", message)
 			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": message, "status": status, "operation": s.hardeningOperation()})
+			return
+		}
+		if err := s.saveAppliedNetworkPolicy(request.AllowLocalNetwork, request.LocalSubnets); err != nil {
+			fail(http.StatusInternalServerError, "host protections were applied, but saving the verified network policy failed: "+err.Error(), "shell.allow_local_network")
 			return
 		}
 	}

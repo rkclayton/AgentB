@@ -6,6 +6,7 @@ import (
 	cryptorand "crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/color"
@@ -47,7 +48,7 @@ func Probe(ctx context.Context, profile *config.Profile) (config.Capabilities, [
 		models, modelsErr := client.Models(check)
 		cancel()
 		if modelsErr != nil {
-			return profile.Capabilities, nil, fmt.Errorf("server identity: props: %v; models: %v", propsErr, modelsErr)
+			return profile.Capabilities, nil, connectionProbeError(propsErr, modelsErr)
 		}
 		caps.Server = "openai-compatible"
 		listed := false
@@ -129,6 +130,34 @@ func Probe(ctx context.Context, profile *config.Profile) (config.Capabilities, [
 	probeReasoning(ctx, client, profile, &caps, &findings)
 	probeOverflow(ctx, client, profile, &caps, &findings)
 	return finish(caps, findings)
+}
+
+type ConnectionError struct {
+	Friendly string
+	Detail   string
+}
+
+func (e *ConnectionError) Error() string           { return e.Friendly }
+func (e *ConnectionError) OperatorMessage() string { return e.Friendly }
+func (e *ConnectionError) Diagnostic() string      { return e.Detail }
+
+func connectionProbeError(propsErr, modelsErr error) error {
+	detail := fmt.Sprintf("server identity: props: %v; models: %v", propsErr, modelsErr)
+	var shape *llm.ResponseShapeError
+	if errors.As(modelsErr, &shape) || errors.As(propsErr, &shape) {
+		lowerURL := strings.ToLower(shape.FinalURL)
+		lowerType := strings.ToLower(shape.ContentType)
+		lowerPrefix := strings.ToLower(shape.Prefix)
+		switch {
+		case shape.Status == http.StatusUnauthorized || shape.Status == http.StatusForbidden:
+			return &ConnectionError{Friendly: "Connection requires credentials. Add the API credential, then Test again.", Detail: detail}
+		case strings.Contains(lowerURL, "login") || strings.Contains(lowerURL, "signin") || strings.Contains(lowerPrefix, "sign in") || strings.Contains(lowerPrefix, "log in"):
+			return &ConnectionError{Friendly: "Connection was redirected to a sign-in page. Use the model API URL and configure its credential.", Detail: detail}
+		case strings.Contains(lowerType, "text/html") || strings.Contains(lowerPrefix, "<html") || strings.Contains(lowerPrefix, "<!doctype html"):
+			return &ConnectionError{Friendly: "Connection returned a web page, not model API JSON. Add the API path to base_url.", Detail: detail}
+		}
+	}
+	return &ConnectionError{Friendly: "Connection test failed. Check base_url and the model server.", Detail: detail}
 }
 
 func probePDF() []byte {

@@ -64,6 +64,12 @@ function shell(active) {
 	const verifyDone = certificateDone && signingStatus.chain_valid && signaturesValid;
 	const signingAllowed = signingStatus.can_manage && !signingBusy;
 	const operatorView = operatorStatusView(store.shell_identity);
+	const lanEnabled = !!store.config.shell?.allow_local_network;
+	const confirmedSubnets = new Set(store.config.shell?.confirmed_local_subnets || []);
+	const detectedSubnets = hardeningStatus.detected_local_subnets || [];
+	const subnetChoices = detectedSubnets.length
+		? detectedSubnets.map((subnet) => `<label class="settings-note"><input type="checkbox" data-local-subnet value="${attr(subnet)}" ${confirmedSubnets.has(subnet) ? "checked" : ""} ${lanEnabled ? "" : "disabled"}> ${html(subnet)}</label>`).join("")
+		: '<p class="settings-note">No private IPv4 LAN subnet detected.</p>';
   return `<div class="settings-subhead">Operator mode</div>
 	${row("identity", `<button type="button" class="settings-operator-status" data-action="operator-context" aria-pressed="${operatorView.active}" aria-label="${attr(operatorView.label)}"><img src="${operatorView.src}" srcset="${operatorView.srcset}" width="24" height="24" alt=""><span>${operatorView.active ? "Stop running everything as me" : "Run everything as me for 20 minutes"}</span></button>`)}
 	<p class="settings-note">This defeats the service-account OS boundary for every tool in every chat until it expires.</p>
@@ -82,6 +88,9 @@ function shell(active) {
 	${row("Agent_b", `<span class="account-status ${hardeningStatus.harness_elevated ? "alarm" : ""}">${html(elevationState)}</span>`)}
 	${row("status", `<span class="account-status"><span class="lamp ${protectionReady ? "live" : hardeningStatus.loaded ? "alarm" : ""}"></span>${html(protectionState)}</span>`)}
 	${row("model route", `<select id="hardening-server" aria-label="Model route for host protections">${hardeningProfiles()}</select>`)}
+	${row("Allow my local network", `<button type="button" role="switch" aria-checked="${lanEnabled}" class="switch ${lanEnabled ? "on" : ""}" data-action="local-network-toggle"></button>`)}
+	<div class="settings-subnets" data-local-subnets>${subnetChoices}</div>
+	<p class="settings-note">Select each detected subnet you intend to expose, then Apply protection. Link-local, cloud metadata, and Agent_b's own listener remain refused.</p>
 	<div class="settings-actions">
 	  <button type="button" data-action="apply-hardening" title="${attr(applyBlocker)}" aria-busy="${hardeningBusy}" ${canApply ? "" : "disabled"}>${hardeningBusy ? "Working…" : drafts.size ? "Save first" : "Apply protection"}</button>
 	  <button type="button" data-action="verify-hardening" ${canInspect ? "" : "disabled"}>Verify</button>

@@ -9,6 +9,10 @@ param(
     [string]$RuleName = 'AgentB-Svc-Outbound-Block',
     [ValidatePattern('^[A-Za-z0-9._-]+$')]
     [string]$LegacyAllowRuleName = 'AgentB-Svc-Model-Allow',
+    [ValidatePattern('^[A-Za-z0-9._-]+$')]
+    [string]$LANICMPRuleName = 'AgentB-Svc-LAN-ICMP-Allow',
+    [switch]$AllowLocalNetwork,
+    [string[]]$LocalSubnet = @(),
     [switch]$Verify,
     [switch]$Remove,
 	[switch]$Inspect,
@@ -16,10 +20,11 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+$LocalSubnet = @(($LocalSubnet -join ',') -split ',' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
 $ruleName = $RuleName
 $legacyAllowRuleName = $LegacyAllowRuleName
 $statusMarker = 'AGENTB_FIREWALL_STATUS='
-$blockedRanges = @(
+$baseBlockedRanges = @(
     '0.0.0.0-100.63.255.255',
     '100.128.0.0-126.255.255.255',
     '128.0.0.0-255.255.255.255',
@@ -27,6 +32,72 @@ $blockedRanges = @(
     '::',
     '::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff'
 )
+$metadataAddress = [Net.IPAddress]::Parse('169.254.169.254')
+
+function ConvertTo-IPv4Number {
+    param([Net.IPAddress]$Address)
+    $bytes = $Address.GetAddressBytes()
+    if ($bytes.Length -ne 4) { throw "Only IPv4 LAN subnets are supported: $Address" }
+    return ([uint64]$bytes[0] * 16777216) + ([uint64]$bytes[1] * 65536) + ([uint64]$bytes[2] * 256) + [uint64]$bytes[3]
+}
+
+function ConvertFrom-IPv4Number {
+    param([uint64]$Value)
+    return "$([math]::Floor($Value / 16777216) % 256).$([math]::Floor($Value / 65536) % 256).$([math]::Floor($Value / 256) % 256).$($Value % 256)"
+}
+
+function Resolve-LANRange {
+    param([string]$Prefix)
+    if ($Prefix -notmatch '^([^/]+)/([0-9]{1,2})$') { throw "LocalSubnet must be an IPv4 CIDR prefix: '$Prefix'" }
+    $address = [Net.IPAddress]::Parse($Matches[1])
+    $bits = [int]$Matches[2]
+    if ($bits -lt 8 -or $bits -gt 32) { throw "LocalSubnet prefix length must be between 8 and 32: '$Prefix'" }
+    $value = ConvertTo-IPv4Number $address
+    $size = [math]::Pow(2, 32 - $bits)
+    $start = [uint64]([math]::Floor($value / $size) * $size)
+    $end = [uint64]($start + $size - 1)
+    $first = [byte]([math]::Floor($start / 16777216) % 256)
+    $second = [byte]([math]::Floor($start / 65536) % 256)
+    $private = $first -eq 10 -or ($first -eq 172 -and $second -ge 16 -and $second -le 31) -or ($first -eq 192 -and $second -eq 168)
+    if (-not $private) { throw "LocalSubnet must be RFC1918 private space: '$Prefix'" }
+    $metadata = ConvertTo-IPv4Number $metadataAddress
+    if ($start -le $metadata -and $end -ge $metadata) { throw "LocalSubnet may not include the metadata address: '$Prefix'" }
+    return [pscustomobject]@{ Start = $start; End = $end; Prefix = "$(ConvertFrom-IPv4Number $start)/$bits" }
+}
+
+function Resolve-BlockedRanges {
+    param([object[]]$Allowed)
+    $ranges = @(
+        [pscustomobject]@{ Start = [uint64]0; End = [uint64]1681915903 },
+        [pscustomobject]@{ Start = [uint64]1686110208; End = [uint64]2130706431 },
+        [pscustomobject]@{ Start = [uint64]2147483648; End = [uint64]4294967295 }
+    )
+    foreach ($allow in $Allowed) {
+        $next = @()
+        foreach ($range in $ranges) {
+            if ($allow.End -lt $range.Start -or $allow.Start -gt $range.End) { $next += $range; continue }
+            if ($allow.Start -gt $range.Start) { $next += [pscustomobject]@{ Start = $range.Start; End = [uint64]($allow.Start - 1) } }
+            if ($allow.End -lt $range.End) { $next += [pscustomobject]@{ Start = [uint64]($allow.End + 1); End = $range.End } }
+        }
+        $ranges = $next
+    }
+    $result = @($ranges | ForEach-Object {
+        $first = ConvertFrom-IPv4Number $_.Start
+        $last = ConvertFrom-IPv4Number $_.End
+        if ($first -eq $last) { $first } else { "$first-$last" }
+    })
+    return $result + @('::', '::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff')
+}
+
+$allowedLANRanges = @()
+if ($AllowLocalNetwork) {
+    foreach ($prefix in $LocalSubnet) {
+        if (-not [string]::IsNullOrWhiteSpace($prefix)) { $allowedLANRanges += Resolve-LANRange $prefix }
+    }
+    if ($allowedLANRanges.Count -eq 0) { throw 'AllowLocalNetwork requires at least one confirmed LocalSubnet.' }
+}
+$confirmedLANSubnets = @($allowedLANRanges | ForEach-Object { $_.Prefix } | Sort-Object -Unique)
+$blockedRanges = if ($AllowLocalNetwork) { Resolve-BlockedRanges $allowedLANRanges } else { $baseBlockedRanges }
 $script:confirmationSuppressed = $NoPrompt -or ($PSBoundParameters.ContainsKey('Confirm') -and -not [bool]$PSBoundParameters['Confirm'])
 if ($NoPrompt) { $ConfirmPreference = 'None' }
 
@@ -110,7 +181,14 @@ function Test-RuleIntent {
     if ($security.LocalUser -ne $LocalUserSddl) { return $false }
     $actual = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $rule).RemoteAddress | Sort-Object)
     $expected = @($blockedRanges | Sort-Object)
-    return ($actual.Count -eq $expected.Count -and -not (Compare-Object -ReferenceObject $expected -DifferenceObject $actual))
+    $blockCorrect = ($actual.Count -eq $expected.Count -and -not (Compare-Object -ReferenceObject $expected -DifferenceObject $actual))
+    $icmp = Get-NetFirewallRule -Name $LANICMPRuleName -ErrorAction SilentlyContinue
+    if (-not $AllowLocalNetwork) { return $blockCorrect -and -not $icmp }
+    if (-not $icmp -or $icmp.Direction -ne 'Outbound' -or $icmp.Action -ne 'Allow' -or $icmp.Enabled -ne 'True' -or $icmp.Profile -ne 'Any') { return $false }
+    $icmpSecurity = Get-NetFirewallSecurityFilter -AssociatedNetFirewallRule $icmp
+    $icmpPort = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $icmp
+    $icmpAddresses = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $icmp).RemoteAddress | Sort-Object)
+    return $blockCorrect -and $icmpSecurity.LocalUser -eq $LocalUserSddl -and $icmpPort.Protocol -eq 'ICMPv4' -and $icmpPort.IcmpType -eq '8' -and $icmpAddresses.Count -eq $confirmedLANSubnets.Count -and -not (Compare-Object -ReferenceObject $confirmedLANSubnets -DifferenceObject $icmpAddresses)
 }
 
 if (($Verify.IsPresent -and $Remove.IsPresent) -or ($Inspect.IsPresent -and ($Verify.IsPresent -or $Remove.IsPresent))) {
@@ -125,8 +203,8 @@ if (-not (Test-AllowedModelAddress -Address $ModelAddress)) {
 Write-Host 'Agent_b service-account outbound firewall policy'
 Write-Host "Account: $env:COMPUTERNAME\$AccountName"
 Write-Host "Model endpoint confirmed inside the spared local/Tailscale ranges: $ModelAddress`:$ModelPort"
-Write-Host 'Policy: one user-scoped outbound Block rule; spare IPv4 loopback 127.0.0.0/8, Tailscale 100.64.0.0/10, and IPv6 loopback ::1.'
-Write-Host 'No Allow rule is created and machine-wide DefaultOutboundAction is not changed.'
+Write-Host "Policy: one user-scoped outbound Block rule; spare IPv4 loopback 127.0.0.0/8, Tailscale 100.64.0.0/10, IPv6 loopback ::1$(if ($AllowLocalNetwork) { ", and confirmed LAN $($confirmedLANSubnets -join ', ')" } else { '' })."
+Write-Host "$(if ($AllowLocalNetwork) { 'One account-scoped outbound ICMPv4 echo Allow rule is created for the confirmed LAN subnets.' } else { 'No Allow rule is created.' }) Machine-wide DefaultOutboundAction is not changed."
 
 if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $Verify -and -not $Inspect) {
     [Console]::Error.WriteLine('Administrator elevation is required to apply or remove the firewall rule.')
@@ -135,7 +213,7 @@ if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $Verify -a
 }
 
 if ($Remove) {
-    $present = @(Get-NetFirewallRule -Name $ruleName, $legacyAllowRuleName -ErrorAction SilentlyContinue)
+$present = @(Get-NetFirewallRule -Name $ruleName, $legacyAllowRuleName, $LANICMPRuleName -ErrorAction SilentlyContinue)
     if ($present.Count -eq 0) {
         Write-Host 'UNCHANGED: Agent_b reserved firewall rules are already absent.'
         Write-Summary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('remove ACLs before deleting the service account if rolling back fully')
@@ -152,7 +230,8 @@ if ($Remove) {
 
 if ($WhatIfPreference) {
     Write-Host 'Mode: WhatIf; no firewall rule or profile setting will be changed.'
-    $null = $PSCmdlet.ShouldProcess($ruleName, "Create or repair user-scoped outbound Block over: $($blockedRanges -join ', ')")
+    $null = $PSCmdlet.ShouldProcess($ruleName, "Create or repair user-scoped outbound Block over: $($blockedRanges -join ', '); confirmed LAN: $($confirmedLANSubnets -join ', ')")
+	if ($AllowLocalNetwork) { $null = $PSCmdlet.ShouldProcess($LANICMPRuleName, "Create account-scoped outbound ICMPv4 echo Allow for: $($confirmedLANSubnets -join ', ')") }
     Write-Summary -Changed @() -NotChanged @('firewall rules', 'firewall profile defaults') -Next @('apply from Agent_b Settings, then verify')
     exit 0
 }
@@ -192,8 +271,12 @@ if ($correct -and -not $legacyPresent) {
 
 if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
 if ($PSCmdlet.ShouldProcess($ruleName, 'Create or repair Agent_b user-scoped outbound Block rule')) {
-    Get-NetFirewallRule -Name $ruleName, $legacyAllowRuleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-    $null = New-NetFirewallRule -Name $ruleName -DisplayName $ruleName -Description 'Blocks Agent_b service-account egress except loopback and Tailscale address ranges.' -Direction Outbound -Action Block -Enabled True -Profile Any -LocalUser $localUserSddl -RemoteAddress $blockedRanges
+    Get-NetFirewallRule -Name $ruleName, $legacyAllowRuleName, $LANICMPRuleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+    $description = if ($AllowLocalNetwork) { "Blocks Agent_b service-account egress except loopback, Tailscale, and confirmed LAN subnets: $($confirmedLANSubnets -join ', ')." } else { 'Blocks Agent_b service-account egress except loopback and Tailscale address ranges.' }
+    $null = New-NetFirewallRule -Name $ruleName -DisplayName $ruleName -Description $description -Direction Outbound -Action Block -Enabled True -Profile Any -LocalUser $localUserSddl -RemoteAddress $blockedRanges
+    if ($AllowLocalNetwork) {
+        $null = New-NetFirewallRule -Name $LANICMPRuleName -DisplayName $LANICMPRuleName -Description 'Allows outbound ICMPv4 echo to operator-confirmed LAN subnets for the Agent_b service identity.' -Direction Outbound -Action Allow -Enabled True -Profile Any -LocalUser $localUserSddl -Protocol ICMPv4 -IcmpType 8 -RemoteAddress $confirmedLANSubnets
+    }
     Write-Host "APPLIED: $ruleName"
 }
 Write-Summary -Changed @('user-scoped outbound Block rule applied') -NotChanged @('firewall profile defaults') -Next @('verify from Settings', 'run the RBAC network check')

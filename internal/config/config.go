@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -341,6 +342,8 @@ type Shell struct {
 	OperatorContextExpiresAt          string              `json:"-"`
 	OperatorContextIdleTimeoutMinutes int                 `json:"operator_context_idle_timeout_minutes"`
 	ServiceAccount                    ShellServiceAccount `json:"service_account"`
+	AllowLocalNetwork                 bool                `json:"allow_local_network"`
+	ConfirmedLocalSubnets             []string            `json:"confirmed_local_subnets"`
 	Deny                              []string            `json:"deny"`
 }
 
@@ -576,6 +579,15 @@ func (c Config) Validate() error {
 	}
 	if c.Workspace == "" {
 		return fmt.Errorf("workspace: required")
+	}
+	if !c.Shell.AllowLocalNetwork && len(c.Shell.ConfirmedLocalSubnets) > 0 {
+		return fmt.Errorf("shell.confirmed_local_subnets: must be empty while allow_local_network is off")
+	}
+	for _, raw := range c.Shell.ConfirmedLocalSubnets {
+		prefix, err := netip.ParsePrefix(raw)
+		if err != nil || !prefix.Addr().Is4() || !prefix.Masked().Addr().IsPrivate() || prefix.Bits() < 8 || prefix.Bits() > 32 || prefix.String() != prefix.Masked().String() {
+			return fmt.Errorf("shell.confirmed_local_subnets: %q must be a canonical private IPv4 prefix", raw)
+		}
 	}
 	for workspace, enabled := range c.Sandbox.Workspaces {
 		if enabled && !filepath.IsAbs(workspace) {

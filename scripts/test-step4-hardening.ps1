@@ -20,6 +20,24 @@ function Assert-DisposableRoot {
     return $full
 }
 
+function Get-ConfirmedPrivateSubnet {
+    foreach ($configuration in Get-NetIPConfiguration) {
+        if ($configuration.NetAdapter.Status -ne 'Up') { continue }
+        foreach ($address in $configuration.IPv4Address) {
+            $ip = [Net.IPAddress]::Parse($address.IPAddress)
+            $bytes = $ip.GetAddressBytes()
+            $private = $bytes[0] -eq 10 -or ($bytes[0] -eq 172 -and $bytes[1] -ge 16 -and $bytes[1] -le 31) -or ($bytes[0] -eq 192 -and $bytes[1] -eq 168)
+            if (-not $private) { continue }
+            $bits = [int]$address.PrefixLength
+            $value = ([uint64]$bytes[0] * 16777216) + ([uint64]$bytes[1] * 65536) + ([uint64]$bytes[2] * 256) + [uint64]$bytes[3]
+            $size = [math]::Pow(2, 32 - $bits)
+            $network = [uint64]([math]::Floor($value / $size) * $size)
+            return "$([math]::Floor($network / 16777216) % 256).$([math]::Floor($network / 65536) % 256).$([math]::Floor($network / 256) % 256).$($network % 256)/$bits"
+        }
+    }
+    throw 'No active RFC1918 IPv4 subnet is available for the LAN-switch verification.'
+}
+
 if (-not (Test-IsAdministrator)) {
     throw 'Step 4 hardening verification must run in an elevated PowerShell owned by the operator.'
 }
@@ -42,6 +60,8 @@ $exchangeRoot = Join-Path $exchangeTestRoot 'Agent_b'
 $credentialPath = Join-Path $dataRoot '.agentb-shell-credential.dpapi'
 $firewallRule = 'AgentB-Step4-Test-' + $suffix
 $legacyRule = $firewallRule + '-Legacy'
+$icmpRule = $firewallRule + '-LAN-ICMP'
+$confirmedSubnet = Get-ConfirmedPrivateSubnet
 $accountCreated = $false
 $aclAttempted = $false
 $firewallAttempted = $false
@@ -88,10 +108,14 @@ try {
     & $go test -count=1 ./internal/tools -run '^TestStep4LiveThreeRootShell$' -v
     if ($LASTEXITCODE -ne 0) { throw "Live service-shell test failed with exit code $LASTEXITCODE." }
 
-    Write-Host 'VERIFY firewall apply and verify'
+    Write-Host "VERIFY firewall apply and verify with LAN switch on: $confirmedSubnet"
     $firewallAttempted = $true
-    & (Join-Path $PSScriptRoot 'apply-firewall-rule.ps1') -AccountName $account -ModelAddress 127.0.0.1 -ModelPort 8080 -RuleName $firewallRule -LegacyAllowRuleName $legacyRule -NoPrompt -Confirm:$false
-    & (Join-Path $PSScriptRoot 'apply-firewall-rule.ps1') -AccountName $account -ModelAddress 127.0.0.1 -ModelPort 8080 -RuleName $firewallRule -LegacyAllowRuleName $legacyRule -Verify
+    & (Join-Path $PSScriptRoot 'apply-firewall-rule.ps1') -AccountName $account -ModelAddress 127.0.0.1 -ModelPort 8080 -RuleName $firewallRule -LegacyAllowRuleName $legacyRule -LANICMPRuleName $icmpRule -AllowLocalNetwork -LocalSubnet $confirmedSubnet -NoPrompt -Confirm:$false
+    & (Join-Path $PSScriptRoot 'apply-firewall-rule.ps1') -AccountName $account -ModelAddress 127.0.0.1 -ModelPort 8080 -RuleName $firewallRule -LegacyAllowRuleName $legacyRule -LANICMPRuleName $icmpRule -AllowLocalNetwork -LocalSubnet $confirmedSubnet -Verify
+
+	Write-Host 'VERIFY firewall apply and verify with LAN switch off'
+    & (Join-Path $PSScriptRoot 'apply-firewall-rule.ps1') -AccountName $account -ModelAddress 127.0.0.1 -ModelPort 8080 -RuleName $firewallRule -LegacyAllowRuleName $legacyRule -LANICMPRuleName $icmpRule -NoPrompt -Confirm:$false
+    & (Join-Path $PSScriptRoot 'apply-firewall-rule.ps1') -AccountName $account -ModelAddress 127.0.0.1 -ModelPort 8080 -RuleName $firewallRule -LegacyAllowRuleName $legacyRule -LANICMPRuleName $icmpRule -Verify
 
     Write-Host 'PASS: Step 4 live account, credential, ACL, shell, and firewall verification'
 } finally {
@@ -101,7 +125,7 @@ try {
     Remove-Item Env:\AGENTB_STEP4_LIVE_PLANS_ROOT -ErrorAction SilentlyContinue
     Remove-Item Env:\AGENTB_STEP4_LIVE_WORKSPACE_ROOT -ErrorAction SilentlyContinue
     if ($firewallAttempted) {
-        & (Join-Path $PSScriptRoot 'apply-firewall-rule.ps1') -AccountName $account -ModelAddress 127.0.0.1 -ModelPort 8080 -RuleName $firewallRule -LegacyAllowRuleName $legacyRule -Remove -NoPrompt -Confirm:$false
+        & (Join-Path $PSScriptRoot 'apply-firewall-rule.ps1') -AccountName $account -ModelAddress 127.0.0.1 -ModelPort 8080 -RuleName $firewallRule -LegacyAllowRuleName $legacyRule -LANICMPRuleName $icmpRule -Remove -NoPrompt -Confirm:$false
     }
     if ($aclAttempted -and $accountCreated) {
         & (Join-Path $PSScriptRoot 'apply-acls.ps1') -AccountName $account -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -Remove -NoPrompt -Confirm:$false
