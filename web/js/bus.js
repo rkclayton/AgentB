@@ -79,10 +79,12 @@ export function reduce(event) {
       break;
     case "error":
       store.error = data;
+      break;
+    case "ui.error":
       // A relayed UI error is evidence about the current render. Notifying view
       // subscribers here would schedule the render that produced it again.
-      if (data.where === "ui") return;
-      break;
+      store.error = data;
+      return;
     default: return;
   }
   notify(event);

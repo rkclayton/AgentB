@@ -133,6 +133,12 @@ func (s *Server) uiError(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &body) {
 		return
 	}
+	switch body.Kind {
+	case "console.error", "unhandled exception", "unhandled rejection":
+	default:
+		writeError(w, http.StatusBadRequest, "kind must be console.error, unhandled exception, or unhandled rejection", "kind")
+		return
+	}
 	if len(body.Message) > 4096 {
 		body.Message = body.Message[:4096]
 	}

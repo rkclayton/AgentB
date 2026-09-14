@@ -93,3 +93,12 @@ func TestUIErrorRelayPublishesSessionScopedHarnessEvent(t *testing.T) {
 		t.Fatal("UI error event not published")
 	}
 }
+
+func TestUIErrorRelayRejectsUnknownKind(t *testing.T) {
+	server, _ := operatorFileServer(t)
+	response := httptest.NewRecorder()
+	server.uiError(response, httptest.NewRequest(http.MethodPost, "/api/ui-errors", strings.NewReader(`{"kind":"other","message":"no"}`)))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+}

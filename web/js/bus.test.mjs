@@ -117,7 +117,7 @@ test("session-scoped UI error evidence never notifies rendering subscribers", ()
   snapshot();
   let notifications = 0;
   const unsubscribe = subscribe((_state, event) => { if (event.type !== "init") notifications++; });
-  reduce({ type: "error", data: { where: "ui", message: "render failed" } });
+  reduce({ type: "ui.error", data: { kind: "console.error", message: "render failed" } });
   assert.equal(store.error.message, "render failed");
   assert.equal(notifications, 0);
   reduce({ type: "error", data: { where: "server", message: "request failed" } });

@@ -2,6 +2,7 @@ package events
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -145,5 +146,18 @@ func TestHistorySummaryRefExcludesUnrelatedElision(t *testing.T) {
 	latest, err := index.resolveReplay("latest")
 	if err != nil || len(latest.Entries) != 4 {
 		t.Fatalf("latest=%+v err=%v", latest, err)
+	}
+}
+
+func TestDeleteOperationalPathsReportsOnlyFilesItRemoved(t *testing.T) {
+	root := t.TempDir()
+	existing := filepath.Join(root, "existing.jsonl")
+	missing := filepath.Join(root, "missing.jsonl")
+	if err := os.WriteFile(existing, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := DeleteOperationalPaths([]string{missing, existing})
+	if err != nil || len(removed) != 1 || removed[0] != existing {
+		t.Fatalf("removed=%v err=%v", removed, err)
 	}
 }

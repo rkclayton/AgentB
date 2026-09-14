@@ -286,7 +286,10 @@ func (w *Writers) DeleteSession(id string) (SessionInventory, error) {
 func DeleteOperationalPaths(paths []string) ([]string, error) {
 	removed := []string{}
 	for _, path := range paths {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
 			return removed, err
 		}
 		removed = append(removed, path)
