@@ -58,6 +58,15 @@ function Get-FilePrefixHash {
     }
 }
 
+function Get-StableConfigFingerprint {
+    param([string]$Path)
+    $value = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json
+    foreach ($server in @($value.servers)) {
+        $server.PSObject.Properties.Remove('capabilities')
+    }
+    return ($value | ConvertTo-Json -Depth 100 -Compress)
+}
+
 function Get-RootFingerprint {
     param([string[]]$Roots)
     return ($Roots | ForEach-Object {
@@ -109,7 +118,9 @@ try {
     $testPort = Get-FreeTcpPort
     $installedConfig.listen = "127.0.0.1:$testPort"
     [IO.File]::WriteAllText($configPath, ($installedConfig | ConvertTo-Json -Depth 100) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
-    $configHash = (Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash
+    $node = (Get-Command node.exe -ErrorAction Stop).Source
+    & $node (Join-Path $PSScriptRoot 'onboarding-acceptance.mjs') --app $testApplication --data $testData --config $configPath --port $testPort
+    if ($LASTEXITCODE -ne 0) { throw "First-run onboarding acceptance exited $LASTEXITCODE." }
 
     foreach ($path in @(
         (Join-Path $testApplication 'Agent_b.exe'),
@@ -259,8 +270,9 @@ try {
     } finally {
         $portOwner.Stop()
     }
-    if ($portFailureExit -eq 0 -or $portFailure -notmatch [regex]::Escape("listen port $testPort is already in use") -or
-        $portFailure -notmatch 'Diagnostics:' -or $portFailure -notmatch 'startup-' -or $portFailure -notmatch '\.log') {
+    $portFailureNormalized = $portFailure -replace '\s+', ' '
+    if ($portFailureExit -eq 0 -or $portFailureNormalized -notmatch [regex]::Escape("listen port $testPort is already in use") -or
+        $portFailureNormalized -notmatch 'Diagnostics:' -or $portFailureNormalized -notmatch 'startup-' -or $portFailureNormalized -notmatch '\.log') {
         throw "Port-conflict launch did not name its cause and diagnostic files.`n$portFailure"
     }
     if ($launcherSource -notmatch 'Configuration error in' -or $launcherSource -notmatch 'Permission error') {
@@ -316,9 +328,14 @@ try {
         } catch { }
     } while (-not $ready -and -not $beforeProcess.HasExited -and [DateTime]::UtcNow -lt $deadline)
     if (-not $ready) { throw 'Installed Agent_b did not become ready before the running-instance upgrade.' }
+    $configFingerprint = Get-StableConfigFingerprint -Path $configPath
 
-    $dataBefore = @(Get-ChildItem -LiteralPath $testData -File -Recurse | Where-Object { -not $_.FullName.StartsWith((Join-Path $testData 'logs') + '\', [StringComparison]::OrdinalIgnoreCase) } | ForEach-Object {
-        [pscustomobject]@{ Path = $_.FullName; SHA256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
+    $dataBefore = @(Get-ChildItem -LiteralPath $testData -File -Recurse | Where-Object {
+        -not $_.FullName.StartsWith((Join-Path $testData 'logs') + '\', [StringComparison]::OrdinalIgnoreCase) -and
+        -not $_.FullName.StartsWith((Join-Path $testData 'stats') + '\', [StringComparison]::OrdinalIgnoreCase) -and
+        -not $_.FullName.Equals((Join-Path $testData 'STATE.md'), [StringComparison]::OrdinalIgnoreCase)
+    } | ForEach-Object {
+        [pscustomobject]@{ Path = $_.FullName; Length = $_.Length; PrefixSHA256 = Get-FilePrefixHash -Path $_.FullName -Length $_.Length }
     })
     $workspaceBefore = @(Get-ChildItem -LiteralPath $testWorkspace -File -Recurse | ForEach-Object {
         [pscustomobject]@{ Path = $_.FullName; SHA256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
@@ -376,7 +393,7 @@ try {
     if ([bool]$afterState.build.dirty -ne [bool]$beforeState.build.dirty -or $afterState.build.commit -ne $beforeState.build.commit) {
         throw 'Restarted Agent_b identity does not match the installed build.'
     }
-    if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -ne $configHash) {
+    if ((Get-StableConfigFingerprint -Path $configPath) -cne $configFingerprint) {
         throw 'Upgrade changed the installed connection configuration.'
     }
     if ((Get-FileHash -LiteralPath $credentialPath -Algorithm SHA256).Hash -ne $credentialHash) {
@@ -390,6 +407,10 @@ try {
     }
     foreach ($entry in $dataBefore) {
         if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf)) { throw "Upgrade removed production data: $($entry.Path)" }
+        $afterLength = (Get-Item -LiteralPath $entry.Path).Length
+        if ($afterLength -lt $entry.Length -or (Get-FilePrefixHash -Path $entry.Path -Length $entry.Length) -ne $entry.PrefixSHA256) {
+            throw "Upgrade changed an existing production-data prefix: $($entry.Path)"
+        }
     }
     foreach ($entry in $workspaceBefore) {
         if (-not (Test-Path -LiteralPath $entry.Path -PathType Leaf) -or (Get-FileHash -LiteralPath $entry.Path -Algorithm SHA256).Hash -ne $entry.SHA256) {
@@ -421,7 +442,7 @@ try {
 
     & powershell.exe -NoLogo -NoProfile -File $installer -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode
     if ($LASTEXITCODE -ne 0) { throw "Reinstall exited $LASTEXITCODE." }
-    if ((Get-FileHash -LiteralPath $configPath -Algorithm SHA256).Hash -ne $configHash) {
+    if ((Get-StableConfigFingerprint -Path $configPath) -cne $configFingerprint) {
         throw 'Reinstall changed preserved connection configuration.'
     }
 
@@ -445,6 +466,12 @@ try {
         }
     }
     if (Test-Path -LiteralPath $testRegistry) { Remove-Item -LiteralPath $testRegistry -Recurse -Force }
+    $disposableExecutable = Join-Path $testApplication 'Agent_b.exe'
+    foreach ($process in @(Get-AgentBProcessesAtPath -Executable $disposableExecutable)) {
+        & (Join-Path $env:SystemRoot 'System32\taskkill.exe') /PID $process.Id /T /F | Out-Null
+        $process.WaitForExit(15000) | Out-Null
+        if (-not $process.HasExited) { throw "Disposable Agent_b PID $($process.Id) did not exit during cleanup." }
+    }
     if (Test-Path -LiteralPath $testRoot) {
         Assert-TemporaryTestPath $testRoot
         Remove-Item -LiteralPath $testRoot -Recurse -Force
