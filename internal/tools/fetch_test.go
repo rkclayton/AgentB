@@ -38,7 +38,7 @@ func TestFetchExtractsReadableHTMLAndKeepsLinks(t *testing.T) {
 func TestFetchFeedFixturesHaveExactDeterministicOutput(t *testing.T) {
 	for _, name := range []string{"rss-cdata", "atom"} {
 		data := fetchFixture(t, name+".xml")
-		want := strings.TrimSuffix(string(fetchFixture(t, name+".expected.txt")), "\n")
+		want := fetchExpected(t, name+".expected.txt")
 		got, dropped, err := extractFeed(data)
 		if err != nil {
 			t.Fatal(err)
@@ -52,7 +52,7 @@ func TestFetchFeedFixturesHaveExactDeterministicOutput(t *testing.T) {
 
 func TestFetchMalformedFeedReportsExactParsePosition(t *testing.T) {
 	_, _, err := extractFeed(fetchFixture(t, "malformed.xml"))
-	want := strings.TrimSuffix(string(fetchFixture(t, "malformed.expected.txt")), "\n")
+	want := fetchExpected(t, "malformed.expected.txt")
 	if err == nil || err.Error() != want {
 		t.Fatalf("error=%q want=%q", err, want)
 	}
@@ -66,7 +66,7 @@ func TestFetchArticleFixturesHaveExactDeterministicOutput(t *testing.T) {
 			t.Fatal(err)
 		}
 		actual := fmt.Sprintf("dropped: %d\nfallback: %t\n%s", dropped, fallback, got)
-		want := strings.TrimSuffix(string(fetchFixture(t, name+".expected.txt")), "\n")
+		want := fetchExpected(t, name+".expected.txt")
 		if actual != want {
 			t.Fatalf("%s output:\n%s\nwant:\n%s", name, actual, want)
 		}
@@ -117,6 +117,10 @@ func fetchFixture(t *testing.T, name string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func fetchExpected(t *testing.T, name string) string {
+	return strings.TrimSuffix(strings.ReplaceAll(string(fetchFixture(t, name)), "\r\n", "\n"), "\n")
 }
 
 func TestFetchSingleLineByteWindowsDoNotRepeat(t *testing.T) {
