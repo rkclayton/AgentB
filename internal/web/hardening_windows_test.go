@@ -110,6 +110,20 @@ func TestHardeningEndpointRejectsUnconfiguredIdentity(t *testing.T) {
 	}
 }
 
+func TestHardeningLANWideningRequiresVerifiedOperatorProcess(t *testing.T) {
+	server, _, _ := serviceAccountTestServer(t, &fakeAccountManager{})
+	manager := &fakeHardeningManager{}
+	server.SetHardeningManager(manager)
+	server.operatorRequest = func(*http.Request) error { return errors.New("service child") }
+	request := httptest.NewRequest(http.MethodPost, "/api/hardening", strings.NewReader(`{"action":"apply","server_id":"local","allow_local_network":true,"local_subnets":["192.168.50.0/24"]}`))
+	authorizeMutation(request, server)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusForbidden || manager.runCalls != 0 || !strings.Contains(response.Body.String(), "verified local operator") {
+		t.Fatalf("status=%d calls=%d body=%s", response.Code, manager.runCalls, response.Body)
+	}
+}
+
 func TestHardeningStatusRejectsHostnameEndpoint(t *testing.T) {
 	server, _, _ := serviceAccountTestServer(t, &fakeAccountManager{})
 	server.cfg.Servers[0].BaseURL = "https://model.example.invalid/v1"

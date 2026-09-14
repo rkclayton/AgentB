@@ -54,6 +54,12 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "action must be apply, verify, or remove", "action")
 		return
 	}
+	if body.Action == "apply" && body.AllowLocalNetwork {
+		if err := s.operatorRequest(r); err != nil {
+			writeError(w, http.StatusForbidden, "Allow my local network can be enabled only by the verified local operator browser process", "shell.allow_local_network")
+			return
+		}
+	}
 	startMessage := map[string]string{
 		"apply":  "Checking host-protection prerequisites…",
 		"verify": "Verifying ACL and outbound policy…",
