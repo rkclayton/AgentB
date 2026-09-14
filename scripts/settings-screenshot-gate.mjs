@@ -30,7 +30,8 @@ const profile = {
 async function capture(name, exe, appRoot, expected) {
   const port = await freePort();
   const dataRoot = resolve(args.data, name);
-  const workspace = join(dataRoot, "workspace");
+  const workspace = resolve(args.data, "workspaces", name, "workspace");
+  await mkdir(dataRoot, { recursive: true });
   await mkdir(workspace, { recursive: true });
   const config = { config_version: 6, listen: `127.0.0.1:${port}`, workspace, log_dir: join(dataRoot, "logs"), servers: [profile], services: {}, agents: [{ name: "Screenshot", b: "local", toolset: ["read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "remember", "recall", "fetch_url", "find_files", "run_script", "call_service"] }] };
   const configPath = join(dataRoot, "harness.json");
@@ -57,8 +58,14 @@ async function capture(name, exe, appRoot, expected) {
     await page.locator('[data-action="profile-toggle"]').first().waitFor({ state: "visible" });
     await page.locator('[data-action="profile-toggle"]').first().click();
     await page.locator('.setting-input[data-path$=".label"]').waitFor({ state: "visible" });
-    await page.screenshot({ path: resolve(args.evidence, `${name}.png`) });
-    return { build: state.build, metrics: await page.evaluate(() => ({ content_width: document.querySelector(".settings-content").clientWidth, content_scroll_width: document.querySelector(".settings-content").scrollWidth, group_height: document.querySelector(".settings-group").scrollHeight })) };
+    await page.screenshot({ path: resolve(args.evidence, `${name}-connections.png`) });
+    const connections = await page.evaluate(() => ({ content_width: document.querySelector(".settings-content").clientWidth, content_scroll_width: document.querySelector(".settings-content").scrollWidth, group_height: document.querySelector(".settings-group").scrollHeight }));
+    await page.locator('[data-action="settings-section"][data-id="shell"]').click();
+    await page.getByText("Allow my local network", { exact: true }).waitFor({ state: name === "candidate" ? "visible" : "hidden" }).catch(() => {});
+	await page.waitForFunction(() => !document.querySelector(".settings-content")?.textContent.includes("checking host protections"), null, { timeout: 5000 }).catch(() => {});
+    await page.screenshot({ path: resolve(args.evidence, `${name}-security.png`) });
+    const security = await page.evaluate(() => ({ content_width: document.querySelector(".settings-content").clientWidth, content_scroll_width: document.querySelector(".settings-content").scrollWidth, group_height: document.querySelector(".settings-group").scrollHeight }));
+    return { build: state.build, metrics: { connections, security } };
   } finally {
     try { await browser?.close(); } catch {}
     try { app.kill(); } catch {}
