@@ -35,6 +35,7 @@ const (
 	OperatorContext       = "operator.context"
 	Error                 = "error"
 	UIError               = "ui.error"
+	LogRetention          = "log.retention"
 	RunQueued             = "run.queued"
 	RunStarted            = "run.started"
 	RunStopping           = "run.stopping"

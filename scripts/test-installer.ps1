@@ -117,7 +117,23 @@ try {
     }
     $testPort = Get-FreeTcpPort
     $installedConfig.listen = "127.0.0.1:$testPort"
+    $installedConfig.operator_files.log_retention_days = 1
     [IO.File]::WriteAllText($configPath, ($installedConfig | ConvertTo-Json -Depth 100) + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
+    $expiredWorkingLog = Join-Path $testData 'logs\retention-expired-working.jsonl'
+    $expiredEvidenceLog = Join-Path $testData 'logs\evidence\retention-expired-evidence.jsonl'
+    $retainedChatLog = Join-Path $testData 'chats\retention-retained-chat.jsonl'
+    foreach ($path in @($expiredWorkingLog, $expiredEvidenceLog, $retainedChatLog)) {
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $path)) | Out-Null
+    }
+    [IO.File]::WriteAllText($expiredWorkingLog, "{}`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($expiredEvidenceLog, "{}`n", [Text.UTF8Encoding]::new($false))
+    $retainedSeed = [ordered]@{
+        seq = 1; ts = '2026-09-01T00:00:00.000Z'; session_id = 'retention-proof'; run_id = ''; type = 'session.created'
+        data = @{ session = [ordered]@{ id = 'retention-proof'; label = 'Retention proof'; agent_id = 'api'; role = 'b'; server_id = 'setup-api'; agent_name = 'API'; main_profile = 'API'; b_profile = 'API'; created_at = '2026-09-01T00:00:00Z'; closed = $true; workspace = $testWorkspace; run = @{ status = 'idle'; max_turns = 10000 }; tools = @(); messages = @(); runnable = $true } }
+    }
+    [IO.File]::WriteAllText($retainedChatLog, ($retainedSeed | ConvertTo-Json -Depth 20 -Compress) + "`n", [Text.UTF8Encoding]::new($false))
+    $expiredAt = [DateTime]::UtcNow.AddDays(-2)
+    foreach ($path in @($expiredWorkingLog, $expiredEvidenceLog, $retainedChatLog)) { [IO.File]::SetLastWriteTimeUtc($path, $expiredAt) }
     $node = (Get-Command node.exe -ErrorAction Stop).Source
     & $node (Join-Path $PSScriptRoot 'onboarding-acceptance.mjs') --app $testApplication --data $testData --config $configPath --port $testPort
     if ($LASTEXITCODE -ne 0) { throw "First-run onboarding acceptance exited $LASTEXITCODE." }
@@ -333,6 +349,7 @@ try {
     $dataBefore = @(Get-ChildItem -LiteralPath $testData -File -Recurse | Where-Object {
         -not $_.FullName.StartsWith((Join-Path $testData 'logs') + '\', [StringComparison]::OrdinalIgnoreCase) -and
         -not $_.FullName.StartsWith((Join-Path $testData 'stats') + '\', [StringComparison]::OrdinalIgnoreCase) -and
+        -not $_.FullName.Equals($configPath, [StringComparison]::OrdinalIgnoreCase) -and
         -not $_.FullName.Equals((Join-Path $testData 'STATE.md'), [StringComparison]::OrdinalIgnoreCase)
     } | ForEach-Object {
         [pscustomobject]@{ Path = $_.FullName; Length = $_.Length; PrefixSHA256 = Get-FilePrefixHash -Path $_.FullName -Length $_.Length }

@@ -1026,6 +1026,7 @@ if (realModel) {
   await browser.wait(`!document.querySelector('#settings-page').hidden && document.querySelector('.settings-content')?.innerText.includes('Adopt repository instructions')`, "operator-file Security settings");
   const folderSettings = await browserText(".settings-content");
   for (const text of ["attachments", "Empty", "log retention (days)", "Adopt repository instructions", "Also remove AGENTS.md / CLAUDE.md"]) assert.ok(folderSettings.includes(text), `Security settings missing ${text}`);
+  assert.equal(await page.locator('[data-path="operator_files.log_retention_days"]').inputValue(), "30");
   assert.equal(await browser.evaluate(`document.querySelector('#adopt-instruction-cleanup')?.checked`), false);
   assert.equal(await browser.evaluate(`document.querySelector('[data-path="operator_files.allow_mailbox_approvals"]')?.getAttribute('aria-checked')`), "false");
   assert.equal(await clickText(".settings-content button", "Adopt"), true);

@@ -137,8 +137,12 @@ func main() {
 	web.SetRegistry(registry)
 	web.SetWorkspaceState(workspaceManager, memoryManager)
 	operatorFiles := operatorfiles.New(paths.Data, logDir, web.ConfigSnapshot)
+	operatorFiles.SetEventPublisher(func(event events.Event) { bus.Publish(event) })
 	if err := operatorFiles.Ensure(); err != nil {
 		log.Fatal(err)
+	}
+	if _, err := operatorFiles.ApplyRetention(); err != nil {
+		log.Printf("apply log retention: %v", err)
 	}
 	web.SetOperatorFiles(operatorFiles)
 	operatorContext, cancelOperatorFiles := context.WithCancel(context.Background())

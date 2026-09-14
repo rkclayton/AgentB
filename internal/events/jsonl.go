@@ -261,10 +261,8 @@ func (w *Writers) DeleteSession(id string) (SessionInventory, error) {
 	if err := w.CloseSession(id); err != nil {
 		return SessionInventory{}, err
 	}
-	for _, path := range inventory.Paths {
-		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			return SessionInventory{}, err
-		}
+	if _, err := DeleteOperationalPaths(inventory.Paths); err != nil {
+		return SessionInventory{}, err
 	}
 	w.mu.Lock()
 	chat := w.chats[id]
@@ -280,6 +278,20 @@ func (w *Writers) DeleteSession(id string) (SessionInventory, error) {
 		return SessionInventory{}, err
 	}
 	return inventory, nil
+}
+
+// DeleteOperationalPaths is the one removal primitive shared by retention and
+// permanent chat deletion. Callers remain responsible for selecting only
+// operational JSONL paths; retained chat journals are deliberately separate.
+func DeleteOperationalPaths(paths []string) ([]string, error) {
+	removed := []string{}
+	for _, path := range paths {
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return removed, err
+		}
+		removed = append(removed, path)
+	}
+	return removed, nil
 }
 func (w *Writers) Write(event Event) error {
 	_, err := w.WriteRecord(event)

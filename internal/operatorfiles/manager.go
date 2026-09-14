@@ -52,6 +52,7 @@ type Status struct {
 type Manager struct {
 	root, logDir string
 	cfg          func() config.Config
+	publish      func(events.Event)
 	now          func() time.Time
 	mu           sync.Mutex
 	runStarted   map[string]time.Time
@@ -60,6 +61,8 @@ type Manager struct {
 func New(root, logDir string, cfg func() config.Config) *Manager {
 	return &Manager{root: filepath.Clean(root), logDir: filepath.Clean(logDir), cfg: cfg, now: time.Now, runStarted: map[string]time.Time{}}
 }
+
+func (m *Manager) SetEventPublisher(publish func(events.Event)) { m.publish = publish }
 
 func (m *Manager) Root() string            { return m.root }
 func (m *Manager) InboxPath() string       { return filepath.Join(m.root, "INBOX.md") }
@@ -570,7 +573,7 @@ func (m *Manager) ApplyRetention() ([]string, error) {
 		return nil, err
 	}
 	cutoff := m.now().Add(-time.Duration(days) * 24 * time.Hour)
-	removed := []string{}
+	candidates := []string{}
 	for _, entry := range entries {
 		if entry.IsDir() || strings.EqualFold(entry.Name(), "evidence") || !strings.HasSuffix(strings.ToLower(entry.Name()), ".jsonl") {
 			continue
@@ -579,18 +582,21 @@ func (m *Manager) ApplyRetention() ([]string, error) {
 		if infoErr != nil || !info.ModTime().Before(cutoff) {
 			continue
 		}
-		path := filepath.Join(m.logDir, entry.Name())
-		if err := os.Remove(path); err != nil {
-			return removed, err
-		}
-		removed = append(removed, path)
+		candidates = append(candidates, filepath.Join(m.logDir, entry.Name()))
 	}
-	sort.Strings(removed)
-	return removed, nil
+	sort.Strings(candidates)
+	removed, removeErr := events.DeleteOperationalPaths(candidates)
+	if len(removed) > 0 && m.publish != nil {
+		files := make([]string, len(removed))
+		for index, path := range removed {
+			files[index] = filepath.Base(path)
+		}
+		m.publish(events.New(events.LogRetention, "", "", map[string]any{"days": days, "files": files, "count": len(files)}))
+	}
+	return removed, removeErr
 }
 
 func (m *Manager) RunRetention(ctx context.Context) {
-	_, _ = m.ApplyRetention()
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 	for {

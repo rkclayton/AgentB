@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium } from "playwright";
 
@@ -86,6 +86,18 @@ app.stderr.on("data", (chunk) => process.stderr.write(chunk));
 let browser;
 try {
   await waitJSON(`${baseURL}/api/state`);
+  await assert.rejects(access(join(args.data, "logs", "retention-expired-working.jsonl")), "expired working JSONL must be pruned on startup");
+  await access(join(args.data, "logs", "evidence", "retention-expired-evidence.jsonl"));
+  await access(join(args.data, "chats", "retention-retained-chat.jsonl"));
+  const startupEvents = (await readdir(join(args.data, "logs"))).filter((name) => name.endsWith(".jsonl"));
+  const retentionEvents = [];
+  for (const name of startupEvents) {
+    for (const line of (await readFile(join(args.data, "logs", name), "utf8")).split(/\r?\n/).filter(Boolean)) {
+      const event = JSON.parse(line);
+      if (event.type === "log.retention") retentionEvents.push(event);
+    }
+  }
+  assert.ok(retentionEvents.some((event) => event.data?.days === 1 && event.data?.files?.includes("retention-expired-working.jsonl")), "startup tape must record the expired working log");
   browser = await chromium.launch({ channel: "msedge", headless: true });
   const page = await browser.newPage({ viewport: { width: 1250, height: 975 } });
   const pageErrors = [];
@@ -109,7 +121,7 @@ try {
   assert.equal(state.config.agents?.[0]?.b, "setup-api");
   assert.equal(Object.keys(state.sessions || {}).length, 1);
   assert.deepEqual(pageErrors, []);
-  process.stdout.write(`PASS: fresh servers:[] install reached a working API-only chat through Setup (${requestCount} fake requests)\n`);
+  process.stdout.write(`PASS: one-day startup retention preserved evidence/chat and fresh servers:[] install reached a working API-only chat through Setup (${requestCount} fake requests)\n`);
 } finally {
   await browser?.close().catch(() => {});
   await stopChild(app);

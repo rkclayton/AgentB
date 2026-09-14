@@ -242,6 +242,8 @@ func TestAdoptIsNonDestructiveByDefaultAndCleanupIsExplicit(t *testing.T) {
 
 func TestRetentionDeletesOnlyExpiredTopLevelJSONL(t *testing.T) {
 	manager, cfg := testManager(t)
+	published := []events.Event{}
+	manager.SetEventPublisher(func(event events.Event) { published = append(published, event) })
 	cfg.OperatorFiles.LogRetentionDays = 30
 	if err := os.MkdirAll(manager.logDir, 0o700); err != nil {
 		t.Fatal(err)
@@ -269,5 +271,12 @@ func TestRetentionDeletesOnlyExpiredTopLevelJSONL(t *testing.T) {
 		if _, err := os.Stat(path); err != nil {
 			t.Fatalf("retained file %s: %v", path, err)
 		}
+	}
+	if len(published) != 1 || published[0].Type != events.LogRetention {
+		t.Fatalf("published=%+v", published)
+	}
+	data, _ := json.Marshal(published[0].Data)
+	if !strings.Contains(string(data), `"days":30`) || !strings.Contains(string(data), `"files":["old.jsonl"]`) {
+		t.Fatalf("retention event=%s", data)
 	}
 }
