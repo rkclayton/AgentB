@@ -369,7 +369,7 @@ func TestEditFile(t *testing.T) {
 		s := testSession(root, "a", "A")
 		for _, path := range []string{"../x.go", filepath.Join(filepath.Dir(root), "other.go")} {
 			_, err := edit(t, tool, s, path, "a", "b")
-			if err == nil || !strings.Contains(err.Error(), "path is outside the workspace") {
+			if err == nil || !strings.Contains(err.Error(), "path is outside the folder") {
 				t.Fatalf("path %q error %v", path, err)
 			}
 		}

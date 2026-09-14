@@ -31,7 +31,7 @@ function sessions() {
     <div class="settings-subhead">New session</div>
     ${row("label", '<input id="new-session-label" value="new session">')}
     ${row("profile", `<select id="new-session-profile">${options}</select>`)}
-    ${row("workspace", `<input id="new-session-workspace" value="${attr(store.config.workspace || "")}">`)}
+    ${row("folder", `<input id="new-session-workspace" value="">`)}
     <button type="button" class="text-action" data-action="new-session" ${options ? "" : "disabled"}>New session</button>
     ${issue("new-session") ? `<p class="field-error">${html(issue("new-session"))}</p>` : ""}
     ${number("run.max_concurrent", "max concurrent", store.config.run?.max_concurrent)}`;
@@ -83,7 +83,7 @@ function memory(active) {
     ${number("memory.max_tokens", "max tokens", store.config.memory?.max_tokens)}
     ${text("memory.dir", "directory", store.config.memory?.dir || "")}
     ${copyRow("file", active?.memory_path || "")}
-    <pre class="memory-content">${html(value || "No notes for this workspace.")}</pre>`;
+    <pre class="memory-content">${html(value || "No notes for this folder.")}</pre>`;
 }
 
 export function renderGeneralPage(page, active, pageContext) {

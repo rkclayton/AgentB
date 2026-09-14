@@ -15,7 +15,7 @@ func TestJail(t *testing.T) {
 			t.Skipf("symlink unavailable: %v", err)
 		}
 		_, err := Resolve(root, filepath.Join("escape", "x.txt"))
-		if err == nil || !strings.Contains(err.Error(), "outside the workspace") {
+		if err == nil || !strings.Contains(err.Error(), "outside the folder") {
 			t.Fatalf("error %v", err)
 		}
 	})

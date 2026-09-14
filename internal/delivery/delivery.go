@@ -75,7 +75,7 @@ func copySource(workspace, folder string, source Source) Item {
 	item := Item{SourcePath: source.Path, Bytes: source.Bytes, Status: "failed"}
 	resolved, err := tools.Resolve(workspace, source.Path)
 	if err != nil {
-		item.Error = "source is outside the workspace"
+		item.Error = "source is outside the folder"
 		return item
 	}
 	input, err := os.Open(resolved)

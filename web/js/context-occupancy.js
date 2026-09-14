@@ -4,7 +4,7 @@ const categoryGroups = [
   { key: "schemas", label: "tool schemas", sources: ["tools"] },
   { key: "tool-results", label: "tool results", sources: ["files", "results", "fetched"] },
   { key: "history", label: "history", sources: ["history", "summary"] },
-  { key: "workspace-memory", label: "workspace memory", sources: ["workspace_memory", "memory"] },
+  { key: "workspace-memory", label: "folder memory", sources: ["workspace_memory", "memory"] },
   { key: "agent-memory", label: "agent memory", sources: ["agent_memory"] },
 ];
 

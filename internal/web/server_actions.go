@@ -36,7 +36,7 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 	_, waitingForBind := s.pendingBinds[body.SessionID]
 	s.bindMu.Unlock()
 	if waitingForBind {
-		writeError(w, http.StatusConflict, "answer the pending workspace binding decision first", "session_id")
+		writeError(w, http.StatusConflict, "answer the pending folder binding decision first", "session_id")
 		return
 	}
 	if len(attachments) == 0 {
@@ -86,7 +86,7 @@ func (s *Server) bindWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	s.bindMu.Unlock()
 	if !ok {
-		writeError(w, http.StatusConflict, "no workspace binding decision is pending", "session_id")
+		writeError(w, http.StatusConflict, "no folder binding decision is pending", "session_id")
 		return
 	}
 	if body.Decision == "yes" {
@@ -381,7 +381,7 @@ func (s *Server) agentAction(w http.ResponseWriter, r *http.Request) {
 	}
 	workspace := filepath.Clean(strings.TrimSpace(body.Workspace))
 	if workspace == "." || !filepath.IsAbs(workspace) {
-		writeError(w, http.StatusBadRequest, "workspace must be an absolute path", "workspace")
+		writeError(w, http.StatusBadRequest, "folder must be an absolute path", "workspace")
 		return
 	}
 	agentEntries, err := s.memoryState.CountAgent(agentID)

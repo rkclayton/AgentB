@@ -33,12 +33,12 @@ func TestRememberTargetSeparatesWorkspaceAndAgentMemory(t *testing.T) {
 		t.Fatal(err)
 	}
 	value, err := recall.Call(context.Background(), item, nil)
-	if err != nil || !strings.Contains(value, "Workspace memory:\n") || !strings.Contains(value, "project fact") || !strings.Contains(value, "Agent memory:\n") || !strings.Contains(value, "operator preference") {
+	if err != nil || !strings.Contains(value, "Folder memory:\n") || !strings.Contains(value, "project fact") || !strings.Contains(value, "Agent memory:\n") || !strings.Contains(value, "operator preference") {
 		t.Fatalf("recall=%q err=%v", value, err)
 	}
 	properties := remember.Schema()["properties"].(map[string]any)
 	target := properties["target"].(map[string]any)
-	if target["default"] != "workspace" {
+	if target["default"] != "folder" {
 		t.Fatalf("target schema=%#v", target)
 	}
 }
@@ -67,7 +67,7 @@ func TestRecallEmptyStoreIgnoresModelSuppliedPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	result, err := recall.Call(context.Background(), item, map[string]any{"path": outside})
-	if err != nil || result != "No saved notes for this workspace." {
+	if err != nil || result != "No saved notes for this folder." {
 		t.Fatalf("recall.Call() = %q, %v", result, err)
 	}
 	if strings.Contains(result, "outside secret") {
@@ -99,7 +99,7 @@ func TestRememberToolsBlockByteDelta(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const wantDelta = 111
+	const wantDelta = 102
 	if delta := len(after) - len(before); delta != wantDelta {
 		t.Fatalf("remember tools-block byte delta=%d, want %d", delta, wantDelta)
 	}

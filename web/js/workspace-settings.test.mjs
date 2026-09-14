@@ -7,8 +7,8 @@ const settings = (await Promise.all([
   "settings-delivery.js", "settings-about.js", "settings-workspace.js", "settings-security.js",
 ].map((name) => readFile(new URL(`./${name}`, import.meta.url), "utf8")))).join("\n");
 
-test("Settings Workspace is read-only for memory and retains policy controls", () => {
-  assert.match(settings, /\["workspace", "Workspace"\]/);
+test("Settings has no Workspace tab and Security retains folder policy controls", () => {
+  assert.doesNotMatch(settings, /\["workspace", "Workspace"\]/);
   assert.match(settings, /memory_count/);
   assert.match(settings, /last_used/);
   assert.doesNotMatch(settings, /clear-workspace-memory/);
@@ -18,7 +18,7 @@ test("Settings Workspace is read-only for memory and retains policy controls", (
   assert.match(settings, /\/api\/workspaces\/policy-revoke/);
 });
 
-test("Settings Workspace owns operator attachments mailbox approvals retention and Adopt", () => {
+test("Settings Security owns operator attachments mailbox approvals retention and Adopt", () => {
 	assert.match(settings, /row\("attachments"/);
 	assert.match(settings, /data-action="empty-operator-attachments"/);
 	assert.match(settings, /Confirm empty/);
@@ -31,10 +31,7 @@ test("Settings Workspace owns operator attachments mailbox approvals retention a
 	assert.match(settings, /\/api\/operator-files/);
 });
 
-test("Settings Workspace exposes Docker Sandbox capability and a staged per-directory target", () => {
-  assert.match(settings, /Docker Sandbox execution/);
-  assert.match(settings, /sandboxStatus\.reason/);
-  assert.match(settings, /sandboxStatus\.findings/);
-  assert.match(settings, /data-action="sandbox-workspace-toggle"/);
-  assert.match(settings, /drafts\.set\("sandbox\.workspaces",workspaces\)/);
+test("per-folder Docker Sandbox control moved out of Settings", () => {
+  assert.doesNotMatch(settings, /Docker Sandbox execution/);
+  assert.doesNotMatch(settings, /data-action="sandbox-workspace-toggle"/);
 });

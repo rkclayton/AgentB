@@ -424,7 +424,7 @@ func (s *Server) validateMessageAttachments(sessionID string, values []events.At
 		seen[key] = true
 		resolved, err := tools.Resolve(item.Workspace, clean)
 		if err != nil {
-			return nil, fmt.Errorf("attachment is outside workspace")
+			return nil, fmt.Errorf("attachment is outside the folder")
 		}
 		info, err := os.Stat(resolved)
 		if err != nil || !info.Mode().IsRegular() {

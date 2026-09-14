@@ -50,7 +50,7 @@ func (s *Shell) Description() string {
 	if len(cfg.Command) > 0 && shellCommandName(cfg.Command[0]) == "powershell" {
 		syntax = "Windows PowerShell 5: use `;` to chain commands, not `&&`."
 	}
-	description := "Run an unconfined inline command from the workspace root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation. Agent-written Windows host scripts cannot be executed; use run_script for multi-line source. " + syntax
+	description := "Run an unconfined inline command from the folder root. Shell has no network in service context (enforced outside the tool layer); use fetch_url for every network operation. Agent-written Windows host scripts cannot be executed; use run_script for multi-line source. " + syntax
 	if cfg.ServiceAccount.Enabled && len(operatorCommands) > 0 {
 		description += " Git and other configured operator commands run as the operator after one decision per run; expect one prompt, not one per call."
 	}
@@ -113,9 +113,9 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 		refusal, ambiguous := inspectShellFileRouting(command)
 		if refusal != nil {
 			if cfg.ServiceAccount.Enabled && refusal.Replacement.Tool == "find_files" && routingReplacementOutsideWorkspace(item.Workspace, refusal) {
-				refusal.Reason = "direct file discovery path is outside the workspace while the service-account split is enabled"
+				refusal.Reason = "direct file discovery path is outside the folder while the service-account split is enabled"
 				refusal.Replacement = nil
-				refusal.Guidance = "paths outside the workspace require an operator decision; state the need once and stop rather than retrying paths"
+				refusal.Guidance = "paths outside the folder require an operator decision; state the need once and stop rather than retrying paths"
 			}
 			result, _ := json.Marshal(refusal)
 			replacement := "none"

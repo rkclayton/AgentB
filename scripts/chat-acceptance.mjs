@@ -129,6 +129,10 @@ const fakeHandler = async (request, response) => {
     response.end(`data: ${JSON.stringify({ choices: [{ delta: { content: " COMPLETE" }, finish_reason: "stop" }], usage: { prompt_tokens: response.agentbPromptTokens || 120, completion_tokens: 12, prompt_tokens_details: { cached_tokens: 80 } } })}\n\ndata: [DONE]\n\n`);
     return;
   }
+  if (user.includes("acceptance: scratch file")) {
+    if (!hasToolAfterLatestUser(body)) return stream(response, { tool_calls: [{ index: 0, id: "scratch-write", type: "function", function: { name: "write_file", arguments: JSON.stringify({ path: "scratch-proof.txt", content: "scratch tool passed\n" }) } }] }, "tool_calls");
+    return stream(response, { content: "SCRATCH FILE COMPLETE" });
+  }
   if (user.includes("acceptance: menu stream")) {
     const count = toolCountAfterLatestUser(body);
     await sleep(400);
@@ -367,19 +371,42 @@ if (realModel) {
   await browser.wait(`new URLSearchParams(location.search).get('session')?.startsWith('s')`, "new session selected");
   record("agent-tab-new-chat-idle");
   snapshot = await state();
-  const sessionID = await browser.evaluate(`new URLSearchParams(location.search).get('session')`);
+  let sessionID = await browser.evaluate(`new URLSearchParams(location.search).get('session')`);
   const session = snapshot.sessions[sessionID];
   assert.equal(session?.id, sessionID, "selected new chat must exist in the server snapshot");
   record("new-chat");
 
+  const fixtureSessionID = sessionID;
+  await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
+  await page.locator("#new-chat-workspace").click();
+  await page.getByRole("button", { name: "Scratch", exact: true }).click();
+  await browser.wait(`new URLSearchParams(location.search).get('session') !== ${JSON.stringify(sessionID)}`, "scratch chat selected");
+  sessionID = await browser.evaluate(`new URLSearchParams(location.search).get('session')`);
+  snapshot = await state();
+  const scratch = snapshot.sessions[sessionID];
+  assert.equal(scratch?.scratch, true);
+  assert.equal(scratch?.workspace_dir, join(args.data, "scratch", sessionID));
+  await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
+  await browser.wait(`document.querySelector('.shell-folder-title')?.innerText.endsWith('· scratch')`, "scratch title");
+  assert.equal(await page.locator(".shell-folder-title").getAttribute("title"), join(args.data, "scratch", sessionID));
+  await setTask("acceptance: scratch file");
+  await browser.wait(`[...document.querySelectorAll('.approval-card')].some(item=>item.innerText.toLowerCase().includes('run as you'))`, "scratch file identity card");
+  assert.equal(await clickText(".approval-card button", "Yes, for this chat"), true);
+  await waitProjectedChatText(sessionID, "SCRATCH FILE COMPLETE", "scratch file tool");
+  assert.equal(await readFile(join(args.data, "scratch", sessionID, "scratch-proof.txt"), "utf8"), "scratch tool passed\n");
+  record("scratch-chat-title-and-file-tool");
+  sessionID = fixtureSessionID;
+  await page.goto(`http://127.0.0.1:${appPort}/chat?session=${sessionID}`);
+  await browser.wait(`document.querySelector('#chat-task')`, "fixture chat restored after scratch acceptance");
+
   await page.locator("#chat-task").fill("acceptance: prose stream");
   await page.locator("#chat-send").click();
   await waitProjectedChatText(sessionID, "VISIBLE PARTIAL", "mid-stream prose partial");
-  await browser.wait(`document.querySelector('.chat-response-prose')?.innerText.includes('VISIBLE PARTIAL')`, "partial prose visible without expansion");
+  await browser.wait(`[...document.querySelectorAll('.chat-response-prose')].at(-1)?.innerText.includes('VISIBLE PARTIAL')`, "partial prose visible without expansion");
   const partialProse = await browser.evaluate(`(() => ({
-    text: document.querySelector('.chat-response-prose')?.innerText || '',
-    turnExpanded: document.querySelector('.chat-response-summary')?.getAttribute('aria-expanded'),
-    caret: document.querySelector('.chat-response-prose .stream-caret')?.isConnected || false,
+    text: [...document.querySelectorAll('.chat-response-prose')].at(-1)?.innerText || '',
+    turnExpanded: [...document.querySelectorAll('.chat-response-summary')].at(-1)?.getAttribute('aria-expanded'),
+    caret: [...document.querySelectorAll('.chat-response-prose')].at(-1)?.querySelector('.stream-caret')?.isConnected || false,
     status: document.querySelector('#chat-notice')?.innerText || ''
   }))()`);
   assert.match(partialProse.text, /VISIBLE PARTIAL/);
@@ -661,7 +688,7 @@ if (realModel) {
   const missingArgsFixture = await page.evaluate(() => {
     const summary = document.querySelector('.chat-response-summary');
     return {
-      rows: document.querySelectorAll('[data-entry-key]').length,
+      rows: document.querySelectorAll('[data-entry-key^="hotfix:"]').length,
       responseAlarm: summary?.closest('.chat-response')?.classList.contains('alarm') || false,
       failureAlarm: document.querySelector('.chat-render-failure')?.classList.contains('alarm') || false,
       text: document.querySelector('#chat-log')?.innerText || ''
@@ -995,16 +1022,16 @@ if (realModel) {
   await browser.wait(`location.pathname==='/' && document.querySelector('#settings-page') && document.querySelector('.shell-settings')?.getAttribute('href')`, "Console settings control");
   await page.locator(".shell-settings").click();
   await browser.wait(`!document.querySelector('#settings-page').hidden`, "Settings open");
-  assert.equal(await clickText(".settings-nav button", "Workspace"), true);
-  await browser.wait(`!document.querySelector('#settings-page').hidden && document.querySelector('.settings-content')?.innerText.includes('Adopt repository instructions')`, "operator-file Workspace settings");
-  const workspaceSettings = await browserText(".settings-content");
-  for (const text of ["attachments", "Empty", "log retention (days)", "Adopt repository instructions", "Also remove AGENTS.md / CLAUDE.md"]) assert.ok(workspaceSettings.includes(text), `Workspace settings missing ${text}`);
+  assert.equal(await clickText(".settings-nav button", "Security"), true);
+  await browser.wait(`!document.querySelector('#settings-page').hidden && document.querySelector('.settings-content')?.innerText.includes('Adopt repository instructions')`, "operator-file Security settings");
+  const folderSettings = await browserText(".settings-content");
+  for (const text of ["attachments", "Empty", "log retention (days)", "Adopt repository instructions", "Also remove AGENTS.md / CLAUDE.md"]) assert.ok(folderSettings.includes(text), `Security settings missing ${text}`);
   assert.equal(await browser.evaluate(`document.querySelector('#adopt-instruction-cleanup')?.checked`), false);
   assert.equal(await browser.evaluate(`document.querySelector('[data-path="operator_files.allow_mailbox_approvals"]')?.getAttribute('aria-checked')`), "false");
   assert.equal(await clickText(".settings-content button", "Adopt"), true);
   await waitFileContains(join(bound, "AGENT_B.md"), "Use the acceptance rules.");
   assert.equal(await readFile(join(bound, "AGENTS.md"), "utf8"), "Use the acceptance rules.\n");
-  record("workspace-operator-files-and-adopt");
+  record("folder-operator-files-and-adopt");
   assert.equal(await clickText(".settings-nav button", "Security"), true);
   await browser.wait(`document.querySelector('.settings-operator-status[data-action="operator-context"]')`, "Settings operator toggle");
   const operatorBefore = await browser.evaluate(`document.querySelector('.settings-operator-status').getAttribute('aria-pressed')`);
@@ -1307,7 +1334,7 @@ if (realModel) {
 	await browser.wait(`location.pathname==='/' && document.querySelector('#settings-page') && document.querySelector('.shell-settings')?.getAttribute('href')`, "Console settings control before Empty");
 	await page.locator(".shell-settings").click();
 	await browser.wait(`document.querySelector('#settings-page') && !document.querySelector('#settings-page').hidden`, "Settings open before Empty");
-	assert.equal(await clickText(".settings-nav button", "Workspace"), true);
+	assert.equal(await clickText(".settings-nav button", "Security"), true);
 	await browser.wait(`!document.querySelector('#settings-page').hidden && [...document.querySelectorAll('.settings-content button')].some(item=>item.textContent.trim()==='Empty')`, "attachments Empty action");
 	assert.equal(await clickText(".settings-content button", "Empty"), true);
 	assert.equal(await clickText(".settings-content button", "Confirm empty"), true);

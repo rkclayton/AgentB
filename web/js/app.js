@@ -204,10 +204,10 @@ async function clearStats() {
 
 async function flushMemory() {
   const session = Object.values(store.sessions).find((item) => item.agent_id === selectedAgent && !item.closed) || store.sessions[store.active];
-  if (!session || store.replay) return showError("An open chat is required to identify the workspace.");
+  if (!session || store.replay) return showError("An open chat is required to identify the folder.");
   try {
     const preview = await api(`/api/agents/${encodeURIComponent(selectedAgent)}/memory/flush`, { workspace: session.workspace, confirm: false });
-    if (!window.confirm(`Flush memory for ${selectedAgent} and ${preview.workspace}?\n\n${preview.agent_entries} agent entries and ${preview.workspace_entries} workspace entries will be removed.`)) return;
+    if (!window.confirm(`Flush memory for ${selectedAgent} and ${preview.workspace}?\n\n${preview.agent_entries} agent entries and ${preview.workspace_entries} folder entries will be removed.`)) return;
     await api(`/api/agents/${encodeURIComponent(selectedAgent)}/memory/flush`, { workspace: session.workspace, confirm: true });
     showFeedback(`Memory flushed for ${selectedAgent} and ${preview.workspace}.`); await refreshState();
   } catch (error) { showError(error.message); }

@@ -71,7 +71,7 @@ func TestBashIsInertWithoutDeclaredReadySandbox(t *testing.T) {
 	shell := NewShell(cfg.Shell)
 	shell.Configure(cfg)
 	detail := NewRunScript(shell).CallDetailed(context.Background(), &session.Session{Workspace: workspace}, map[string]any{"language": "bash", "source": "uname -s"})
-	if detail.Err == nil || !strings.Contains(detail.Err.Error(), "requires this workspace") {
+	if detail.Err == nil || !strings.Contains(detail.Err.Error(), "requires this folder") {
 		t.Fatalf("detail=%+v", detail)
 	}
 }

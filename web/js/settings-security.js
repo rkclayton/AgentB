@@ -74,7 +74,7 @@ function shell(active) {
     ${row("repeat", `<input id="service-account-setup-confirmation" type="password" autocomplete="new-password" aria-label="Repeat new service-account password" ${setupDisabled ? "disabled" : ""}>`)}
     <div class="settings-actions">
       <button type="button" data-action="setup-service-account" data-setup-action="${setupAction}" ${setupDisabled ? "disabled" : ""}>${setupLabel}</button>
-      <button type="button" data-action="test-shell-credential" title="${protectionReady ? "" : "Apply host protection before testing workspace access."}" ${canTestIdentity ? "" : "disabled"}>Test identity</button>
+      <button type="button" data-action="test-shell-credential" title="${protectionReady ? "" : "Apply host protection before testing folder access."}" ${canTestIdentity ? "" : "disabled"}>Test identity</button>
       <button type="button" data-action="refresh-service-account" ${serviceAccountBusy ? "disabled" : ""}>Refresh</button>
     </div>
     ${feedback(serviceAccountMessage, serviceAccountAlarm, "The non-admin Windows account used by shell and file tools. Windows may request approval.")}
@@ -88,7 +88,7 @@ function shell(active) {
 	  <button type="button" data-action="refresh-hardening">Refresh</button>
 	  <button type="button" class="${armed.has("hardening:remove") ? "confirm" : ""}" data-action="remove-hardening" ${canInspect ? "" : "disabled"}>${armed.has("hardening:remove") ? "Confirm remove" : "Remove"}</button>
 	</div>
-	${feedback(protectionFeedback, hardeningAlarm || !!applyBlocker, "Apply protection requests Windows approval, grants workspace access, then tests the service identity.")}
+	${feedback(protectionFeedback, hardeningAlarm || !!applyBlocker, "Apply protection requests Windows approval, grants folder access, then tests the service identity.")}
 	<div class="settings-subhead">Code signing</div>
 	<p class="settings-note">Gives this installation a stable publisher identity and trusted local chain; it does not create Defender cloud reputation.</p>
 	${row("certificate", `<span class="account-status"><span class="lamp ${certificateDone ? "live" : ""}"></span>${html(certificateDone ? `${signingStatus.subject} · ${signingStatus.thumbprint}` : "not done")}</span>`)}
@@ -141,7 +141,7 @@ function sessionControls(active) {
   return `<div class="settings-actions vertical">
       <button type="button" class="${armed.has(resetKey) ? "confirm" : ""}" data-action="reset-session" data-id="${attr(active.id)}">${armed.has(resetKey) ? "Confirm clear" : "Clear conversation"}</button>
     </div>
-    <p class="settings-note">Clears messages and run counters; keeps workspace, profile, enabled tools, and memory.</p>
+    <p class="settings-note">Clears messages and run counters; keeps folder, profile, enabled tools, and memory.</p>
     ${copyRow("JSONL", active.log_path || "")}`;
 }
 

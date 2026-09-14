@@ -432,7 +432,7 @@ func (m *Manager) ExportChat(snapshot session.Snapshot) (string, error) {
 	base := filepath.Join(dir, date+"-"+name+".md")
 	path := availablePath(base)
 	var body strings.Builder
-	fmt.Fprintf(&body, "# %s\n\n- chat: `%s`\n- agent: %s\n- workspace: `%s`\n- closed: %s\n\n## Transcript\n", snapshot.Label, snapshot.ID, snapshot.AgentName, snapshot.Workspace, m.now().UTC().Format(time.RFC3339))
+	fmt.Fprintf(&body, "# %s\n\n- chat: `%s`\n- agent: %s\n- folder: `%s`\n- closed: %s\n\n## Transcript\n", snapshot.Label, snapshot.ID, snapshot.AgentName, snapshot.Workspace, m.now().UTC().Format(time.RFC3339))
 	messages, err := m.exportMessages(snapshot)
 	if err != nil {
 		return "", err
@@ -552,7 +552,7 @@ func DirKey(dir string) string {
 	sum := sha256.Sum256([]byte(key))
 	name := safeName(filepath.Base(abs))
 	if name == "" {
-		name = "workspace"
+		name = "folder"
 	}
 	return name + "-" + hex.EncodeToString(sum[:4])
 }

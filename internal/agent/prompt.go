@@ -58,6 +58,8 @@ func (r *PromptRenderer) RenderMemoryParts(profile *config.Profile, s *session.S
 		}
 	}
 	value := strings.ReplaceAll(template, "{{workspace}}", s.Workspace)
+	value = strings.ReplaceAll(value, "{{folder}}", s.Workspace)
+	value = strings.ReplaceAll(value, "{{plans}}", s.PlansRoot)
 	value = strings.ReplaceAll(value, "{{tools}}", strings.Join(toolNames, ", "))
 	value = strings.ReplaceAll(value, "{{agent}}", agentBlock)
 	value = strings.ReplaceAll(value, "{{project}}", project)

@@ -29,6 +29,7 @@ type Registry struct {
 	agentMemory func(context.Context, string, string) (string, string, error)
 	workspaces  *workspaceinfo.Manager
 	plansRoot   string
+	scratchRoot string
 }
 
 func NewRegistry(bus *events.Bus, writers *events.Writers, profiles func(string) (*config.Profile, bool), maxTurns int, settings func() config.Config) *Registry {
@@ -41,7 +42,10 @@ func (r *Registry) SetAgentMemoryLoader(loader func(context.Context, string, str
 	r.agentMemory = loader
 }
 func (r *Registry) SetWorkspaceManager(manager *workspaceinfo.Manager) { r.workspaces = manager }
-func (r *Registry) SetPlansRoot(root string)                           { r.plansRoot = filepath.Clean(root) }
+func (r *Registry) SetPlansRoot(root string) {
+	r.plansRoot = filepath.Clean(root)
+	r.scratchRoot = filepath.Join(filepath.Dir(r.plansRoot), "scratch")
+}
 func (r *Registry) Create(label, agentID, workspace string) (*Session, error) {
 	return r.create(label, agentID, workspace, nil, "b", "")
 }
@@ -110,18 +114,19 @@ func (r *Registry) Restore(saved Snapshot) (*Session, error) {
 	if role == "" {
 		role = "b"
 	}
-	planID, planDir := "", ""
+	planID, planDir, planRepo := "", "", ""
 	if role == "d" && saved.PlanID != "" {
 		planID, err = normalizePlanID(saved.PlanID)
 		if err != nil {
 			return nil, fmt.Errorf("restore session %s: %w", saved.ID, err)
 		}
 		planDir = filepath.Join(r.plansRoot, planID)
+		planRepo = planRepoForRestore(planDir, saved.PlanRepo)
 	}
 	s := &Session{
 		ID: saved.ID, Label: saved.Label, AgentID: saved.AgentID, ServerID: saved.ServerID,
-		AgentName: saved.AgentName, BProfile: saved.BProfile, Role: role, PlanID: planID, PlanName: saved.PlanName, PlanDir: planDir, PlansRoot: r.plansRoot, PromptAddendum: agent.PromptAddendum,
-		Workspace: firstNonempty(saved.WorkspaceDir, saved.Workspace), WorkspaceMissing: saved.WorkspaceMissing,
+		AgentName: saved.AgentName, BProfile: saved.BProfile, Role: role, PlanID: planID, PlanName: saved.PlanName, PlanDir: planDir, PlanRepo: planRepo, PlansRoot: r.plansRoot, PromptAddendum: agent.PromptAddendum,
+		Workspace: firstNonempty(saved.WorkspaceDir, saved.Workspace), WorkspaceMissing: saved.WorkspaceMissing, Scratch: saved.Scratch,
 		ProjectBlock: saved.ProjectContent, ProjectFiles: append([]string(nil), saved.ProjectFiles...), ProjectNotes: append([]string(nil), saved.ProjectNotes...),
 		PendingRepoPolicy: clonePolicyState(saved.PendingRepoPolicy), RepoPolicy: clonePolicyState(saved.RepoPolicy),
 		Run: run, ToolsEnabled: tools, ToolCalls: calls, LastSeen: map[string]time.Time{}, CreatedAt: createdAt,
@@ -135,6 +140,7 @@ func (r *Registry) Restore(saved Snapshot) (*Session, error) {
 	if r.workspaces != nil && !s.WorkspaceMissing {
 		s.ProjectTouch = r.projectTouch(s)
 	}
+	s.EnsurePlan = r.ensurePlanHook(s)
 	r.sessions[s.ID] = s
 	if strings.HasPrefix(s.ID, "s") {
 		if value, parseErr := strconv.Atoi(strings.TrimPrefix(s.ID, "s")); parseErr == nil && value >= r.next {
@@ -152,6 +158,12 @@ func firstNonempty(values ...string) string {
 		}
 	}
 	return ""
+}
+func planRepoForRestore(dir, saved string) string {
+	if saved != "" {
+		return saved
+	}
+	return planRepo(dir)
 }
 func planDisplayName(dir string) string {
 	data, err := os.ReadFile(filepath.Join(dir, "plan.md"))
@@ -195,7 +207,16 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 	if !ok {
 		return nil, fmt.Errorf("agent_id: %s profile %s was not found", role, profileID)
 	}
-	planDir, planName := "", ""
+	id := "main"
+	if len(r.sessions) > 0 {
+		id = fmt.Sprintf("s%d", r.next)
+		r.next++
+	}
+	autoLabel := label == ""
+	if label == "" {
+		label = id
+	}
+	planDir, planName, selectedRepo := "", "", ""
 	if role == "d" && planID != "" {
 		normalized, normalizeErr := normalizePlanID(planID)
 		if normalizeErr != nil {
@@ -207,6 +228,34 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 			return nil, fmt.Errorf("plan_id: plan not found")
 		}
 		planName = planDisplayName(planDir)
+		selectedRepo = planRepo(planDir)
+		if workspace == "" {
+			workspace = selectedRepo
+		}
+	}
+	scratch := workspace == ""
+	if scratch {
+		if r.scratchRoot == "" {
+			return nil, fmt.Errorf("scratch storage is unavailable")
+		}
+		for {
+			workspace = filepath.Join(r.scratchRoot, id)
+			_, statErr := os.Lstat(workspace)
+			if os.IsNotExist(statErr) {
+				break
+			}
+			if statErr != nil {
+				return nil, statErr
+			}
+			id = fmt.Sprintf("s%d", r.next)
+			r.next++
+			if autoLabel {
+				label = id
+			}
+		}
+		if err := os.MkdirAll(workspace, 0o700); err != nil {
+			return nil, err
+		}
 	}
 	abs, err := filepath.Abs(workspace)
 	if err != nil {
@@ -220,13 +269,10 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 		}
 		abs = setup.Dir
 	}
-	id := "main"
-	if len(r.sessions) > 0 {
-		id = fmt.Sprintf("s%d", r.next)
-		r.next++
-	}
-	if label == "" {
-		label = id
+	if !scratch && r.plansRoot != "" && hasAgentFile(abs) {
+		if _, _, err := r.ensurePlanLocked(abs); err != nil {
+			return nil, err
+		}
 	}
 	logPath, err := r.writers.OpenSession(id)
 	if err != nil {
@@ -282,10 +328,11 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 			return nil, err
 		}
 	}
-	session := &Session{ID: id, Label: label, AgentID: agentID, ServerID: profileID, AgentName: agent.Name, BProfile: profile.Label, Role: role, PlanID: planID, PlanName: planName, PlanDir: planDir, PlansRoot: r.plansRoot, PromptAddendum: agent.PromptAddendum, Workspace: abs, WorkspaceMissing: setup.Missing, ProjectBlock: setup.Instructions.Block, ProjectFiles: setup.Instructions.Files, ProjectNotes: setup.Instructions.Notes, PendingRepoPolicy: pendingPolicy, RepoPolicy: activePolicy, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, AgentMemoryBlock: agentMemoryBlock, AgentMemoryPath: agentMemoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
+	session := &Session{ID: id, Label: label, AgentID: agentID, ServerID: profileID, AgentName: agent.Name, BProfile: profile.Label, Role: role, PlanID: planID, PlanName: planName, PlanDir: planDir, PlanRepo: selectedRepo, PlansRoot: r.plansRoot, PromptAddendum: agent.PromptAddendum, Workspace: abs, WorkspaceMissing: setup.Missing, Scratch: scratch, ProjectBlock: setup.Instructions.Block, ProjectFiles: setup.Instructions.Files, ProjectNotes: setup.Instructions.Notes, PendingRepoPolicy: pendingPolicy, RepoPolicy: activePolicy, Run: RunState{Status: "idle", MaxTurns: r.maxTurns}, ToolsEnabled: tools, ToolCalls: map[string]int{}, LastSeen: map[string]time.Time{}, CreatedAt: time.Now().UTC(), LogPath: logPath, Runnable: runnable, NotRunnableReason: reason, MemoryBlock: memoryBlock, MemoryPath: memoryPath, AgentMemoryBlock: agentMemoryBlock, AgentMemoryPath: agentMemoryPath, SchemaTokens: map[string]int{}, MarginalTokens: map[string]int{}}
 	if r.workspaces != nil && !setup.Missing {
 		session.ProjectTouch = r.projectTouch(session)
 	}
+	session.EnsurePlan = r.ensurePlanHook(session)
 	session.Messages = []events.Message{}
 	session.Budget = initialBudget(profile)
 	r.sessions[id] = session
@@ -294,6 +341,24 @@ func (r *Registry) create(label, agentID, workspace string, enabled map[string]b
 		r.bus.Publish(events.New(events.ProjectInstructions, id, "", map[string]any{"block": setup.Instructions.Block, "files": setup.Instructions.Files, "notes": setup.Instructions.Notes, "lazy": false}))
 	}
 	return session, nil
+}
+
+func hasAgentFile(dir string) bool {
+	for _, name := range []string{"AGENT_B.md", "AGENTS.md", "CLAUDE.md"} {
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *Registry) ensurePlanHook(item *Session) func(string) {
+	return func(dir string) {
+		if item.Scratch || !hasAgentFile(dir) {
+			return
+		}
+		_, _, _ = r.EnsurePlan(dir)
+	}
 }
 
 func (r *Registry) ApplyRepoPolicySession(sessionID string, state workspaceinfo.PolicyState) error {
@@ -359,6 +424,7 @@ func (r *Registry) BindWorkspace(sessionID, dir string) (*Session, error) {
 	}
 	s.Workspace = setup.Dir
 	s.WorkspaceMissing = false
+	s.Scratch = false
 	s.ProjectBlock = setup.Instructions.Block
 	s.ProjectFiles = append([]string(nil), setup.Instructions.Files...)
 	s.ProjectNotes = append([]string(nil), setup.Instructions.Notes...)
@@ -379,6 +445,9 @@ func (r *Registry) BindWorkspace(sessionID, dir string) (*Session, error) {
 	}
 	bound := s.SnapshotUnlocked()
 	s.mu.Unlock()
+	if hasAgentFile(setup.Dir) && s.EnsurePlan != nil {
+		s.EnsurePlan(setup.Dir)
+	}
 	r.bus.Publish(events.New(events.WorkspaceBound, sessionID, "", map[string]any{
 		"workspace_dir": bound.WorkspaceDir, "workspace_missing": bound.WorkspaceMissing,
 		"project_content": bound.ProjectContent, "project_files": bound.ProjectFiles, "project_notes": bound.ProjectNotes,

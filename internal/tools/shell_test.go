@@ -567,7 +567,7 @@ func TestShellFileRoutingDoesNotRedirectOutsideWorkspaceWhenSplitEnabled(t *test
 	if err := json.Unmarshal([]byte(strings.TrimPrefix(detail.Err.Error(), "note: command was not executed; ")), &refusal); err != nil {
 		t.Fatal(err)
 	}
-	if refusal.Replacement != nil || !strings.Contains(refusal.Reason, "outside the workspace") || !strings.Contains(refusal.Guidance, "require an operator decision") {
+	if refusal.Replacement != nil || !strings.Contains(refusal.Reason, "outside the folder") || !strings.Contains(refusal.Guidance, "require an operator decision") {
 		t.Fatalf("outside-workspace refusal=%+v", refusal)
 	}
 }

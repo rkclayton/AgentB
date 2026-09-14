@@ -98,7 +98,7 @@ func TestFileIdentityDisabledKeepsWorkspaceBoundary(t *testing.T) {
 	_, err := identity.Wrap(NewListDir(config.Defaults(workspace).Tools.ListDir)).Call(
 		context.Background(), &session.Session{Workspace: workspace}, map[string]any{"path": external},
 	)
-	if err == nil || !strings.Contains(err.Error(), "outside the workspace") {
+	if err == nil || !strings.Contains(err.Error(), "outside the folder") {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -156,7 +156,7 @@ func TestFileToolJailDescriptionOnlyWhenServiceSplitEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(string(off), "Try once. If it's outside your workspace") {
+	if strings.Contains(string(off), "Try once. If it's outside your folder") {
 		t.Fatalf("disabled split changed description: %s", off)
 	}
 	cfg.Shell.ServiceAccount.Enabled = true
@@ -165,7 +165,7 @@ func TestFileToolJailDescriptionOnlyWhenServiceSplitEnabled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "Try once. If it's outside your workspace the operator will be asked; don't retry other paths."
+	want := "Try once. If it's outside your folder the operator will be asked; don't retry other paths."
 	if strings.Count(string(on), want) != len(names) || string(on) == string(off) {
 		t.Fatalf("enabled split schema=%s", on)
 	}

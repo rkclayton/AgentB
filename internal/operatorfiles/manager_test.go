@@ -176,7 +176,7 @@ func TestChatExportGoldenCollapsesToolsAndReferencesAttachments(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	want := "# Review build\n\n- chat: `s1`\n- agent: Local\n- workspace: `" + filepath.Join(manager.Root(), "repo") + "`\n- closed: 2026-09-08T02:03:04Z\n\n## Transcript\n\n### You\n\nReview this.\n\n- attachment: `attachments/spec.pdf`\n\n### Summary\n\nKept the requested change.\n\n### Agent\n\nChecking.\n\n- tool `read_file` · requested · turn 1\n\n- tool `read_file` · ok · turn 1\n\n### Agent\n\nDone.\n"
+	want := "# Review build\n\n- chat: `s1`\n- agent: Local\n- folder: `" + filepath.Join(manager.Root(), "repo") + "`\n- closed: 2026-09-08T02:03:04Z\n\n## Transcript\n\n### You\n\nReview this.\n\n- attachment: `attachments/spec.pdf`\n\n### Summary\n\nKept the requested change.\n\n### Agent\n\nChecking.\n\n- tool `read_file` · requested · turn 1\n\n- tool `read_file` · ok · turn 1\n\n### Agent\n\nDone.\n"
 	if string(data) != want {
 		t.Fatalf("export mismatch\n--- got ---\n%s\n--- want ---\n%s", data, want)
 	}

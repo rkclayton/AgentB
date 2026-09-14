@@ -101,6 +101,12 @@ func (s *Server) operatorFileState(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusConflict, err.Error(), "dir")
 				return
 			}
+			if s.registry != nil {
+				if _, _, ensureErr := s.registry.EnsurePlan(body.Dir); ensureErr != nil {
+					writeError(w, http.StatusInternalServerError, ensureErr.Error(), "plans")
+					return
+				}
+			}
 			writeJSON(w, http.StatusOK, map[string]any{"path": path, "removed": removed})
 		default:
 			writeError(w, http.StatusBadRequest, "action must be empty_attachments or adopt_instructions", "action")

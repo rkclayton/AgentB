@@ -303,7 +303,7 @@ func classifyLogonFailure(err error) error {
 		case errorLogonTypeNotGranted:
 			return &serviceSpawnError{kind: "service account lacks the required logon right", err: errno}
 		case errorDirectory:
-			return &serviceSpawnError{kind: "service account cannot access the configured workspace", err: errno}
+			return &serviceSpawnError{kind: "service account cannot access the configured folder", err: errno}
 		}
 	}
 	return &serviceSpawnError{kind: "CreateProcessWithLogonW failed", err: err}

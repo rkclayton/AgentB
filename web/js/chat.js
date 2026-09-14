@@ -837,7 +837,7 @@ function createBindCard(session) {
 	const card = document.createElement("section"); card.className = "approval-card workspace-bind-card";
 	const title = document.createElement("span"); title.textContent = "Allow this";
 	const heading = document.createElement("strong"); heading.textContent = `Bind this chat to ${session.pending_bind.dir}?`;
-	const reason = document.createElement("span"); reason.textContent = "The directory named in your message is outside this chat's workspace.";
+	const reason = document.createElement("span"); reason.textContent = "The directory named in your message is outside this chat's folder.";
 	const actions = document.createElement("div"); actions.className = "approval-actions";
 	for (const [label, decision] of [["Yes", "yes"], ["No", "no"]]) {
 		const button = document.createElement("button"); button.type = "button"; button.textContent = label;

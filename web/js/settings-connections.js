@@ -85,7 +85,7 @@ function profileFields(profile, reason) {
     <div class="profile-fieldset profile-sampling"><h4>Sampling</h4><div class="sampling-grid"><div></div><div class="sampling-column">Thinking</div><div class="sampling-column">Non-thinking</div>${samplingRows}</div></div>
     <div class="profile-fieldset profile-prompt"><h4>System prompt</h4>
     ${textarea(`${p}.system_prompt_override`, "system prompt override", profile.system_prompt_override || "")}
-    <p class="settings-note">variables: {{workspace}} {{tools}} {{agent}} {{project}} {{memory}}</p></div>
+    <p class="settings-note">variables: {{folder}} {{plans}} {{tools}} {{agent}} {{project}} {{memory}}</p></div>
     <div class="profile-fieldset profile-capabilities"><h4>Capabilities</h4>
     <div class="findings"><span class="settings-note">${html(caps.probed_at || "not probed")}</span><ul>${findings || "<li>no findings</li>"}</ul></div>
     ${reason && reason !== "context length unknown" ? `<p class="field-error">${html(reason)}</p>` : ""}

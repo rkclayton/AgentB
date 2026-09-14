@@ -10,7 +10,7 @@ import (
 )
 
 func nativeFolderPicker(initial string) (string, error) {
-	script := `Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description='Bind new Agent_b chat to a workspace'; $d.SelectedPath=$args[0]; if($d.ShowDialog() -eq 'OK'){[Console]::Out.Write($d.SelectedPath)}else{exit 2}`
+	script := `Add-Type -AssemblyName System.Windows.Forms; $d=New-Object System.Windows.Forms.FolderBrowserDialog; $d.Description='Choose a folder for the new Agent_b chat'; $d.SelectedPath=$args[0]; if($d.ShowDialog() -eq 'OK'){[Console]::Out.Write($d.SelectedPath)}else{exit 2}`
 	cmd := exec.Command("powershell.exe", "-NoProfile", "-STA", "-Command", script, initial)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	out, err := cmd.Output()

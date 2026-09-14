@@ -101,7 +101,7 @@ test("New chat uses the fixed left plus and history uses the agent right-click m
   assert.match(html, /id="app-shell"[^>]+data-page="console"/);
   assert.match(shell, /left\.append\(newChatButton, newChatMenu, tabs\)/);
   assert.match(shell, /hasD \? showRoleMenu/);
-  assert.match(shell, /: void createChat\(selectedSession\?\.workspace \|\| store\.config\.workspace, "agent_b"\)/);
+  assert.match(shell, /: void createChat\(selectedSession\?\.workspace \|\| "", "agent_b"\)/);
   assert.doesNotMatch(shell, /wrap\.append\(newChatButton\)|wrap\.append\(add\)/);
   assert.match(shell, /oncontextmenu/);
   assert.match(shell, /agent-chat-rename/);
@@ -116,13 +116,16 @@ test("New chat uses the fixed left plus and history uses the agent right-click m
   assert.match(shell, /Stop it before closing the chat/);
 });
 
-test("workspace choice displaced from plus lives on Console because it is per-chat", () => {
-  assert.match(consoleHTML, /id="new-chat-workspace"[^>]*>New chat in workspace…<\/button>/);
+test("optional folder choice lives on Console because it is per-chat", () => {
+  assert.match(consoleHTML, /id="new-chat-workspace"[^>]*>New chat…<\/button>/);
   assert.match(shell, /agentb:new-chat-workspace/);
   assert.match(shell, /menu\.hidden = true/);
   assert.match(shell, /api\("\/api\/pick-folder", undefined, "GET"\)/);
   assert.match(shell, /api\("\/api\/pick-folder", \{ default: choices\.default \}\)/);
+  assert.match(shell, /addChoice\("Scratch", ""\)/);
+  assert.match(shell, /Last plan/);
   assert.match(shell, /\{ source_session_id: source\.id, workspace \}/);
+  assert.match(shell, /source && source\.role !== "d" && workspace/);
 });
 
 test("Composer is five lines with no placeholder and expands upward", () => {

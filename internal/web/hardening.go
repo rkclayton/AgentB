@@ -133,12 +133,12 @@ func (s *Server) hostHardening(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if body.Action == "apply" {
-		s.progressHardening("Host protections verified; testing service-account workspace access…")
+		s.progressHardening("Host protections verified; testing service-account folder access…")
 		testContext, testCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		testMessage, testErr := s.shellTest(testContext)
 		testCancel()
 		if testErr != nil {
-			message = "host protections were applied, but service-account workspace access failed: " + testMessage
+			message = "host protections were applied, but service-account folder access failed: " + testMessage
 			s.finishHardening("failed", message)
 			writeJSON(w, http.StatusOK, map[string]any{"ok": false, "message": message, "status": status, "operation": s.hardeningOperation()})
 			return

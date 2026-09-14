@@ -10,6 +10,7 @@ import (
 	"harness/internal/config"
 	"harness/internal/events"
 	"harness/internal/projection"
+	"harness/internal/session"
 	workspaceinfo "harness/internal/workspace"
 )
 
@@ -69,7 +70,6 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		}
 		if body.Workspace == "" {
 			s.mu.RLock()
-			body.Workspace = s.cfg.Workspace
 			if body.AgentID == "" {
 				body.AgentID = s.cfg.DefaultAgentID()
 			}
@@ -102,6 +102,22 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) plans(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+		var body struct {
+			ID   string `json:"id"`
+			Repo string `json:"repo"`
+		}
+		if !decode(w, r, &body) {
+			return
+		}
+		plan, err := s.registry.SetPlanRepo(body.ID, body.Repo)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error(), "repo")
+			return
+		}
+		writeJSON(w, http.StatusOK, plan)
+		return
+	}
 	if r.Method != http.MethodGet {
 		method(w)
 		return
@@ -116,24 +132,11 @@ func (s *Server) plans(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, err.Error(), "plans")
 		return
 	}
-	values := []map[string]string{}
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		id := entry.Name()
-		name := id
-		if data, readErr := os.ReadFile(filepath.Join(root, id, "plan.md")); readErr == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				if strings.HasPrefix(strings.TrimSpace(line), "#") {
-					if value := strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#")); value != "" {
-						name = value
-						break
-					}
-				}
-			}
-		}
-		values = append(values, map[string]string{"id": id, "name": name})
+	_ = entries
+	values, err := session.ListPlans(root)
+	if err != nil {
+		writeError(w, 500, err.Error(), "plans")
+		return
 	}
 	writeJSON(w, 200, values)
 }

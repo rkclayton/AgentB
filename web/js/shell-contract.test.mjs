@@ -17,7 +17,7 @@ test("shared shell slot order is identical on Chat Console and Plan", () => {
     assert.doesNotMatch(html, /id="(?:shell-stop|shell-state|shell-operator-status)"/);
   }
   assert.match(shell, /root\.append\(left, right\)/);
-  assert.match(shell, /right\.append\(pages, settings\)/);
+  assert.match(shell, /right\.append\(folderTitle, folderMenu, pages, settings\)/);
   assert.doesNotMatch(shell, /shell-operator-status|right\.append\(stop/);
   assert.match(shell, /\[\["plan", "\/plan"\]\]/);
   assert.doesNotMatch(shell, /\["chat", "Chat", "\/chat"\]|\["console", "Console", "\/"\]/);
@@ -60,7 +60,8 @@ test("plus adds a two-line d choice only for an assigned d profile", () => {
   assert.match(shell, /agent_b · \$\{name\} — chat/);
   assert.match(shell, /agent_d · \$\{name\} — plan/);
   assert.match(shell, /add\("none"\)/);
-  assert.match(shell, /for \(const plan of plans\) add\(plan\.name \|\| plan\.id, plan\.id\)/);
+  assert.match(shell, /for \(const plan of plans\)/);
+  assert.match(shell, /planRepoEditor\(plan/);
 });
 
 test("Plan is a compact accessible brain icon", () => {

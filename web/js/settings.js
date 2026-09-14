@@ -46,7 +46,6 @@ const serverProfiles = () => Array.isArray(store.servers) ? store.servers : [];
 
 const sectionLabels = [
   ["servers", "Connections"],
-  ["workspace", "Workspace"],
   ["context", "Context"],
   ["run", "Run & approval"],
   ["delivery", "Delivery"],
@@ -158,13 +157,12 @@ function render() {
   const content = {
     servers: () => renderConnectionsPage(settingsPageContext(active)),
     sessions: () => renderGeneralPage("sessions", active, settingsPageContext(active)),
-    workspace: () => renderWorkspacePage(settingsPageContext(active)),
     tools: () => renderGeneralPage("tools", active, settingsPageContext(active)),
     memory: () => renderGeneralPage("memory", active, settingsPageContext(active)),
     context: () => renderContextPage(active, settingsPageContext(active)),
     run: () => renderRunPage(settingsPageContext(active)),
     delivery: () => renderDeliveryPage(settingsPageContext(active)),
-    shell: () => renderSecurityPage("shell", active, settingsPageContext(active)),
+    shell: () => renderSecurityPage("shell", active, settingsPageContext(active)) + renderWorkspacePage(settingsPageContext(active)),
     about: () => renderAboutPage(settingsPageContext(active)),
     session: () => renderSecurityPage("session", active, settingsPageContext(active)),
   };
@@ -228,14 +226,14 @@ function group(name, content) {
 
 async function refreshWorkspaceState() {
 	try { workspaceState=await api("/api/workspaces",undefined,"GET") } catch { workspaceState=[] }
-	if(open&&activeSection==="workspace")render();
+	if(open&&activeSection==="shell")render();
 }
 
 async function refreshOperatorFileState() {
 	const dir=store.sessions[store.active]?.workspace||store.config.workspace||"";
 	try { operatorFileState=await api(`/api/operator-files?dir=${encodeURIComponent(dir)}`,undefined,"GET") }
 	catch { operatorFileState={attachment_files:0,attachment_bytes:0,instruction_found:[]} }
-	if(open&&activeSection==="workspace")render();
+	if(open&&activeSection==="shell")render();
 }
 
 function row(label, control, extra = "") {

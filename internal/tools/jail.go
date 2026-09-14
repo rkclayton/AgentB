@@ -68,7 +68,7 @@ func resolvePath(workspace, path string, enforceWorkspace bool) (string, error) 
 		}
 		parent := filepath.Dir(existing)
 		if parent == existing {
-			return "", fmt.Errorf("path is outside the workspace")
+			return "", fmt.Errorf("path is outside the folder")
 		}
 		existing = parent
 	}
@@ -83,7 +83,7 @@ func resolvePath(workspace, path string, enforceWorkspace bool) (string, error) 
 	candidate = filepath.Join(resolved, rest)
 	rel, err := filepath.Rel(root, candidate)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("path is outside the workspace")
+		return "", fmt.Errorf("path is outside the folder")
 	}
 	return candidate, nil
 }

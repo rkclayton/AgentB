@@ -16,7 +16,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$displayVersion = '0.51.0'
+$displayVersion = '0.52.0'
 
 function Get-FullPath {
     param([string]$Path)
@@ -489,10 +489,10 @@ if ($Alpha -or ($config.shell.service_account -and [bool]$config.shell.service_a
 	$aclAccount = if ($config.shell.service_account.account) { [string]$config.shell.service_account.account } else { 'agentb-svc' }
 	$installedAclScript = Join-Path $applicationRoot 'scripts\apply-acls.ps1'
 	& $installedAclScript -AccountName $aclAccount -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -NoPrompt -Confirm:$false
-	Write-Host 'VERIFY: installed root, plans-directory exception, workspace, and exchange-folder ACL policy'
+	Write-Host 'VERIFY: installed root, plans/scratch exceptions, workspace, and exchange-folder ACL policy'
 	& $installedAclScript -AccountName $aclAccount -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -Verify
 	if ($LASTEXITCODE -ne 0) { throw "Installed ACL policy verification failed with exit code $LASTEXITCODE." }
-	Write-Host 'PASS: installed root, plans-directory exception, workspace, and exchange-folder ACL policy'
+	Write-Host 'PASS: installed root, plans/scratch exceptions, workspace, and exchange-folder ACL policy'
 }
 
 $iconPath = Join-Path $applicationRoot 'web\assets\Agent_b.ico'

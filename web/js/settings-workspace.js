@@ -3,20 +3,16 @@ function useSettingsContext(context) {
   ({ store, armed, workspaceState, operatorFileState, row, number, toggle, currentValue, html, attr } = context);
 }
 
-function workspaces() {
-	const sandboxWorkspaces=currentValue("sandbox.workspaces",store.config.sandbox?.workspaces||{});
-	const sandboxStatus=store.sandbox||{reason:"sandbox capability has not been checked",findings:[]};
+function folders() {
 	const directories = workspaceState.length ? workspaceState.map((item) => {
 		const policyKey=`policy:${item.dir}`; const policy=item.policy;
-		const sandboxed=sandboxWorkspaces[item.dir]===true;
-		return `<div class="session-row workspace-row"><span class="path" title="${attr(item.dir)}">${html(item.dir)}</span><span>${item.memory_count} memory ${item.memory_count===1?"entry":"entries"}</span><span>${html(relativeDate(item.last_used))}</span><button type="button" role="switch" aria-checked="${sandboxed}" class="switch ${sandboxed?"on":""}" data-action="sandbox-workspace-toggle" data-id="${attr(item.dir)}" title="Run shell and bash in Docker Sandbox"></button></div>
+		return `<div class="session-row workspace-row"><span class="path" title="${attr(item.dir)}">${html(item.dir)}</span><span>${item.memory_count} memory ${item.memory_count===1?"entry":"entries"}</span><span>${html(relativeDate(item.last_used))}</span></div>
 		${policy ? `<div class="session-row workspace-policy-row"><span class="path" title="${attr(policy.path)}">${html(policy.path)}</span><code title="${attr(policy.hash)}">${html((policy.hash||"").slice(0,12))}</code><span>${html(policy.approved_at||"not approved")}</span><button type="button" class="${armed.has(policyKey)?"confirm":""}" data-action="revoke-workspace-policy" data-id="${attr(item.dir)}" ${policy.approved?"":"disabled"}>${armed.has(policyKey)?"Confirm revoke":"Revoke"}</button></div>`:""}`;
-	}).join("") : '<p class="settings-note">No known workspace directories.</p>';
-	const findings=(sandboxStatus.findings||[]).map((finding)=>`<p class="settings-note">${html(finding)}</p>`).join("");
-	return `${operatorFilesWorkspace()}<div class="settings-subhead">Docker Sandbox execution</div><p class="settings-note">${html(sandboxStatus.reason||"capability unavailable")}</p>${findings}<div class="settings-subhead">Known directories · right switch selects the execution target</div>${directories}`;
+	}).join("") : '<p class="settings-note">No known folders.</p>';
+	return `${operatorFilesFolder()}<div class="settings-subhead">Known folders</div>${directories}`;
 }
 
-function operatorFilesWorkspace() {
+function operatorFilesFolder() {
 	const bytes=Number(operatorFileState.attachment_bytes||0).toLocaleString("en-US");
 	const files=Number(operatorFileState.attachment_files||0);
 	const emptyKey="operator-attachments:empty";
@@ -40,5 +36,5 @@ function relativeDate(value) { if(!value)return "never"; const date=new Date(val
 
 export function renderWorkspacePage(context) {
   useSettingsContext(context);
-  return workspaces();
+  return folders();
 }

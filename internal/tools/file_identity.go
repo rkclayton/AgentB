@@ -63,7 +63,7 @@ func (t *identityFileTool) Description() string {
 	description := t.tool.Description()
 	service, _, _, _ := t.identity.snapshot()
 	if service.Enabled {
-		description += " Try once. If it's outside your workspace the operator will be asked; don't retry other paths."
+		description += " Try once. If it's outside your folder the operator will be asked; don't retry other paths."
 	}
 	return description
 }
@@ -111,8 +111,8 @@ func (t *identityFileTool) CallDetailed(ctx context.Context, s *session.Session,
 	if errors.Is(err, os.ErrPermission) {
 		return fileIdentityOverride("service account was denied permission for the requested path")
 	}
-	if strings.Contains(strings.ToLower(err.Error()), "path is outside the workspace") {
-		return fileIdentityOverride("bound-directory jail: path is outside the workspace")
+	if strings.Contains(strings.ToLower(err.Error()), "path is outside the folder") {
+		return fileIdentityOverride("bound-directory jail: path is outside the folder")
 	}
 	return CallDetail{Err: err}
 }

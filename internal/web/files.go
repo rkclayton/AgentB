@@ -102,7 +102,7 @@ func (s *Server) openFileFolder(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		writeError(w, http.StatusBadRequest, "scope must be workspace or exchange", "scope")
+		writeError(w, http.StatusBadRequest, "scope must be folder or exchange", "scope")
 		return
 	}
 	resolved, err := tools.Resolve(root, body.Path)

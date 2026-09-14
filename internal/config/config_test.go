@@ -935,3 +935,11 @@ func TestAttachmentConfigIsAdditiveCurrentSchema(t *testing.T) {
 		t.Fatalf("zero limit validation=%v", err)
 	}
 }
+
+func TestFullToolsetContractHasTwelveStableTools(t *testing.T) {
+	want := "read_file,list_dir,write_file,edit_file,search_text,shell,remember,recall,fetch_url,find_files,run_script,call_service"
+	got := FullToolset()
+	if len(got) != 12 || strings.Join(got, ",") != want {
+		t.Fatalf("full toolset=%v", got)
+	}
+}

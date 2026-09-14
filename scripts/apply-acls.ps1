@@ -173,6 +173,7 @@ if (($Verify.IsPresent -and $Remove.IsPresent) -or ($Inspect.IsPresent -and ($Ve
 $application = [IO.Path]::GetFullPath($ApplicationDirectory).TrimEnd('\')
 $data = [IO.Path]::GetFullPath($DataDirectory).TrimEnd('\')
 $plans = Join-Path $data 'plans'
+$scratch = Join-Path $data 'scratch'
 $workspace = [IO.Path]::GetFullPath($WorkspaceDirectory).TrimEnd('\')
 $exchange = [IO.Path]::GetFullPath([Environment]::ExpandEnvironmentVariables($ExchangeDirectory)).TrimEnd('\')
 
@@ -237,7 +238,7 @@ $sharedAnchors = @(
     [IO.Path]::GetFullPath($env:ProgramFiles).TrimEnd('\'),
     [IO.Path]::GetFullPath($env:ProgramData).TrimEnd('\')
 )
-foreach ($reachable in @($application, $workspace, $exchange, $plans)) {
+foreach ($reachable in @($application, $workspace, $exchange, $plans, $scratch)) {
     $parent = [IO.DirectoryInfo]$reachable
     while ($parent.Parent -and $parent.Parent.Parent) {
         $parent = $parent.Parent
@@ -265,6 +266,16 @@ if (-not (Test-Path -LiteralPath $plans -PathType Container) -and -not $WhatIfPr
 }
 $targets += [pscustomobject]@{ Path = $plans; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant plans-folder Modify' }
 
+if (-not (Test-Path -LiteralPath $scratch -PathType Container) -and -not $WhatIfPreference) {
+	if ($Verify -or $Inspect -or $Remove) {
+		if ($Verify) { Write-Host "DRIFT: scratch directory does not exist :: $scratch" }
+	} else {
+		if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
+		if ($PSCmdlet.ShouldProcess($scratch, 'Create scratch directory')) { $null = New-Item -ItemType Directory -Path $scratch }
+	}
+}
+$targets += [pscustomobject]@{ Path = $scratch; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant scratch-folder Modify' }
+
 if (-not (Test-Path -LiteralPath $workspace -PathType Container) -and -not $WhatIfPreference) {
     if ($Verify -or $Inspect -or $Remove) {
         [Console]::Error.WriteLine("Workspace directory does not exist: $workspace")
@@ -285,14 +296,15 @@ if (-not (Test-Path -LiteralPath $exchange -PathType Container) -and -not $WhatI
 }
 $targets += [pscustomobject]@{ Path = $exchange; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant exchange-folder Modify' }
 
-Write-Host 'Agent_b root, plans, workspace, and exchange-folder ACL policy'
+Write-Host 'Agent_b root, plans, scratch, workspace, and exchange-folder ACL policy'
 Write-Host "Identity: $env:COMPUTERNAME\$AccountName"
 Write-Host "Application: $application"
 Write-Host "Operator data: $data"
 Write-Host "Plans folder: $plans"
+Write-Host "Scratch folder: $scratch"
 Write-Host "Service workspace: $workspace"
 Write-Host "Exchange folder: $exchange"
-Write-Host 'The service identity can read/execute but not mutate the application tree, can traverse operator data only to the plans folder, and can modify only plans, workspace, and exchange.'
+Write-Host 'The service identity can read/execute but not mutate the application tree, can traverse operator data only to the plans and scratch folders, and can modify only plans, scratch, workspace, and exchange.'
 
 if (-not (Test-IsAdministrator) -and -not $WhatIfPreference -and -not $Verify -and -not $Inspect) {
     [Console]::Error.WriteLine('Administrator elevation is required to apply or remove ACLs.')
@@ -332,7 +344,7 @@ if ($Verify -or $Inspect) {
         if ($Verify) { Write-Host "$(if ($present) { 'PASS' } else { 'DRIFT' }): $($target.Intent) :: $($target.Path)" }
     }
     if ($Inspect) {
-        $status = [ordered]@{ supported = $true; account_exists = $true; applied = ($drift -eq 0); drift = $drift; summary = $(if ($drift -eq 0) { 'root, plans, workspace, and exchange-folder ACL policy verified' } else { "$drift ACL drift item(s)" }) }
+        $status = [ordered]@{ supported = $true; account_exists = $true; applied = ($drift -eq 0); drift = $drift; summary = $(if ($drift -eq 0) { 'root, plans, scratch, workspace, and exchange-folder ACL policy verified' } else { "$drift ACL drift item(s)" }) }
         Write-Output ($statusMarker + ($status | ConvertTo-Json -Compress))
         exit 0
     }

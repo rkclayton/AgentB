@@ -149,8 +149,8 @@ try {
     $installedInstallerSource = Get-Content -Raw -LiteralPath (Join-Path $testApplication 'scripts\install-Agent_b.ps1')
     if ($installedInstallerSource -notmatch '\$installedAclScript[^\r\n]+apply-acls\.ps1' -or
         $installedInstallerSource -notmatch '& \$installedAclScript[^\r\n]+-Verify' -or
-        $installedInstallerSource -notmatch 'PASS: installed root, plans-directory exception, workspace, and exchange-folder ACL policy') {
-        throw 'Installed elevated installer does not self-verify the plans-directory host-policy exception.'
+        $installedInstallerSource -notmatch 'PASS: installed root, plans/scratch exceptions, workspace, and exchange-folder ACL policy') {
+		throw 'Installed elevated installer does not self-verify the plans/scratch host-policy exceptions.'
     }
     $sourceBatchLauncher = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'start-Agent_b.cmd')
     if ($sourceBatchLauncher -notmatch 'AGENTB_HIDDEN_REENTRY' -or
@@ -177,7 +177,7 @@ try {
         }
     }
     if ($shellSource -notmatch 'root\.append\(left, right\)' -or
-        $shellSource -notmatch 'right\.append\(pages, settings\)' -or
+        $shellSource -notmatch 'right\.append\(folderTitle, folderMenu, pages, settings\)' -or
         $shellSource -match 'shell-operator-status' -or
         $shellSource -match 'all:\s*true') {
         throw 'Installed shared shell does not preserve agent-tabs/right-controls ownership.'

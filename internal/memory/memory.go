@@ -63,7 +63,7 @@ func (m *Manager) AgentPath(agentID string) string {
 }
 func (m *Manager) Load(ctx context.Context, workspace, serverID string) (string, string, error) {
 	path := m.Path(workspace)
-	return m.load(ctx, path, serverID, "Notes from earlier sessions in this workspace:")
+	return m.load(ctx, path, serverID, "Notes from earlier sessions in this folder:")
 }
 func (m *Manager) LoadAgent(ctx context.Context, agentID, serverID string) (string, string, error) {
 	path := m.AgentPath(agentID)

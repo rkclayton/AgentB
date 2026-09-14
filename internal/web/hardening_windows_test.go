@@ -88,7 +88,7 @@ func TestHardeningReportsWorkspaceTestFailureAfterApplyingPolicy(t *testing.T) {
 	authorizeMutation(request, server)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
-	if response.Code != http.StatusOK || manager.runCalls != 1 || !strings.Contains(response.Body.String(), `"ok":false`) || !strings.Contains(response.Body.String(), "workspace access failed") {
+	if response.Code != http.StatusOK || manager.runCalls != 1 || !strings.Contains(response.Body.String(), `"ok":false`) || !strings.Contains(response.Body.String(), "folder access failed") {
 		t.Fatalf("post-apply identity failure was not reported: status=%d calls=%d body=%s", response.Code, manager.runCalls, response.Body)
 	}
 }

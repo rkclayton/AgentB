@@ -33,6 +33,8 @@ button:hover{background:rgba(216,221,227,.12)}button:active{background:rgba(216,
 .shell-left,.agent-tabs,.shell-right,.shell-pages{display:flex;align-items:center;min-width:0;gap:2px}
 .shell-left{overflow:hidden}
 .shell-left{width:100%}
+.shell-folder-title{max-width:42vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--mute);font:11px/20px var(--mono);background:transparent;border:0}
+.shell-folder-form{display:flex;gap:3px;padding:3px}.shell-folder-form input{min-width:0;flex:1}
 .agent-tabs{flex:1 1 auto;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 .agent-tabs::-webkit-scrollbar{height:4px}.agent-tabs::-webkit-scrollbar-thumb{background:var(--mute)}
 .agent-tab-wrap{position:relative;display:flex;align-items:center;flex:0 0 var(--agent-tab-width);width:var(--agent-tab-width);min-width:var(--agent-tab-width);max-width:var(--agent-tab-width)}

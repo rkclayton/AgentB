@@ -164,7 +164,7 @@ func (s *Server) setupServiceAccount(w http.ResponseWriter, r *http.Request, acc
 	inspectCancel()
 	response := map[string]any{
 		"ok":         true,
-		"message":    "account and credential updated and authenticated; apply host protection to grant workspace access, then test identity",
+		"message":    "account and credential updated and authenticated; apply host protection to grant folder access, then test identity",
 		"account":    currentStatus,
 		"credential": credentialStatus,
 		"identity":   s.shell.IdentityStatus(),
