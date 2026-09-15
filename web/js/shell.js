@@ -37,9 +37,7 @@ export function initShell(options = {}) {
   left.append(newChatButton, newChatMenu, tabs);
 
   const right = node("div", "shell-right");
-  const folderTitle = button("", "Chat folder", "shell-folder-title");
-  const folderMenu = node("div", "shell-menu shell-folder-menu");
-  folderMenu.hidden = true;
+  const sessionHeading = node("span", "shell-session-title");
   const pages = node("nav", "shell-pages");
   pages.setAttribute("aria-label", "Pages");
   for (const [id, path] of [["plan", "/plan"]]) {
@@ -64,7 +62,7 @@ export function initShell(options = {}) {
     const closing = settings.getAttribute("aria-expanded") === "true";
     beginNavigation({ kind: "settings", from: closing ? "settings" : page, to: closing ? page : "settings", fullDocument: false, chatID: store.active, mutationToken: store.mutation_token });
   });
-  right.append(folderTitle, folderMenu, pages, settings);
+  right.append(sessionHeading, pages, settings);
   root.append(left, right);
   document.addEventListener("click", (event) => {
     if (!root.contains(event.target)) for (const menu of root.querySelectorAll(".shell-menu")) menu.hidden = true;
@@ -119,7 +117,7 @@ export function initShell(options = {}) {
     newChatButton.title = hasD ? "New chat or plan" : "New chat with agent_b";
     newChatButton.setAttribute("aria-label", newChatButton.title);
     newChatButton.disabled = store.replay || !(store.config.agents || []).length;
-    newChatButton.onclick = () => hasD ? showRoleMenu(newChatMenu, newChatButton, configured) : void createChat(selectedSession?.workspace || "", "agent_b");
+    newChatButton.onclick = () => hasD ? showRoleMenu(newChatMenu, newChatButton, configured) : void createChat("agent_b");
     if ((page === "chat" || page === "console") && store.selection.agent_id) rememberAgentSide(store.selection.agent_id, page);
     const rendered = open.length ? open : [null];
     for (const session of rendered) {
@@ -183,32 +181,13 @@ export function initShell(options = {}) {
 
   function showRoleMenu(menu, anchor, configured) {
     menu.replaceChildren();
-    const workspace = store.sessions[store.selection.session_id]?.workspace || "";
     const name = configured?.name || "Agent";
     const chat = button(`agent_b · ${name} — chat`, "Open chat", "shell-new-choice");
-    chat.onclick = () => { menu.hidden = true; void createChat(workspace, "agent_b"); };
+    chat.onclick = () => { menu.hidden = true; void createChat("agent_b"); };
     const plan = button(`agent_d · ${name} — plan`, "Open plan chat", "shell-new-choice");
-    plan.onclick = () => void showPlanMenu(menu, anchor, configured, workspace);
+    plan.onclick = () => { menu.hidden = true; void createChat("agent_d", configured); };
     menu.append(chat, plan);
     revealMenu(menu, anchor);
-  }
-
-  async function showPlanMenu(menu, anchor, configured, workspace) {
-    try {
-      const plans = await api("/api/plans", undefined, "GET");
-      menu.replaceChildren();
-      const add = (label, planID = "") => {
-        const choice = button(label, label, "shell-new-choice");
-        choice.onclick = () => { menu.hidden = true; void createChat(planID ? "" : workspace, "agent_d", planID, configured); };
-        menu.append(choice);
-      };
-      add("none");
-      for (const plan of plans) {
-        add(plan.name || plan.id, plan.id);
-        menu.append(planRepoEditor(plan, () => showPlanMenu(menu, anchor, configured, workspace)));
-      }
-      revealMenu(menu, anchor);
-    } catch (error) { report(error.message); }
   }
 
   function renderAgentMenu(menu, agentID) {
@@ -321,106 +300,24 @@ export function initShell(options = {}) {
     menu.style.top = `${Math.max(8, Math.min(anchorRect.bottom, innerHeight - menuRect.height - 8))}px`;
   }
 
-  async function showNewChatMenu(menu, agentID = "agent_b", anchor = null) {
-    if (store.replay) return;
-    try {
-      const choices = await api("/api/pick-folder", undefined, "GET");
-      menu.replaceChildren();
-      const addChoice = (label, path, planID = "") => {
-        const choice = button(label, path, "shell-new-choice");
-        choice.onclick = () => { menu.hidden = true; void createChat(path, agentID, agentID === "agent_d" ? planID : ""); };
-        menu.append(choice);
-      };
-      const plans = await api("/api/plans", undefined, "GET");
-      const current = store.sessions[store.selection.session_id]?.workspace || "";
-      if (current) addChoice(`Current · ${current}`, current);
-      let lastPlanID = "";
-      try { lastPlanID = localStorage.getItem("agentb.lastPlan") || ""; } catch {}
-      const orderedPlans = [...plans.filter((item) => item.repo)].sort((a, b) => (b.id === lastPlanID) - (a.id === lastPlanID));
-      for (const plan of orderedPlans) addChoice(`${plan.id === lastPlanID ? "Last plan" : "Plan"} · ${plan.name || plan.id}`, plan.repo, plan.id);
-      for (const plan of plans) menu.append(planRepoEditor(plan, () => showNewChatMenu(menu, agentID, anchor)));
-      addChoice("Scratch", "");
-      for (const item of (choices.recent || []).filter((item) => item.dir && item.dir.toLowerCase() !== String(choices.default).toLowerCase()).slice(0, 6)) addChoice(item.dir, item.dir);
-      const form = node("form", "shell-folder-form");
-      const typed = document.createElement("input");
-      typed.placeholder = "Folder path";
-      typed.setAttribute("aria-label", "Folder path");
-      const use = button("Open", "Open folder", "shell-new-choice");
-      use.type = "submit";
-      form.append(typed, use);
-      form.onsubmit = (event) => { event.preventDefault(); if (typed.value.trim()) { menu.hidden = true; void createChat(typed.value.trim(), agentID); } };
-      menu.append(form);
-      const browse = button("Browse…", "Browse for folder", "shell-new-choice");
-      browse.onclick = async () => {
-        menu.hidden = true;
-        try {
-          const picked = await api("/api/pick-folder", { default: choices.default });
-          await createChat(picked.workspace_dir, agentID);
-        } catch (error) { if (!String(error.message).includes("canceled")) report(error.message); }
-      };
-      menu.append(browse);
-      if (anchor) revealMenu(menu, anchor);
-      else menu.hidden = false;
-    } catch (error) { report(error.message); }
-  }
-
-  async function createChat(workspace, agentID = "agent_b", planID = "", configured = null) {
+  async function createChat(agentID = "agent_b", configured = null) {
     const source = store.sessions[store.selection.session_id] || Object.values(store.sessions).sort((a, b) => Date.parse(b.created_at || 0) - Date.parse(a.created_at || 0))[0];
     try {
       const configuredID = agentKey(configured || configuredAgent(source));
       const body = agentID === "agent_d"
-        ? { agent_id: configuredID, workspace, role: "d", plan_id: planID }
-        : source && source.role !== "d" && workspace ? { source_session_id: source.id, workspace } : { agent_id: configuredID, workspace };
+        ? { agent_id: configuredID, role: "d" }
+        : source && source.role !== "d" ? { source_session_id: source.id } : { agent_id: configuredID };
       const result = await api("/api/sessions", body);
-	  if (planID) { try { localStorage.setItem("agentb.lastPlan", planID); } catch {} }
       reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") });
       setSelection(agentID, result.session.id);
     } catch (error) { report(error.message); }
   }
 
-  function planRepoEditor(plan, refresh) {
-    const form = node("form", "shell-folder-form shell-plan-repo");
-    const input = document.createElement("input");
-    input.value = plan.repo || "";
-    input.setAttribute("aria-label", `${plan.name || plan.id} folder`);
-    const save = button("Set", `Set folder for ${plan.name || plan.id}`, "shell-new-choice");
-    save.type = "submit";
-    form.append(input, save);
-    form.onsubmit = async (event) => {
-      event.preventDefault();
-      if (!input.value.trim()) return;
-      try { await api("/api/plans", { id: plan.id, repo: input.value.trim() }); await refresh(); }
-      catch (error) { report(error.message); }
-    };
-    return form;
-  }
-
-  function renderFolderControl(session) {
-    folderTitle.hidden = !session;
-    if (!session) return;
-    folderTitle.textContent = sessionTitle(session);
-    folderTitle.title = session.workspace_dir || session.workspace || "scratch";
-    folderTitle.onclick = () => {
-      folderMenu.replaceChildren();
-      const path = session.workspace_dir || session.workspace || "";
-      const enabled = store.config.sandbox?.workspaces?.[path] === true;
-      const sandbox = button(`Docker Sandbox · ${enabled ? "on" : "off"}`, "Toggle Docker Sandbox for this folder", "shell-new-choice");
-      sandbox.setAttribute("role", "switch");
-      sandbox.setAttribute("aria-checked", String(enabled));
-      sandbox.onclick = async () => {
-        const workspaces = { ...(store.config.sandbox?.workspaces || {}), [path]: !enabled };
-        try { await api("/api/config", { sandbox: { workspaces } }); reduce({ type: "snapshot", data: await api("/api/state", undefined, "GET") }); folderMenu.hidden = true; }
-        catch (error) { report(error.message); }
-      };
-      folderMenu.append(sandbox);
-      revealMenu(folderMenu, folderTitle);
-    };
-  }
-
   function render() {
     const session = store.sessions[store.selection.session_id];
     document.title = session ? sessionTitle(session) : "Agent_b";
-    renderFolderControl(session);
+    sessionHeading.hidden = !session;
+    sessionHeading.textContent = session ? sessionTitle(session) : "";
     renderTabs();
     const query = new URLSearchParams();
     if (session) query.set("session", session.id);
@@ -433,11 +330,6 @@ export function initShell(options = {}) {
   subscribe((_state, event) => {
     render();
   });
-  window.addEventListener("agentb:new-chat-workspace", () => {
-    const menu = tabs.querySelector('.agent-tab-wrap.selected .shell-menu') || tabs.querySelector('.agent-tab-wrap[data-agent="agent_b"] .shell-menu');
-    const tab = menu?.closest(".agent-tab-wrap")?.querySelector(".agent-tab");
-    if (menu && tab) void showNewChatMenu(menu, "agent_b", tab);
-  });
   return {
     render,
     report,
@@ -447,9 +339,7 @@ export function initShell(options = {}) {
       render();
     },
     newChat() {
-      const menu = tabs.querySelector('.agent-tab-wrap[data-agent="agent_b"] .shell-menu');
-      const tab = tabs.querySelector('.agent-tab-wrap[data-agent="agent_b"] .agent-tab');
-      if (menu && tab) void showNewChatMenu(menu, "agent_b", tab);
+      if (!store.replay) void createChat("agent_b");
     },
   };
 }

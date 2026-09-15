@@ -25,6 +25,7 @@ func TestRetainedChatsRestoreWithoutOperationalLogsAndDeleteExplicitly(t *testin
 	firstBus := events.NewBus()
 	firstBus.SetDurableSink(firstWriters.WriteRecord, nil, nil)
 	firstRegistry := session.NewRegistry(firstBus, firstWriters, profiles, 40, func() config.Config { return cfg })
+	firstRegistry.SetPlansRoot(filepath.Join(root, "plans"))
 	item, err := firstRegistry.Create("main", cfg.DefaultAgentID(), workspace)
 	if err != nil {
 		t.Fatal(err)

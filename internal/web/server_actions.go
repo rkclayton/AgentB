@@ -2,7 +2,6 @@ package web
 
 import (
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 
@@ -32,25 +31,6 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "text or attachments required", "text")
 		return
 	}
-	s.bindMu.Lock()
-	_, waitingForBind := s.pendingBinds[body.SessionID]
-	s.bindMu.Unlock()
-	if waitingForBind {
-		writeError(w, http.StatusConflict, "answer the pending folder binding decision first", "session_id")
-		return
-	}
-	if len(attachments) == 0 {
-		if item, ok := s.registry.Get(body.SessionID); ok {
-			if dir := namedOutsideDirectory(body.Text, item.Snapshot().WorkspaceDir); dir != "" {
-				s.bindMu.Lock()
-				s.pendingBinds[body.SessionID] = pendingBind{Dir: dir, Text: body.Text}
-				s.bindMu.Unlock()
-				s.bus.Publish(events.New(events.WorkspaceBindRequired, body.SessionID, "", map[string]any{"dir": dir}))
-				writeJSON(w, http.StatusAccepted, map[string]any{"bind_offer": true, "dir": dir})
-				return
-			}
-		}
-	}
 	result, err := s.scheduler.SubmitAttachments(r.Context(), body.SessionID, body.Text, attachments)
 	if err != nil {
 		status := 400
@@ -63,90 +43,6 @@ func (s *Server) message(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 202, result)
 }
 
-func (s *Server) bindWorkspace(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		method(w)
-		return
-	}
-	var body struct {
-		SessionID string `json:"session_id"`
-		Decision  string `json:"decision"`
-	}
-	if !decode(w, r, &body) {
-		return
-	}
-	if body.Decision != "yes" && body.Decision != "no" {
-		writeError(w, http.StatusBadRequest, "decision must be yes or no", "decision")
-		return
-	}
-	s.bindMu.Lock()
-	pending, ok := s.pendingBinds[body.SessionID]
-	if ok {
-		delete(s.pendingBinds, body.SessionID)
-	}
-	s.bindMu.Unlock()
-	if !ok {
-		writeError(w, http.StatusConflict, "no folder binding decision is pending", "session_id")
-		return
-	}
-	if body.Decision == "yes" {
-		item, err := s.registry.BindWorkspace(body.SessionID, pending.Dir)
-		if err != nil {
-			s.bindMu.Lock()
-			s.pendingBinds[body.SessionID] = pending
-			s.bindMu.Unlock()
-			writeError(w, http.StatusConflict, err.Error(), "workspace")
-			return
-		}
-		if s.runner != nil {
-			s.runner.PublishBudget(r.Context(), item)
-		}
-	}
-	s.bus.Publish(events.New(events.WorkspaceBindDecided, body.SessionID, "", map[string]any{"dir": pending.Dir, "decision": body.Decision}))
-	result, err := s.scheduler.SubmitAttachments(r.Context(), body.SessionID, pending.Text, pending.Attachments)
-	if err != nil {
-		writeError(w, http.StatusConflict, err.Error(), "session_id")
-		return
-	}
-	writeJSON(w, http.StatusAccepted, result)
-}
-
-func namedOutsideDirectory(text, bound string) string {
-	for _, candidate := range windowsPathCandidates(text) {
-		for candidate != "" {
-			candidate = strings.TrimSpace(strings.TrimRight(candidate, ".,;:!?)]}"))
-			if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-				rel, relErr := filepath.Rel(bound, candidate)
-				if relErr != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-					return filepath.Clean(candidate)
-				}
-				break
-			}
-			cut := strings.LastIndexAny(candidate, " \t")
-			if cut < 0 {
-				break
-			}
-			candidate = candidate[:cut]
-		}
-	}
-	return ""
-}
-
-func windowsPathCandidates(text string) []string {
-	values := []string{}
-	for index := 0; index+3 <= len(text); index++ {
-		letter := (text[index] >= 'A' && text[index] <= 'Z') || (text[index] >= 'a' && text[index] <= 'z')
-		if letter && text[index+1] == ':' && (text[index+2] == '\\' || text[index+2] == '/') {
-			end := index + 3
-			for end < len(text) && !strings.ContainsRune("\r\n\"'`<>|", rune(text[end])) {
-				end++
-			}
-			values = append(values, text[index:end])
-			index = end - 1
-		}
-	}
-	return values
-}
 func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		method(w)

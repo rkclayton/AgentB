@@ -53,8 +53,8 @@ test("Composer clusters one paperclip above stop and send and pending files occu
 
 test("Pending approval is pinned above the composer with zero idle space", () => {
 	assert.match(html, /id="chat-pending-approval" class="pending-approval" hidden[\s\S]*class="chat-composer-row"/);
-	assert.match(chat, /session\?\.pending_approval \|\| session\?\.pending_repo_policy \|\| session\?\.pending_bind \? "waiting for you"/);
-	assert.match(chat, /pendingApproval\.hidden = !\(session\?\.pending_approval \|\| session\?\.pending_repo_policy \|\| session\?\.pending_bind\)/);
+	assert.match(chat, /session\?\.pending_approval \|\| session\?\.pending_repo_policy \? "waiting for you"/);
+	assert.match(chat, /pendingApproval\.hidden = !\(session\?\.pending_approval \|\| session\?\.pending_repo_policy\)/);
 	assert.match(css, /\.pending-approval\[hidden\]\s*\{\s*display:\s*none/);
 	assert.match(tokens, /\.agent-tab-robot\.waiting\{color:var\(--alarm\)/);
 });
@@ -101,31 +101,25 @@ test("New chat uses the fixed left plus and history uses the agent right-click m
   assert.match(html, /id="app-shell"[^>]+data-page="console"/);
   assert.match(shell, /left\.append\(newChatButton, newChatMenu, tabs\)/);
   assert.match(shell, /hasD \? showRoleMenu/);
-  assert.match(shell, /: void createChat\(selectedSession\?\.workspace \|\| "", "agent_b"\)/);
+  assert.match(shell, /: void createChat\("agent_b"\)/);
   assert.doesNotMatch(shell, /wrap\.append\(newChatButton\)|wrap\.append\(add\)/);
   assert.match(shell, /oncontextmenu/);
   assert.match(shell, /agent-chat-rename/);
   assert.match(shell, /agent-chat-delete/);
   assert.doesNotMatch(html + css, /chat-list|chat-list-toggle/);
   assert.doesNotMatch(html, /chat-clear-conversation|Clear conversation/);
-  assert.match(shell, /source_session_id: source\.id, workspace/);
+  assert.match(shell, /source_session_id: source\.id/);
   assert.match(shell, /agent_d · \$\{name\} — plan/);
-  assert.match(shell, /api\("\/api\/plans", undefined, "GET"\)/);
-  assert.match(shell, /role: "d", plan_id: planID/);
+  assert.match(shell, /role: "d"/);
   assert.match(shell, /button\("", chatName/);
   assert.match(shell, /Stop it before closing the chat/);
 });
 
-test("optional folder choice lives on Console because it is per-chat", () => {
-  assert.match(consoleHTML, /id="new-chat-workspace"[^>]*>New chat…<\/button>/);
-  assert.match(shell, /agentb:new-chat-workspace/);
-  assert.match(shell, /menu\.hidden = true/);
-  assert.match(shell, /api\("\/api\/pick-folder", undefined, "GET"\)/);
-  assert.match(shell, /api\("\/api\/pick-folder", \{ default: choices\.default \}\)/);
-  assert.match(shell, /addChoice\("Scratch", ""\)/);
-  assert.match(shell, /Last plan/);
-  assert.match(shell, /\{ source_session_id: source\.id, workspace \}/);
-  assert.match(shell, /source && source\.role !== "d" && workspace/);
+test("new chats expose no folder selection surface", () => {
+  assert.doesNotMatch(consoleHTML, /new-chat-workspace|New chat…/);
+  assert.doesNotMatch(shell, /pick-folder|Folder path|Browse|Last plan|planRepoEditor|pending_bind/);
+  assert.match(shell, /\{ source_session_id: source\.id \}/);
+  assert.match(shell, /source && source\.role !== "d"/);
 });
 
 test("Composer is five lines with no placeholder and expands upward", () => {
@@ -172,10 +166,8 @@ test("Repository policy is a pinned full-content trust decision", () => {
   assert.match(chat, /Technical detail/);
 });
 
-test("An existing outside directory raises the workspace bind offer before the model runs", () => {
-	assert.match(chat, /Bind this chat to \$\{session\.pending_bind\.dir\}\?/);
-	assert.match(chat, /api\("\/api\/bind", \{ session_id: session\.id, decision \}\)/);
-	assert.match(chat, /pending_approval \|\| session\?\.pending_repo_policy \|\| session\?\.pending_bind \? "waiting for you"/);
+test("chat has no workspace bind offer", () => {
+	assert.doesNotMatch(chat, /pending_bind|workspace-bind-card|\/api\/bind/);
 });
 
 test("Reduced motion remains zero-duration", () => {

@@ -194,7 +194,7 @@ async function finish() {
     snapshot = await request("/api/state", undefined, "GET");
     const agent = snapshot.config.agents?.[0];
     if (!Object.keys(snapshot.sessions || {}).length && agent) {
-      await request("/api/sessions", { label: "main", agent_id: agent.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, ""), workspace: snapshot.config.workspace });
+      await request("/api/sessions", { label: "main", agent_id: agent.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") });
     }
     location.href = agent ? "/chat" : "/chat?setup=skip";
   } catch (error) { message = error.message; alarm = true; render(); }

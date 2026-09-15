@@ -351,7 +351,7 @@ if (-not $currentSid.Value.Equals($OperatorSid, [StringComparison]::OrdinalIgnor
 Write-Host 'Agent_b admin-protected program installation with per-operator registration and data'
 Write-Host "Application: $applicationRoot"
 Write-Host "Operator data: $dataRoot"
-Write-Host "Service workspace: $workspaceRoot"
+Write-Host "Legacy workspace (preserved when present): $workspaceRoot"
 Write-Host "Operator SID: $OperatorSid"
 
 if ($WhatIfPreference) {
@@ -359,7 +359,7 @@ if ($WhatIfPreference) {
     $null = $PSCmdlet.ShouldProcess($sourceBinary, 'Build Agent_b')
     $null = $PSCmdlet.ShouldProcess($applicationRoot, 'Install or upgrade admin-only program files')
     $null = $PSCmdlet.ShouldProcess($dataRoot, 'Create or preserve private operator data')
-    $null = $PSCmdlet.ShouldProcess($workspaceRoot, 'Create or preserve service workspace')
+	if (Test-Path -LiteralPath $workspaceRoot -PathType Container) { $null = $PSCmdlet.ShouldProcess($workspaceRoot, 'Preserve legacy service workspace') }
     Stop-InstallTranscript
     exit 0
 }
@@ -391,7 +391,6 @@ if ($SkipBuild) {
 
 $applicationCreated = -not (Test-Path -LiteralPath $applicationRoot -PathType Container)
 $dataCreated = -not (Test-Path -LiteralPath $dataRoot -PathType Container)
-$workspaceCreated = -not (Test-Path -LiteralPath $workspaceRoot -PathType Container)
 $null = New-Item -ItemType Directory -Path $applicationRoot -Force
 if ($applicationCreated) { Set-ApplicationDirectoryAcl -Path $applicationRoot -Owner $currentSid }
 foreach ($directory in @('web', 'prompts', 'scripts', 'docs')) {
@@ -407,8 +406,6 @@ Copy-Item -LiteralPath (Join-Path $sourceRoot 'scripts\launch-installed.cmd') -D
 $null = New-Item -ItemType Directory -Path $dataRoot -Force
 if ($dataCreated) { Set-PrivateDirectoryAcl -Path $dataRoot -Owner $currentSid }
 foreach ($directory in @('logs', 'memory')) { $null = New-Item -ItemType Directory -Path (Join-Path $dataRoot $directory) -Force }
-$null = New-Item -ItemType Directory -Path $workspaceRoot -Force
-if ($workspaceCreated) { Set-PrivateDirectoryAcl -Path $workspaceRoot -Owner $currentSid }
 
 $configPath = Join-Path $dataRoot 'harness.json'
 $writeConfig = $false
@@ -418,7 +415,7 @@ if (Test-Path -LiteralPath $configPath -PathType Leaf) {
 } else {
     $templatePath = Join-Path $applicationRoot 'harness.example.json'
     $config = Get-Content -Raw -LiteralPath $templatePath | ConvertFrom-Json
-    $config.workspace = $workspaceRoot
+    $config.workspace = Join-Path $dataRoot 'scratch'
     $config.log_dir = Join-Path $dataRoot 'logs'
 	$config.memory.dir = Join-Path $dataRoot 'memory'
 	$writeConfig = $true

@@ -4,7 +4,7 @@ import test from "node:test";
 
 const root = new URL("../", import.meta.url);
 const standalone = /(^|[^a-z0-9_-])workspace([^a-z0-9_-]|$)/i;
-const protocol = new Set(["workspace", "workspace.conflict", "workspace.bind_required", "workspace.bind_decided", "workspace.bound"]);
+const protocol = new Set(["workspace", "workspace.conflict", "workspace.bound"]);
 
 function literals(source) {
   const found = [];

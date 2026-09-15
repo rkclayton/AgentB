@@ -277,14 +277,10 @@ if (-not (Test-Path -LiteralPath $scratch -PathType Container) -and -not $WhatIf
 $targets += [pscustomobject]@{ Path = $scratch; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant scratch-folder Modify' }
 
 if (-not (Test-Path -LiteralPath $workspace -PathType Container) -and -not $WhatIfPreference) {
-    if ($Verify -or $Inspect -or $Remove) {
-        [Console]::Error.WriteLine("Workspace directory does not exist: $workspace")
-        exit 1
-    }
-    if (Test-ConfirmationPromptExpected) { Assert-SafeConfirmationInput }
-    if ($PSCmdlet.ShouldProcess($workspace, 'Create workspace directory')) { $null = New-Item -ItemType Directory -Path $workspace }
+	Write-Host "Legacy workspace is absent; no workspace ACL is required: $workspace"
+} elseif (Test-Path -LiteralPath $workspace -PathType Container) {
+	$targets += [pscustomobject]@{ Path = $workspace; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant legacy workspace Modify' }
 }
-$targets += [pscustomobject]@{ Path = $workspace; Rights = $allowRights; Inheritance = $recursive; Type = $allow; Intent = 'grant workspace Modify' }
 
 if (-not (Test-Path -LiteralPath $exchange -PathType Container) -and -not $WhatIfPreference) {
     if ($Verify -or $Inspect -or $Remove) {

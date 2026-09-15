@@ -110,11 +110,12 @@ try {
 
     $configPath = Join-Path $testData 'harness.json'
     $installedConfig = Get-Content -Raw -LiteralPath $configPath | ConvertFrom-Json
-    if (-not ([string]$installedConfig.workspace).Equals($testWorkspace, [StringComparison]::OrdinalIgnoreCase) -or
+    if (-not ([string]$installedConfig.workspace).Equals((Join-Path $testData 'scratch'), [StringComparison]::OrdinalIgnoreCase) -or
         -not ([string]$installedConfig.log_dir).Equals((Join-Path $testData 'logs'), [StringComparison]::OrdinalIgnoreCase) -or
         -not ([string]$installedConfig.memory.dir).Equals((Join-Path $testData 'memory'), [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Installed configuration does not use the three-root layout.'
+        throw 'Installed configuration does not use data-root scratch, logs, and memory.'
     }
+	if (Test-Path -LiteralPath $testWorkspace) { throw 'Fresh install created the removed legacy workspace.' }
     $testPort = Get-FreeTcpPort
     $installedConfig.listen = "127.0.0.1:$testPort"
     $installedConfig.operator_files.log_retention_days = 1
@@ -204,7 +205,7 @@ try {
         }
     }
     if ($shellSource -notmatch 'root\.append\(left, right\)' -or
-        $shellSource -notmatch 'right\.append\(folderTitle, folderMenu, pages, settings\)' -or
+        $shellSource -notmatch 'right\.append\(sessionHeading, pages, settings\)' -or
         $shellSource -match 'shell-operator-status' -or
         $shellSource -match 'all:\s*true') {
         throw 'Installed shared shell does not preserve agent-tabs/right-controls ownership.'
@@ -298,6 +299,7 @@ try {
     $credentialPath = Join-Path $testData '.agentb-shell-credential.dpapi'
     [IO.File]::WriteAllBytes($credentialPath, [byte[]](1, 2, 3, 4))
     $credentialHash = (Get-FileHash -LiteralPath $credentialPath -Algorithm SHA256).Hash
+	$null = New-Item -ItemType Directory -Path $testWorkspace -Force
     $workspaceMarker = Join-Path $testWorkspace 'preserve-me.txt'
     Set-Content -LiteralPath $workspaceMarker -Value 'preserve'
 
@@ -472,7 +474,7 @@ try {
         (Test-Path -LiteralPath $testRegistry)) {
         throw 'Uninstall left a program, shortcut, or registration artifact.'
     }
-    Write-Host 'PASS: isolated three-root install, upgrade preservation, preserve-data uninstall, reinstall, and owner-checked purge uninstall'
+    Write-Host 'PASS: fresh install omits legacy workspace; upgrade preservation, preserve-data uninstall, reinstall, and owner-checked purge uninstall'
 } finally {
     if ($whatIfTranscript -and (Test-Path -LiteralPath $whatIfTranscript -PathType Leaf)) {
         $resolvedTranscript = [IO.Path]::GetFullPath($whatIfTranscript)

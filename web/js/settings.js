@@ -870,7 +870,6 @@ async function newSession() {
   const body = {
     label: sheet.querySelector("#new-session-label").value,
     server_id: sheet.querySelector("#new-session-profile").value,
-    workspace: sheet.querySelector("#new-session-workspace").value,
   };
   try {
     const result = await api("/api/sessions", body);

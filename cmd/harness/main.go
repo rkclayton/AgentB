@@ -245,7 +245,7 @@ func main() {
 			}
 		}
 		if !open {
-			mainSession, createErr := registry.Create("main", mainAgentID, cfg.Workspace)
+			mainSession, createErr := registry.Create("main", mainAgentID, "")
 			if createErr != nil {
 				log.Fatal(createErr)
 			}

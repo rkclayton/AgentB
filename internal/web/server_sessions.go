@@ -34,20 +34,18 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			Label           string `json:"label"`
 			AgentID         string `json:"agent_id"`
 			ServerID        string `json:"server_id"`
-			Workspace       string `json:"workspace"`
 			SourceSessionID string `json:"source_session_id"`
 			Role            string `json:"role"`
-			PlanID          string `json:"plan_id"`
 		}
 		if !decode(w, r, &body) {
 			return
 		}
 		if body.SourceSessionID != "" {
-			if body.Label != "" || body.AgentID != "" || body.ServerID != "" || body.Role != "" || body.PlanID != "" {
+			if body.Label != "" || body.AgentID != "" || body.ServerID != "" || body.Role != "" {
 				writeError(w, 400, "source_session_id cannot be combined with overrides", "session")
 				return
 			}
-			item, err := s.registry.CreateLikeAt(body.SourceSessionID, body.Workspace)
+			item, err := s.registry.CreateLike(body.SourceSessionID)
 			if err != nil {
 				writeError(w, 400, err.Error(), "session")
 				return
@@ -68,13 +66,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			}
 			s.mu.RUnlock()
 		}
-		if body.Workspace == "" {
-			s.mu.RLock()
-			if body.AgentID == "" {
-				body.AgentID = s.cfg.DefaultAgentID()
-			}
-			s.mu.RUnlock()
-		} else if body.AgentID == "" {
+		if body.AgentID == "" {
 			s.mu.RLock()
 			body.AgentID = s.cfg.DefaultAgentID()
 			s.mu.RUnlock()
@@ -87,7 +79,7 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			writeError(w, 400, reason, "agent_id")
 			return
 		}
-		item, err := s.registry.CreateRole(body.Label, body.AgentID, body.Workspace, body.Role, body.PlanID)
+		item, err := s.registry.CreateRole(body.Label, body.AgentID, "", body.Role, "")
 		if err != nil {
 			writeError(w, 400, err.Error(), "session")
 			return
@@ -102,22 +94,6 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) plans(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		var body struct {
-			ID   string `json:"id"`
-			Repo string `json:"repo"`
-		}
-		if !decode(w, r, &body) {
-			return
-		}
-		plan, err := s.registry.SetPlanRepo(body.ID, body.Repo)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error(), "repo")
-			return
-		}
-		writeJSON(w, http.StatusOK, plan)
-		return
-	}
 	if r.Method != http.MethodGet {
 		method(w)
 		return
@@ -238,40 +214,6 @@ func (s *Server) workspaceAction(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
-}
-
-func (s *Server) folderPicker(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodGet {
-		recent := []workspaceinfo.Entry{}
-		if s.workspaceState != nil {
-			recent = s.workspaceState.List()
-		}
-		writeJSON(w, 200, map[string]any{"default": s.roots.Workspace, "recent": recent})
-		return
-	}
-	if r.Method != http.MethodPost {
-		method(w)
-		return
-	}
-	if err := s.operatorRequest(r); err != nil {
-		writeError(w, http.StatusForbidden, "folder selection requires a verified operator browser process: "+err.Error(), "workspace")
-		return
-	}
-	var body struct {
-		Default string `json:"default"`
-	}
-	if !decode(w, r, &body) {
-		return
-	}
-	if body.Default == "" {
-		body.Default = s.roots.Workspace
-	}
-	selected, err := s.pickFolder(body.Default)
-	if err != nil {
-		writeError(w, 400, err.Error(), "workspace")
-		return
-	}
-	writeJSON(w, 200, map[string]string{"workspace_dir": selected})
 }
 
 func (s *Server) session(w http.ResponseWriter, r *http.Request) {

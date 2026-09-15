@@ -12,9 +12,7 @@ export function firstUserLine(session) {
 export function sessionTitle(session) {
   if (!session) return "";
   const profile = session.b_profile || session.server_id || "profile";
-  const folder = session.scratch ? "scratch" : String(session.workspace_dir || session.workspace || "").replace(/[\\/]+$/, "").split(/[\\/]/).pop() || "scratch";
-  const base = `agent_${session.role === "d" ? "d" : "b"} · ${profile} · ${folder}`;
-  return session.role === "d" ? `${base} · plan: ${session.plan_name || "none"}` : base;
+  return `agent_${session.role === "d" ? "d" : "b"} · ${profile}`;
 }
 
 export function agentAuthor(session, role = "b") {

@@ -53,9 +53,9 @@ func (r *Registry) CreateRole(label, agentID, workspace, role, planID string) (*
 	return r.create(label, agentID, workspace, nil, role, planID)
 }
 func (r *Registry) CreateLike(sourceID string) (*Session, error) {
-	return r.CreateLikeAt(sourceID, "")
+	return r.createLike(sourceID)
 }
-func (r *Registry) CreateLikeAt(sourceID, workspace string) (*Session, error) {
+func (r *Registry) createLike(sourceID string) (*Session, error) {
 	source, ok := r.Get(sourceID)
 	if !ok {
 		return nil, fmt.Errorf("source session not found")
@@ -65,14 +65,11 @@ func (r *Registry) CreateLikeAt(sourceID, workspace string) (*Session, error) {
 	for _, tool := range snapshot.Tools {
 		enabled[tool.Name] = tool.Enabled
 	}
-	if workspace == "" {
-		workspace = snapshot.Workspace
-	}
 	agentID := snapshot.AgentID
 	if _, found := r.resolveAgent(agentID); agentID == "" || !found {
 		agentID = snapshot.ServerID
 	}
-	return r.create("", agentID, workspace, enabled, "b", "")
+	return r.create("", agentID, "", enabled, "b", "")
 }
 
 // Restore rehydrates a retained chat into a fresh operational tape. The
@@ -393,83 +390,6 @@ func (r *Registry) ApplyRepoPolicySession(sessionID string, state workspaceinfo.
 		}
 	}
 	return nil
-}
-
-func (r *Registry) BindWorkspace(sessionID, dir string) (*Session, error) {
-	s, ok := r.Get(sessionID)
-	if !ok {
-		return nil, fmt.Errorf("session not found")
-	}
-	if r.workspaces == nil {
-		return nil, fmt.Errorf("workspace manager unavailable")
-	}
-	setup, err := r.workspaces.Inspect(dir)
-	if err != nil {
-		return nil, err
-	}
-	if setup.Missing {
-		return nil, fmt.Errorf("workspace directory does not exist")
-	}
-	snapshot := s.Snapshot()
-	memoryBlock, memoryPath := "", ""
-	if r.memory != nil {
-		memoryBlock, memoryPath, err = r.memory(context.Background(), setup.Dir, snapshot.ServerID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	var activePolicy, pendingPolicy *workspaceinfo.PolicyState
-	if setup.Policy.Path != "" {
-		copy := setup.Policy
-		if setup.Policy.Approved && setup.Policy.Error == "" {
-			activePolicy = &copy
-		} else {
-			pendingPolicy = &copy
-		}
-	}
-
-	s.mu.Lock()
-	if s.Closed {
-		s.mu.Unlock()
-		return nil, fmt.Errorf("session is closed")
-	}
-	if s.Run.Status != "idle" {
-		s.mu.Unlock()
-		return nil, fmt.Errorf("session is running")
-	}
-	s.Workspace = setup.Dir
-	s.WorkspaceMissing = false
-	s.Scratch = false
-	s.ProjectBlock = setup.Instructions.Block
-	s.ProjectFiles = append([]string(nil), setup.Instructions.Files...)
-	s.ProjectNotes = append([]string(nil), setup.Instructions.Notes...)
-	s.PendingRepoPolicy = pendingPolicy
-	s.RepoPolicy = activePolicy
-	s.MemoryBlock, s.MemoryPath = memoryBlock, memoryPath
-	s.LastSeen = map[string]time.Time{}
-	s.ProjectTouch = r.projectTouch(s)
-	if activePolicy != nil && len(activePolicy.Policy.DefaultToolset) > 0 {
-		for name := range s.ToolsEnabled {
-			s.ToolsEnabled[name] = false
-		}
-		for _, name := range activePolicy.Policy.DefaultToolset {
-			if _, exists := s.ToolsEnabled[name]; exists {
-				s.ToolsEnabled[name] = true
-			}
-		}
-	}
-	bound := s.SnapshotUnlocked()
-	s.mu.Unlock()
-	if hasAgentFile(setup.Dir) && s.EnsurePlan != nil {
-		s.EnsurePlan(setup.Dir)
-	}
-	r.bus.Publish(events.New(events.WorkspaceBound, sessionID, "", map[string]any{
-		"workspace_dir": bound.WorkspaceDir, "workspace_missing": bound.WorkspaceMissing,
-		"project_content": bound.ProjectContent, "project_files": bound.ProjectFiles, "project_notes": bound.ProjectNotes,
-		"pending_repo_policy": bound.PendingRepoPolicy, "repo_policy": bound.RepoPolicy,
-		"memory_path": bound.MemoryPath, "memory_content": bound.MemoryContent, "tools": bound.Tools,
-	}))
-	return s, nil
 }
 
 func (r *Registry) projectTouch(item *Session) func(string) {

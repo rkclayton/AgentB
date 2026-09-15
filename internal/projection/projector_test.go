@@ -327,22 +327,12 @@ func TestSessionRenameReplaysAuthorAndUserPin(t *testing.T) {
 	}
 }
 
-func TestWorkspaceBindOfferAndDecisionReconstruct(t *testing.T) {
+func TestRetainedWorkspaceBoundEventReconstructs(t *testing.T) {
 	state := seeded(t)
 	dir := `C:\projects\bound`
-	var err error
-	state, _, err = Next(state, Record{Cursor: Cursor{Generation: "bind.events", Offset: 1}, Event: events.New(events.WorkspaceBindRequired, "main", "", map[string]any{"dir": dir})})
-	if err != nil || state.PendingBind == nil || state.PendingBind.Dir != dir {
-		t.Fatalf("required state=%+v err=%v", state.PendingBind, err)
-	}
-	state, _, err = Next(state, Record{Cursor: Cursor{Generation: "bind.events", Offset: 2}, Event: events.New(events.WorkspaceBound, "main", "", map[string]any{"workspace_dir": dir, "project_content": "instructions"})})
-	if err != nil || state.PendingBind != nil || state.WorkspaceDir != dir || state.ProjectContent != "instructions" {
+	state, _, err := Next(state, Record{Cursor: Cursor{Generation: "bind.events", Offset: 2}, Event: events.New(events.WorkspaceBound, "main", "", map[string]any{"workspace_dir": dir, "project_content": "instructions"})})
+	if err != nil || state.WorkspaceDir != dir || state.ProjectContent != "instructions" {
 		t.Fatalf("bound state=%+v err=%v", state, err)
-	}
-	state, _, err = Next(state, Record{Cursor: Cursor{Generation: "bind.events", Offset: 3}, Event: events.New(events.WorkspaceBindRequired, "main", "", map[string]any{"dir": `C:\other`})})
-	state, _, err = Next(state, Record{Cursor: Cursor{Generation: "bind.events", Offset: 4}, Event: events.New(events.WorkspaceBindDecided, "main", "", map[string]any{"dir": `C:\other`, "decision": "no"})})
-	if err != nil || state.PendingBind != nil || state.WorkspaceDir != dir {
-		t.Fatalf("denied state=%+v err=%v", state, err)
 	}
 }
 

@@ -76,14 +76,11 @@ type Server struct {
 	memoryState       *memory.Manager
 	statsState        *stats.Manager
 	operatorFiles     *operatorfiles.Manager
-	pickFolder        func(string) (string, error)
 	probeMu           sync.Mutex
 	probeCancels      map[string]*probeRun
 	reachabilityMu    sync.Mutex
 	reachability      map[string]*reachabilityRetry
 	reachabilityAfter func(time.Duration, func()) operatorTimer
-	bindMu            sync.Mutex
-	pendingBinds      map[string]pendingBind
 	navigationMu      sync.Mutex
 	navigationIDs     map[string]time.Time
 	agentServerMu     sync.Mutex
@@ -92,12 +89,6 @@ type Server struct {
 }
 
 type probeRun struct{ cancel context.CancelFunc }
-type pendingBind struct {
-	Dir         string
-	Text        string
-	Attachments []events.Attachment
-}
-
 type RuntimeRoots struct {
 	Application string
 	Data        string
@@ -124,7 +115,6 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 		reachabilityAfter: func(duration time.Duration, fn func()) operatorTimer {
 			return time.AfterFunc(duration, fn)
 		},
-		pendingBinds:  map[string]pendingBind{},
 		navigationIDs: map[string]time.Time{},
 		agentServers:  map[string]pendingAgentServer{},
 		extractClient: &http.Client{},
@@ -132,7 +122,6 @@ func New(cfg *config.Config, path, webDir string, roots RuntimeRoots, bus *event
 		detectLocal: func(ctx context.Context, account string) (any, error) {
 			return detection.Local(ctx, filepath.Join(roots.Application, "scripts", "detect-local-capabilities.ps1"), account)
 		},
-		pickFolder: nativeFolderPicker,
 	}
 }
 func (s *Server) SetRegistry(registry *session.Registry) {
@@ -216,7 +205,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/sessions/", s.replayGuard(s.session))
 	mux.HandleFunc("/api/workspaces", s.replayGuard(s.workspaces))
 	mux.HandleFunc("/api/workspaces/", s.replayGuard(s.workspaceAction))
-	mux.HandleFunc("/api/pick-folder", s.replayGuard(s.folderPicker))
 	mux.HandleFunc("/api/servers", s.servers)
 	mux.HandleFunc("/api/servers/", s.replayGuard(s.server))
 	mux.HandleFunc("/api/config", s.replayGuard(s.config))
@@ -225,7 +213,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/hardening", s.replayGuard(s.hostHardening))
 	mux.HandleFunc("/api/signing", s.replayGuard(s.codeSigning))
 	mux.HandleFunc("/api/message", s.replayGuard(s.message))
-	mux.HandleFunc("/api/bind", s.replayGuard(s.bindWorkspace))
 	mux.HandleFunc("/api/stop", s.replayGuard(s.stop))
 	mux.HandleFunc("/api/approve", s.replayGuard(s.approve))
 	mux.HandleFunc("/api/tools/", s.replayGuard(s.toggleTool))

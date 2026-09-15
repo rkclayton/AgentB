@@ -74,32 +74,6 @@ func canonicalRepo(value string) (string, error) {
 	return abs, nil
 }
 
-func (r *Registry) SetPlanRepo(planID, repo string) (Plan, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	id, err := normalizePlanID(planID)
-	if err != nil {
-		return Plan{}, err
-	}
-	dir := filepath.Join(r.plansRoot, id)
-	if info, statErr := os.Lstat(dir); statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-		return Plan{}, fmt.Errorf("plan_id: plan not found")
-	}
-	canonical, err := canonicalRepo(repo)
-	if err != nil {
-		return Plan{}, err
-	}
-	for _, item := range r.planListLocked() {
-		if item.ID != id && item.Repo != "" && samePath(item.Repo, canonical) {
-			return Plan{}, fmt.Errorf("repo already belongs to plan %s", item.ID)
-		}
-	}
-	if err := writePlanRepo(dir, canonical); err != nil {
-		return Plan{}, err
-	}
-	return Plan{ID: id, Name: planDisplayName(dir), Repo: canonical}, nil
-}
-
 func (r *Registry) EnsurePlan(repo string) (Plan, bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
