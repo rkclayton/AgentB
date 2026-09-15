@@ -29,8 +29,11 @@ func resolveForTool(ctx context.Context, workspace, path string) (string, error)
 }
 
 func resolveForSessionTool(ctx context.Context, s *session.Session, root, path string) (string, error) {
+	// D's plan-write boundary is immutable and operator identity cannot widen it.
+	// Resolve D paths canonically even when an OS-authorized B file-tool mode
+	// would otherwise let Windows ACLs decide.
 	if s.Role == "d" {
-		ctx = context.WithValue(ctx, osPathPolicyKey{}, false)
+		return resolvePath(root, path, true)
 	}
 	return resolveForTool(ctx, root, path)
 }
@@ -103,6 +106,17 @@ func refuseRepoPolicyWrite(workspace, path string) error {
 		if len(parts) > 0 && strings.EqualFold(parts[0], ".agentb") {
 			return fmt.Errorf("repo-policy immutability rule: model file tools cannot write .agentb/")
 		}
+	}
+	return nil
+}
+
+func refusePlanManifestWrite(s *session.Session, path string) error {
+	if s == nil || s.Role != "d" || s.PlanDir == "" {
+		return nil
+	}
+	manifest := filepath.Join(filepath.Clean(s.PlanDir), "plan.json")
+	if strings.EqualFold(filepath.Clean(path), manifest) {
+		return fmt.Errorf("plan manifest immutability rule: model file tools cannot write plan.json")
 	}
 	return nil
 }

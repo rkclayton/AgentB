@@ -57,6 +57,12 @@ func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string
 	if err != nil {
 		return "", err
 	}
+	if err := refuseRepoPolicyWrite(root, resolved); err != nil {
+		return "", err
+	}
+	if err := refusePlanManifestWrite(s, resolved); err != nil {
+		return "", err
+	}
 	displayPath := cleanRel(path)
 	if relative, relativeErr := filepath.Rel(root, resolved); relativeErr == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
 		displayPath = cleanRel(relative)

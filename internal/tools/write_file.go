@@ -122,6 +122,12 @@ func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[strin
 	if err != nil {
 		return "", err
 	}
+	if err := refuseRepoPolicyWrite(root, resolved); err != nil {
+		return "", err
+	}
+	if err := refusePlanManifestWrite(s, resolved); err != nil {
+		return "", err
+	}
 	if existing, readErr := os.ReadFile(resolved); readErr == nil && string(existing) == content {
 		w.coordinator.publishPlan(s)
 		return fmt.Sprintf("unchanged: %s already has the requested bytes", cleanRel(path)), nil
