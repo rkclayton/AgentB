@@ -16,7 +16,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$displayVersion = '0.58.0'
+$displayVersion = '0.59.0'
 . (Join-Path $PSScriptRoot 'removal-guard.ps1')
 
 function Get-FullPath {
