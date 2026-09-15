@@ -207,7 +207,7 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 		s.queue = append(s.queue, next)
 	}
 	priorRun := entry.s.Snapshot().Run
-	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: reason, LastStopDetail: detail, ArmedDetectors: append([]string(nil), priorRun.ArmedDetectors...)}
+	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: reason, LastStopDetail: detail, LastRunID: entry.runID, ArmedDetectors: append([]string(nil), priorRun.ArmedDetectors...)}
 	queueHeld := (s.held[entry.s.ID] || s.unreachable[entry.s.ID]) && len(s.pending[entry.s.ID]) > 0
 	if queueHeld {
 		state.Status = "held"
@@ -335,7 +335,7 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 				status = "held"
 			}
 			armed := append([]string(nil), entry.s.Snapshot().Run.ArmedDetectors...)
-			entry.s.SetRun(session.RunState{Status: status, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.pending[entry.s.ID]), LastStopReason: "done", LastStopDetail: "stopped before dispatch", ArmedDetectors: armed})
+			entry.s.SetRun(session.RunState{Status: status, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.pending[entry.s.ID]), LastStopReason: "done", LastStopDetail: "stopped before dispatch", LastRunID: entry.runID, ArmedDetectors: armed})
 			s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": entry.runID, "reason": "done", "detail": "stopped before dispatch", "turns": 0, "queue_held": s.held[entry.s.ID], "armed_detectors": armed})))
 			stopped = append(stopped, entry.s.ID)
 		} else {
@@ -378,7 +378,7 @@ func (s *Scheduler) forceFinish(sessionID string, expected *activeRun, detail st
 	}
 	priorRun := item.Snapshot().Run
 	turn := priorRun.Turn
-	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: active.stopReason, LastStopDetail: detail, ArmedDetectors: append([]string(nil), priorRun.ArmedDetectors...)}
+	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: active.stopReason, LastStopDetail: detail, LastRunID: active.runID, ArmedDetectors: append([]string(nil), priorRun.ArmedDetectors...)}
 	queueHeld := (s.held[sessionID] || s.unreachable[sessionID]) && len(s.pending[sessionID]) > 0
 	if queueHeld {
 		state.Status, state.QueuePosition = "held", len(s.pending[sessionID])

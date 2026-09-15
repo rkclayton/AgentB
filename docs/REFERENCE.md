@@ -105,7 +105,7 @@ The former `%LocalAppData%\Programs\Agent_b` layout is not migrated automaticall
 |---|---|
 | Process | `listen`, `workspace`, `log_dir` |
 | Profiles | `roles.{main,aux}` and `servers[].{id,label,base_url,model,credential,request_timeout_s,probe_mode,sampling,reasoning,context:{n_ctx,reserve_output},system_prompt_override,capabilities}` |
-| Runs | `run.{max_turns,cycle_window,max_consecutive_tool_errors,max_concurrent,queue_depth}`, `approval.mode` |
+| Runs | `run.{max_turns,max_wall_clock_seconds,max_tool_calls,cycle_window,max_consecutive_tool_errors,max_concurrent,queue_depth}`, `approval.mode` |
 | Context and memory | `context.{soft_pct,summary_pct,accounting}`, `memory.{enabled,dir,max_tokens}` |
 | Operator files | `operator_files.{allow_mailbox_approvals,log_retention_days}` (mailbox approvals default off; live-log retention defaults to 30 days and never prunes evidence archives) |
 | Tool caps | `tools.{read_file:{default_limit,max_limit},list_dir,grep,fetch:{timeout_s,max_bytes,max_redirects,default_limit,max_limit,allow_domains,deny_domains,allow_internal_hosts},find_files:{skip_roots}}`, `shell.{command,timeout_s,max_timeout_s,max_output_lines_head,max_output_lines_tail,file_routing_guard,operator_context,operator_context_idle_timeout_minutes,service_account,deny}` (`read_file` and `fetch_url` limits are bytes; `fetch_url` defaults to public hosts except listed IP-geolocation domains, with private-network access denied; `file_routing_guard` defaults on; `operator_context` and `service_account.enabled` default off; operator context is process-global, runtime-only, and lapses after 20 idle minutes by default) |

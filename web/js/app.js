@@ -58,7 +58,8 @@ consoleStop.addEventListener("click", () => { const id=store.selection.session_i
 consoleRunLabel.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-label]");
   const id = store.selection.session_id;
-  if (button && id && !store.replay) void api(`/api/sessions/${encodeURIComponent(id)}/result-label`, { label: button.dataset.label }).catch((error) => showError(error.message));
+  const runID = store.sessions[id]?.run?.last_run_id;
+  if (button && id && runID && !store.replay) void api(`/api/sessions/${encodeURIComponent(id)}/result-label`, { label: button.dataset.label, run_id: runID }).catch((error) => showError(error.message));
 });
 
 subscribe((_state, event) => {

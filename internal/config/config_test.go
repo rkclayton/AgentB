@@ -118,6 +118,26 @@ func TestLoadRejectsExplicitZeroMaxTurns(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsExplicitZeroIndependentBackstops(t *testing.T) {
+	for _, field := range []string{"max_wall_clock_seconds", "max_tool_calls"} {
+		t.Run(field, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "harness.json")
+			template, err := os.ReadFile("../../harness.example.json")
+			if err != nil {
+				t.Fatal(err)
+			}
+			document := strings.Replace(string(template), `"`+field+`": `+map[string]string{"max_wall_clock_seconds": "21600", "max_tool_calls": "1000"}[field], `"`+field+`": 0`, 1)
+			if err := os.WriteFile(path, []byte(document), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, _, _, err := Load(path); err == nil || !strings.Contains(err.Error(), field) || !strings.Contains(err.Error(), "zero is not unlimited") {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
 func TestLoadWithTemplateSeparatesApplicationAndDataRoots(t *testing.T) {
 	applicationRoot := t.TempDir()
 	dataRoot := filepath.Join(t.TempDir(), "nested", "data")

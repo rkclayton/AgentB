@@ -462,7 +462,9 @@ func LoadWithRoots(path, examplePath, dataRoot string) (*Config, bool, bool, err
 	var metadata struct {
 		ConfigVersion *int `json:"config_version"`
 		Run           struct {
-			MaxTurns *int `json:"max_turns"`
+			MaxTurns            *int `json:"max_turns"`
+			MaxWallClockSeconds *int `json:"max_wall_clock_seconds"`
+			MaxToolCalls        *int `json:"max_tool_calls"`
 		} `json:"run"`
 		Approval struct {
 			Mode string `json:"mode"`
@@ -473,6 +475,12 @@ func LoadWithRoots(path, examplePath, dataRoot string) (*Config, bool, bool, err
 	}
 	if metadata.Run.MaxTurns != nil && *metadata.Run.MaxTurns == 0 {
 		return nil, false, created, fmt.Errorf("run.max_turns: zero is not unlimited; omit it for the default %d or use a positive pathological-case backstop", DefaultMaxTurns)
+	}
+	if metadata.Run.MaxWallClockSeconds != nil && *metadata.Run.MaxWallClockSeconds == 0 {
+		return nil, false, created, fmt.Errorf("run.max_wall_clock_seconds: zero is not unlimited; omit it for the default %d or use a positive backstop", DefaultMaxWallClockSeconds)
+	}
+	if metadata.Run.MaxToolCalls != nil && *metadata.Run.MaxToolCalls == 0 {
+		return nil, false, created, fmt.Errorf("run.max_tool_calls: zero is not unlimited; omit it for the default %d or use a positive backstop", DefaultMaxToolCalls)
 	}
 	unstamped := metadata.ConfigVersion == nil
 	if !unstamped && *metadata.ConfigVersion != 2 && *metadata.ConfigVersion != 3 && *metadata.ConfigVersion != 4 && *metadata.ConfigVersion != 5 && *metadata.ConfigVersion != CurrentConfigVersion {

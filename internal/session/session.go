@@ -23,6 +23,7 @@ type RunState struct {
 	Partial        string   `json:"partial"`
 	LastStopReason string   `json:"last_stop_reason"`
 	LastStopDetail string   `json:"last_stop_detail,omitempty"`
+	LastRunID      string   `json:"last_run_id,omitempty"`
 	ArmedDetectors []string `json:"armed_detectors,omitempty"`
 	ResultLabel    string   `json:"result_label,omitempty"`
 }

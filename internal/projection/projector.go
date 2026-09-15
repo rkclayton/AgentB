@@ -36,6 +36,7 @@ type Run struct {
 	Partial        string   `json:"partial"`
 	LastStopReason string   `json:"last_stop_reason"`
 	LastStopDetail string   `json:"last_stop_detail,omitempty"`
+	LastRunID      string   `json:"last_run_id,omitempty"`
 	ArmedDetectors []string `json:"armed_detectors,omitempty"`
 	ResultLabel    string   `json:"result_label,omitempty"`
 }
@@ -328,6 +329,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.Run.Partial = ""
 		next.Run.LastStopReason = ""
 		next.Run.LastStopDetail = ""
+		next.Run.LastRunID = ""
 		next.Run.ArmedDetectors = stringSlice(data["armed_detectors"])
 		next.Run.ResultLabel = ""
 		next.QueuedMessages = max(0, next.QueuedMessages-1)
@@ -339,7 +341,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		if boolValue(data["queue_held"]) {
 			status = "held"
 		}
-		next.Run = Run{Status: status, MaxTurns: next.Run.MaxTurns, QueuePosition: next.QueuedMessages, LastStopReason: stringValue(data["reason"]), LastStopDetail: stringValue(data["detail"]), ArmedDetectors: append([]string(nil), next.Run.ArmedDetectors...)}
+		next.Run = Run{Status: status, MaxTurns: next.Run.MaxTurns, QueuePosition: next.QueuedMessages, LastStopReason: stringValue(data["reason"]), LastStopDetail: stringValue(data["detail"]), LastRunID: record.Event.RunID, ArmedDetectors: append([]string(nil), next.Run.ArmedDetectors...)}
 		next.Activity.Stage = "wait_user"
 		next.Activity.StageState = "enter"
 		next.Activity.ActiveTool = ""
@@ -350,7 +352,9 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 			next.PendingApproval = nil
 		}
 	case events.RunLabeled:
-		next.Run.ResultLabel = stringValue(data["label"])
+		if record.Event.RunID == next.Run.LastRunID {
+			next.Run.ResultLabel = stringValue(data["label"])
+		}
 	case events.ModelUnreachable:
 		next.ModelUnreachable = &ModelAvailability{Host: stringValue(data["host"]), Detail: stringValue(data["detail"])}
 		next.ModelBusy = nil

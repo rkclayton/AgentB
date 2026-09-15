@@ -237,6 +237,7 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		}
 		var body struct {
 			Label string `json:"label"`
+			RunID string `json:"run_id"`
 		}
 		if !decode(w, r, &body) {
 			return
@@ -250,10 +251,14 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusConflict, "a completed run is required", "session_id")
 			return
 		}
+		if body.RunID == "" || body.RunID != run.LastRunID {
+			writeError(w, http.StatusConflict, "the completed run has changed", "run_id")
+			return
+		}
 		run.ResultLabel = body.Label
 		item.SetRun(run)
-		s.bus.Publish(events.New(events.RunLabeled, id, "", map[string]any{"label": body.Label}))
-		writeJSON(w, http.StatusOK, map[string]any{"session_id": id, "label": body.Label})
+		s.bus.Publish(events.New(events.RunLabeled, id, body.RunID, map[string]any{"label": body.Label}))
+		writeJSON(w, http.StatusOK, map[string]any{"session_id": id, "run_id": body.RunID, "label": body.Label})
 		return
 	}
 	if len(parts) == 3 && parts[1] == "grants" && parts[2] == "revoke" && r.Method == http.MethodPost {
