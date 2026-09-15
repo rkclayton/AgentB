@@ -79,3 +79,22 @@ func TestEvaluateGuessedThresholds(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluateEventsRetainsTransientFirstFire(t *testing.T) {
+	stream := []events.Event{}
+	for turn := 1; turn <= 8; turn++ {
+		stream = append(stream, events.New(events.ToolResult, "s1", "r1", map[string]any{"turn": turn, "ok": true, "preview": "same result"}))
+	}
+	stream = append(stream, events.New(events.ToolResult, "s1", "r1", map[string]any{"turn": 9, "ok": true, "preview": "different 1"}))
+	stream = append(stream, events.New(events.ToolResult, "s1", "r1", map[string]any{"turn": 10, "ok": true, "preview": "different 2"}))
+	for _, record := range EvaluateEvents(stream, ArmedSet(false)) {
+		if record.Detector != ResultRepetition {
+			continue
+		}
+		if !record.WouldFire || intValue(record.Values["first_fire_turn"]) != 5 {
+			t.Fatalf("result repetition=%+v", record)
+		}
+		return
+	}
+	t.Fatal("result repetition record missing")
+}

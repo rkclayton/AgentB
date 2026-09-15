@@ -53,6 +53,7 @@ type Record struct {
 
 type runState struct {
 	armed          map[string]bool
+	firstFire      map[string]int
 	seenCalls      map[string]bool
 	seenReads      map[string]bool
 	novelTurns     map[int]bool
@@ -148,16 +149,38 @@ func (m *Manager) Consume(event events.Event) {
 	m.mu.Lock()
 	state := m.runs[k]
 	if event.Type == events.RunStarted {
-		state = &runState{armed: map[string]bool{}, seenCalls: map[string]bool{}, seenReads: map[string]bool{}, novelTurns: map[int]bool{}, turnTools: map[int]map[string]bool{}, durations: map[int]float64{}}
-		for _, value := range sliceStrings(data["armed_detectors"]) {
-			state.armed[value] = true
-		}
+		state = newRunState(sliceStrings(data["armed_detectors"]))
 		m.runs[k] = state
 	}
 	if state == nil {
 		m.mu.Unlock()
 		return
 	}
+	if event.Type == events.RunStopped {
+		delete(m.runs, k)
+		recordFirstFires(state)
+		records := Evaluate(state)
+		m.mu.Unlock()
+		for _, record := range records {
+			m.bus.Publish(events.New(events.ProgressShadow, event.SessionID, event.RunID, record))
+		}
+		return
+	}
+	observe(state, event)
+	recordFirstFires(state)
+	m.mu.Unlock()
+}
+
+func newRunState(armed []string) *runState {
+	state := &runState{armed: map[string]bool{}, firstFire: map[string]int{}, seenCalls: map[string]bool{}, seenReads: map[string]bool{}, novelTurns: map[int]bool{}, turnTools: map[int]map[string]bool{}, durations: map[int]float64{}}
+	for _, value := range armed {
+		state.armed[value] = true
+	}
+	return state
+}
+
+func observe(state *runState, event events.Event) {
+	data := dataMap(event.Data)
 	turn := intValue(data["turn"])
 	if turn > state.maxTurn {
 		state.maxTurn = turn
@@ -202,16 +225,21 @@ func (m *Manager) Consume(event events.Event) {
 	case events.ProgressAux:
 		state.auxKnown = boolValue(data["available"])
 		state.auxStuck = strings.EqualFold(stringValue(data["verdict"]), "stuck")
-	case events.RunStopped:
-		delete(m.runs, k)
-		records := Evaluate(state)
-		m.mu.Unlock()
-		for _, record := range records {
-			m.bus.Publish(events.New(events.ProgressShadow, event.SessionID, event.RunID, record))
-		}
-		return
 	}
-	m.mu.Unlock()
+}
+
+// EvaluateEvents runs the same shadow evaluators used by live event consumers.
+// Callers remain responsible for selecting exactly one run from a shared tape.
+func EvaluateEvents(stream []events.Event, armed []string) []Record {
+	state := newRunState(armed)
+	for _, event := range stream {
+		if event.Type == events.RunStarted || event.Type == events.RunStopped {
+			continue
+		}
+		observe(state, event)
+		recordFirstFires(state)
+	}
+	return Evaluate(state)
 }
 
 func stringValue(value any) string {
@@ -279,6 +307,25 @@ func ResultHash(value string) string {
 }
 
 func Evaluate(state *runState) []Record {
+	records := evaluateCurrent(state)
+	for index := range records {
+		if first := state.firstFire[records[index].Detector]; first > 0 {
+			records[index].WouldFire = true
+			records[index].Values["first_fire_turn"] = first
+		}
+	}
+	return records
+}
+
+func recordFirstFires(state *runState) {
+	for _, record := range evaluateCurrent(state) {
+		if record.Available && record.WouldFire && state.firstFire[record.Detector] == 0 {
+			state.firstFire[record.Detector] = max(1, state.maxTurn)
+		}
+	}
+}
+
+func evaluateCurrent(state *runState) []Record {
 	t := GuessedThresholds
 	armed := func(name string) bool { return state.armed[name] }
 	noNovel := 0
@@ -325,6 +372,13 @@ func Evaluate(state *runState) []Record {
 		{AuxProgress, armed(AuxProgress), armed(AuxProgress) && state.auxKnown, state.auxKnown && state.auxStuck, true, map[string]any{"every_turns": t.AuxEveryTurns, "soft": true}, map[string]any{"verdict_available": state.auxKnown, "verdict_stuck": state.auxStuck}},
 	}
 	return records
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func min(a, b int) int {
