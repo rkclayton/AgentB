@@ -36,11 +36,13 @@ type Manager struct {
 	allowLocal bool
 	wait       func(context.Context, time.Duration) error
 
-	mu      sync.RWMutex
-	webhook *url.URL
-	cancel  context.CancelFunc
-	unsub   func()
-	started bool
+	mu             sync.RWMutex
+	webhook        *url.URL
+	webhookContext context.Context
+	webhookCancel  context.CancelFunc
+	cancel         context.CancelFunc
+	unsub          func()
+	started        bool
 }
 
 func New(bus *events.Bus, label func(string) string, baseURL string) *Manager {
@@ -69,7 +71,11 @@ func (m *Manager) Configure(raw string) error {
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		m.mu.Lock()
+		if m.webhookCancel != nil {
+			m.webhookCancel()
+		}
 		m.webhook = nil
+		m.webhookContext, m.webhookCancel = nil, nil
 		m.mu.Unlock()
 		return nil
 	}
@@ -78,9 +84,18 @@ func (m *Manager) Configure(raw string) error {
 		return err
 	}
 	m.mu.Lock()
+	if m.webhookCancel != nil {
+		m.webhookCancel()
+	}
 	m.webhook = endpoint
+	m.webhookContext, m.webhookCancel = context.WithCancel(context.Background())
 	m.mu.Unlock()
 	return nil
+}
+
+func (m *Manager) Validate(raw string) error {
+	_, err := parseWebhook(strings.TrimSpace(raw), m.allowLocal)
+	return err
 }
 
 func (m *Manager) State() State {
@@ -102,7 +117,9 @@ func (m *Manager) Start(ctx context.Context) {
 	workerContext, cancel := context.WithCancel(ctx)
 	m.started, m.unsub, m.cancel = true, unsubscribe, cancel
 	m.mu.Unlock()
+	jobs := make(chan events.Event, 128)
 	go func() {
+		defer close(jobs)
 		for {
 			select {
 			case <-workerContext.Done():
@@ -114,8 +131,17 @@ func (m *Manager) Start(ctx context.Context) {
 				if !notifiable(event.Type) || !m.State().Configured {
 					continue
 				}
-				m.deliver(workerContext, event.Type, m.message(event))
+				select {
+				case jobs <- event:
+				case <-workerContext.Done():
+					return
+				}
 			}
+		}
+	}()
+	go func() {
+		for event := range jobs {
+			_ = m.deliver(workerContext, event.Type, m.message(event))
 		}
 	}()
 }
@@ -140,14 +166,23 @@ func (m *Manager) SendTest(ctx context.Context) error {
 }
 
 func (m *Manager) deliver(ctx context.Context, eventType, message string) error {
-	err := m.post(ctx, message)
+	m.mu.RLock()
+	endpoint, configuredContext := m.webhook, m.webhookContext
+	m.mu.RUnlock()
+	if endpoint == nil || configuredContext == nil {
+		return errors.New("webhook is not configured")
+	}
+	deliveryContext, cancel := context.WithCancel(ctx)
+	stopCancel := context.AfterFunc(configuredContext, cancel)
+	defer func() { stopCancel(); cancel() }()
+	err := m.post(deliveryContext, endpoint, message)
 	if err == nil {
 		return nil
 	}
-	if waitErr := m.wait(ctx, retryDelay); waitErr != nil {
+	if waitErr := m.wait(deliveryContext, retryDelay); waitErr != nil {
 		return waitErr
 	}
-	err = m.post(ctx, message)
+	err = m.post(deliveryContext, endpoint, message)
 	if err == nil {
 		return nil
 	}
@@ -159,14 +194,15 @@ func (m *Manager) deliver(ctx context.Context, eventType, message string) error 
 	return fmt.Errorf("Discord notification failed after one retry: %s", safe)
 }
 
-func (m *Manager) post(ctx context.Context, message string) error {
-	m.mu.RLock()
-	endpoint := m.webhook
-	m.mu.RUnlock()
-	if endpoint == nil {
-		return errors.New("webhook is not configured")
-	}
-	body, err := json.Marshal(map[string]string{"content": message})
+func (m *Manager) post(ctx context.Context, endpoint *url.URL, message string) error {
+	payload := struct {
+		Content         string `json:"content"`
+		AllowedMentions struct {
+			Parse []string `json:"parse"`
+		} `json:"allowed_mentions"`
+	}{Content: message}
+	payload.AllowedMentions.Parse = []string{}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
@@ -240,7 +276,7 @@ func parseWebhook(raw string, allowLocal bool) (*url.URL, error) {
 	if allowLocal && endpoint.Scheme == "http" && (host == "localhost" || net.ParseIP(host).IsLoopback()) {
 		return endpoint, nil
 	}
-	if endpoint.Scheme != "https" || !(host == "discord.com" || strings.HasSuffix(host, ".discord.com")) || !strings.HasPrefix(endpoint.EscapedPath(), "/api/webhooks/") {
+	if endpoint.Scheme != "https" || !(host == "discord.com" || host == "canary.discord.com" || host == "ptb.discord.com") || !strings.HasPrefix(endpoint.EscapedPath(), "/api/webhooks/") {
 		return nil, errors.New("Discord URL must be an https://discord.com/api/webhooks/... endpoint")
 	}
 	return endpoint, nil

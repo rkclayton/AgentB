@@ -3,6 +3,7 @@ package notifications
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,13 +17,20 @@ import (
 func TestTwoEventsProduceTwoHumanPostsWithoutDuplicates(t *testing.T) {
 	var mu sync.Mutex
 	var messages []string
+	mentionsDisabled := true
 	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]string
+		var body struct {
+			Content         string `json:"content"`
+			AllowedMentions struct {
+				Parse []string `json:"parse"`
+			} `json:"allowed_mentions"`
+		}
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
 		mu.Lock()
-		messages = append(messages, body["content"])
+		messages = append(messages, body.Content)
+		mentionsDisabled = mentionsDisabled && body.AllowedMentions.Parse != nil && len(body.AllowedMentions.Parse) == 0
 		mu.Unlock()
 		w.WriteHeader(http.StatusNoContent)
 	}))
@@ -54,11 +62,46 @@ func TestTwoEventsProduceTwoHumanPostsWithoutDuplicates(t *testing.T) {
 	if len(messages) != 2 {
 		t.Fatalf("posts=%d messages=%q", len(messages), messages)
 	}
+	if !mentionsDisabled {
+		t.Fatal("Discord allowed_mentions was not explicitly disabled")
+	}
 	if !strings.Contains(messages[0], "shell needs your approval") || !strings.Contains(messages[0], "http://127.0.0.1:8790/chat?session=s+one") {
 		t.Fatalf("approval message=%q", messages[0])
 	}
 	if !strings.Contains(messages[1], "The run finished.") {
 		t.Fatalf("stopped message=%q", messages[1])
+	}
+}
+
+func TestChangingConfigurationCancelsWaitingRetry(t *testing.T) {
+	bus := events.NewBus()
+	manager := New(bus, nil, "http://127.0.0.1:8790")
+	manager.allowLocal = true
+	if err := manager.Configure("http://127.0.0.1:1/first"); err != nil {
+		t.Fatal(err)
+	}
+	attempted := make(chan struct{}, 1)
+	manager.client = roundTripFunc(func(*http.Request) (*http.Response, error) {
+		attempted <- struct{}{}
+		return nil, context.DeadlineExceeded
+	})
+	manager.wait = func(ctx context.Context, _ time.Duration) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	done := make(chan error, 1)
+	go func() { done <- manager.deliver(context.Background(), events.RunStopped, "old event") }()
+	<-attempted
+	if err := manager.Configure("http://127.0.0.1:2/second"); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("delivery error=%v", err)
+	}
+	select {
+	case <-attempted:
+		t.Fatal("old event retried after its configured destination changed")
+	default:
 	}
 }
 

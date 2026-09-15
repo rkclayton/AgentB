@@ -11,6 +11,7 @@ import (
 )
 
 type notificationManager interface {
+	Validate(string) error
 	Configure(string) error
 	State() notifications.State
 	SendTest(context.Context) error
@@ -48,13 +49,16 @@ func (s *Server) notificationSettings(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, "Discord webhook URL is required", "notifications.discord_url")
 				return
 			}
-			if err := s.notifications.Configure(body.URL); err != nil {
+			if err := s.notifications.Validate(body.URL); err != nil {
 				writeError(w, http.StatusBadRequest, err.Error(), "notifications.discord_url")
 				return
 			}
 			if err := s.notificationStore.Write([]byte(strings.TrimSpace(body.URL))); err != nil {
-				_ = s.notifications.Configure("")
 				writeError(w, http.StatusInternalServerError, err.Error(), "notifications.discord_url")
+				return
+			}
+			if err := s.notifications.Configure(body.URL); err != nil {
+				writeError(w, http.StatusInternalServerError, "stored Discord URL could not be activated", "notifications.discord_url")
 				return
 			}
 		case "clear":

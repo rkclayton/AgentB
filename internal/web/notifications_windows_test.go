@@ -29,6 +29,7 @@ func (m *fakeNotificationManager) Configure(raw string) error {
 	}
 	return nil
 }
+func (m *fakeNotificationManager) Validate(string) error      { return nil }
 func (m *fakeNotificationManager) State() notifications.State { return m.state }
 func (m *fakeNotificationManager) SendTest(context.Context) error {
 	m.tests++
