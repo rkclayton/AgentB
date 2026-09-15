@@ -9,6 +9,7 @@ import (
 
 	"harness/internal/config"
 	"harness/internal/events"
+	"harness/internal/progress"
 	"harness/internal/session"
 )
 
@@ -161,7 +162,7 @@ func (s *Scheduler) SubmitAttachments(ctx context.Context, sessionID, text strin
 	entry := queuedRun{s: item, runID: runID, userMessageID: message.ID}
 	s.queue = append(s.queue, entry)
 	position := len(s.queue)
-	item.SetRun(session.RunState{Status: "queued", RunID: runID, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: position})
+	item.SetRun(session.RunState{Status: "queued", RunID: runID, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: position, ArmedDetectors: s.armedDetectors(item)})
 	s.bus.Publish(events.New(events.RunQueued, sessionID, runID, map[string]any{"run_id": runID, "position": position}))
 	return SubmitResult{RunID: runID, Queued: true, Position: position}, nil
 }
@@ -173,8 +174,9 @@ func (s *Scheduler) startLocked(entry queuedRun) {
 	ctx, cancel := context.WithCancel(context.Background())
 	active := &activeRun{cancel: cancel, runID: entry.runID, done: make(chan struct{})}
 	s.active[entry.s.ID] = active
-	entry.s.SetRun(session.RunState{Status: "running", RunID: entry.runID, MaxTurns: s.cfg().Run.MaxTurns})
-	s.bus.Publish(events.New(events.RunStarted, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "user_message_id": entry.userMessageID}))
+	armed := s.armedDetectors(entry.s)
+	entry.s.SetRun(session.RunState{Status: "running", RunID: entry.runID, MaxTurns: s.cfg().Run.MaxTurns, ArmedDetectors: armed})
+	s.bus.Publish(events.New(events.RunStarted, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "user_message_id": entry.userMessageID, "armed_detectors": armed, "thresholds_are_guesses": true}))
 	go func() {
 		reason, detail, turns := s.runner.Run(ctx, entry.s, entry.runID)
 		s.finish(entry, reason, detail, turns)
@@ -203,7 +205,8 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 		next.s.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns})
 		s.queue = append(s.queue, next)
 	}
-	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: reason}
+	priorRun := entry.s.Snapshot().Run
+	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: reason, LastStopDetail: detail, ArmedDetectors: append([]string(nil), priorRun.ArmedDetectors...)}
 	queueHeld := (s.held[entry.s.ID] || s.unreachable[entry.s.ID]) && len(s.pending[entry.s.ID]) > 0
 	if queueHeld {
 		state.Status = "held"
@@ -219,6 +222,16 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 	}
 	s.repositionLocked()
 	s.mu.Unlock()
+}
+
+func (s *Scheduler) armedDetectors(item *session.Session) []string {
+	hasAux := false
+	if item != nil {
+		if agentConfig, ok := s.cfg().Agent(item.Snapshot().AgentID); ok {
+			hasAux = agentConfig.C != ""
+		}
+	}
+	return progress.ArmedSet(hasAux)
 }
 
 func identicalPendingPosition(waiting []queuedRun, text string) int {

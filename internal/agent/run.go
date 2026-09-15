@@ -353,6 +353,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 		s.RecordModelTurn()
 		r.bus.Publish(responseEvent)
 		r.maybeAutoRename(ctx, s)
+		r.maybeAuxProgress(ctx, s, runID, turn)
 		r.stage(s, runID, turn, "parse", func() {})
 		if response.FinishReason == "length" && len(toolCalls) > 0 {
 			if lengthSeen {

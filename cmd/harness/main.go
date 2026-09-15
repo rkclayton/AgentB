@@ -29,6 +29,7 @@ import (
 	"harness/internal/memory"
 	"harness/internal/notifications"
 	"harness/internal/operatorfiles"
+	"harness/internal/progress"
 	"harness/internal/projection"
 	"harness/internal/serviceaccount"
 	"harness/internal/session"
@@ -119,6 +120,9 @@ func main() {
 	bus := events.NewBus()
 	projector := projection.NewStore()
 	bus.SetDurableSink(writers.WriteRecord, projector.Apply, projector.MarkStale)
+	progressManager := progress.New(bus)
+	progressManager.Start()
+	defer progressManager.Close()
 	web := webserver.New(cfg, paths.Config, filepath.Join(paths.Application, "web"), roots, bus)
 	web.SetProjection(projector, writers)
 	for _, notice := range cfg.LoadNotices {

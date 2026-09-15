@@ -15,13 +15,16 @@ import (
 )
 
 type RunState struct {
-	Status         string `json:"status"`
-	RunID          string `json:"run_id"`
-	Turn           int    `json:"turn"`
-	MaxTurns       int    `json:"max_turns"`
-	QueuePosition  int    `json:"queue_position"`
-	Partial        string `json:"partial"`
-	LastStopReason string `json:"last_stop_reason"`
+	Status         string   `json:"status"`
+	RunID          string   `json:"run_id"`
+	Turn           int      `json:"turn"`
+	MaxTurns       int      `json:"max_turns"`
+	QueuePosition  int      `json:"queue_position"`
+	Partial        string   `json:"partial"`
+	LastStopReason string   `json:"last_stop_reason"`
+	LastStopDetail string   `json:"last_stop_detail,omitempty"`
+	ArmedDetectors []string `json:"armed_detectors,omitempty"`
+	ResultLabel    string   `json:"result_label,omitempty"`
 }
 type ToolState struct {
 	Name           string `json:"name"`

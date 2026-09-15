@@ -28,13 +28,16 @@ type Record struct {
 }
 
 type Run struct {
-	Status         string `json:"status"`
-	RunID          string `json:"run_id"`
-	Turn           int    `json:"turn"`
-	MaxTurns       int    `json:"max_turns"`
-	QueuePosition  int    `json:"queue_position"`
-	Partial        string `json:"partial"`
-	LastStopReason string `json:"last_stop_reason"`
+	Status         string   `json:"status"`
+	RunID          string   `json:"run_id"`
+	Turn           int      `json:"turn"`
+	MaxTurns       int      `json:"max_turns"`
+	QueuePosition  int      `json:"queue_position"`
+	Partial        string   `json:"partial"`
+	LastStopReason string   `json:"last_stop_reason"`
+	LastStopDetail string   `json:"last_stop_detail,omitempty"`
+	ArmedDetectors []string `json:"armed_detectors,omitempty"`
+	ResultLabel    string   `json:"result_label,omitempty"`
 }
 
 type Tool struct {
@@ -324,6 +327,9 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		next.Run.QueuePosition = 0
 		next.Run.Partial = ""
 		next.Run.LastStopReason = ""
+		next.Run.LastStopDetail = ""
+		next.Run.ArmedDetectors = stringSlice(data["armed_detectors"])
+		next.Run.ResultLabel = ""
 		next.QueuedMessages = max(0, next.QueuedMessages-1)
 		next.Activity.DispatchAlarm = false
 	case events.RunStopping:
@@ -333,7 +339,7 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		if boolValue(data["queue_held"]) {
 			status = "held"
 		}
-		next.Run = Run{Status: status, MaxTurns: next.Run.MaxTurns, QueuePosition: next.QueuedMessages, LastStopReason: stringValue(data["reason"])}
+		next.Run = Run{Status: status, MaxTurns: next.Run.MaxTurns, QueuePosition: next.QueuedMessages, LastStopReason: stringValue(data["reason"]), LastStopDetail: stringValue(data["detail"]), ArmedDetectors: append([]string(nil), next.Run.ArmedDetectors...)}
 		next.Activity.Stage = "wait_user"
 		next.Activity.StageState = "enter"
 		next.Activity.ActiveTool = ""
