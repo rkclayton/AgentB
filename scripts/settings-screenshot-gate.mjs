@@ -61,10 +61,13 @@ async function capture(name, exe, appRoot, expected) {
     await page.screenshot({ path: resolve(args.evidence, `${name}-connections.png`) });
     const connections = await page.evaluate(() => ({ content_width: document.querySelector(".settings-content").clientWidth, content_scroll_width: document.querySelector(".settings-content").scrollWidth, group_height: document.querySelector(".settings-group").scrollHeight }));
     await page.locator('[data-action="settings-section"][data-id="shell"]').click();
-    await page.getByText("Allow my local network", { exact: true }).waitFor({ state: name === "candidate" ? "visible" : "hidden" }).catch(() => {});
+	await page.waitForFunction(() => document.querySelector(".settings-content")?.textContent.includes("Allow my local network"), null, { timeout: 5000 }).catch(() => {});
 	await page.waitForFunction(() => !document.querySelector(".settings-content")?.textContent.includes("checking host protections"), null, { timeout: 5000 }).catch(() => {});
+    await page.evaluate(() => { document.querySelector(".settings-content").scrollTop = 0; });
+    await page.waitForTimeout(250);
+    await page.evaluate(() => { document.querySelector(".settings-content").scrollTop = 0; scrollTo(0, 0); });
     await page.screenshot({ path: resolve(args.evidence, `${name}-security.png`) });
-    const security = await page.evaluate(() => ({ content_width: document.querySelector(".settings-content").clientWidth, content_scroll_width: document.querySelector(".settings-content").scrollWidth, group_height: document.querySelector(".settings-group").scrollHeight }));
+    const security = await page.evaluate(() => ({ content_width: document.querySelector(".settings-content").clientWidth, content_scroll_width: document.querySelector(".settings-content").scrollWidth, content_scroll_top: document.querySelector(".settings-content").scrollTop, window_scroll_y: scrollY, group_height: document.querySelector(".settings-group").scrollHeight, subheads: [...document.querySelectorAll(".settings-subhead")].map((node) => ({ text: node.textContent, top: node.getBoundingClientRect().top })) }));
     return { build: state.build, metrics: { connections, security } };
   } finally {
     try { await browser?.close(); } catch {}

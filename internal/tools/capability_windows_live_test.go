@@ -175,8 +175,8 @@ func TestCapabilitySuiteLiveServiceSplit(t *testing.T) {
 		if result := toolRegistry.CallDetailed(context.Background(), d, "read_file", map[string]any{"path": repositoryFile}); !result.OK || !strings.Contains(result.Content, "repository evidence") {
 			t.Fatalf("d repository read=%+v", result)
 		}
-		if result := toolRegistry.CallDetailed(context.Background(), d, "write_file", map[string]any{"path": filepath.Join(workspace, "d-escape.txt"), "content": "escape"}); result.OK || result.OperatorOverrideReason == "" {
-			t.Fatalf("d repository write did not match the visible b-jail refusal: %+v", result)
+		if result := toolRegistry.CallDetailed(context.Background(), d, "write_file", map[string]any{"path": filepath.Join(workspace, "d-escape.txt"), "content": "escape"}); result.OK || !strings.Contains(result.Content, "outside the plan") || result.OperatorOverrideReason != "" {
+			t.Fatalf("d repository write did not match the direct plan-jail refusal: %+v", result)
 		} else if _, ok := toolRegistry.CallAsOperator(context.Background(), d, "write_file", map[string]any{"path": filepath.Join(workspace, "d-escape.txt"), "content": "escape"}); ok {
 			t.Fatal("operator identity widened the d repository-write jail")
 		}
@@ -184,10 +184,12 @@ func TestCapabilitySuiteLiveServiceSplit(t *testing.T) {
 		if err := os.MkdirAll(sibling, 0o700); err != nil {
 			t.Fatal(err)
 		}
-		if result := toolRegistry.CallDetailed(context.Background(), d, "read_file", map[string]any{"path": filepath.Join(sibling, "plan.md")}); result.OK || result.OperatorOverrideReason == "" {
-			t.Fatalf("d sibling read did not match the visible b-jail refusal: %+v", result)
-		} else if _, ok := toolRegistry.CallAsOperator(context.Background(), d, "read_file", map[string]any{"path": filepath.Join(sibling, "plan.md")}); ok {
-			t.Fatal("operator identity widened the d sibling-plan jail")
+		siblingPlan := filepath.Join(sibling, "plan.md")
+		if err := os.WriteFile(siblingPlan, []byte("# Sibling plan\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if result := toolRegistry.CallDetailed(context.Background(), d, "read_file", map[string]any{"path": siblingPlan}); !result.OK || !strings.Contains(result.Content, "Sibling plan") {
+			t.Fatalf("d plan-tree read did not use the union jail: %+v", result)
 		}
 	})
 

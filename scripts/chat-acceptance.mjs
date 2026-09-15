@@ -135,7 +135,7 @@ const fakeHandler = async (request, response) => {
   }
   if (user.includes("acceptance: menu stream")) {
     const count = toolCountAfterLatestUser(body);
-    await sleep(400);
+    await sleep(1000);
     if (count < 8) {
       const path = count < 2 ? "long-tool.txt" : "AGENTS.md";
       return stream(response, { tool_calls: [{ index: 0, id: `menu-stream-${count}`, type: "function", function: { name: "read_file", arguments: JSON.stringify({ path }) } }] }, "tool_calls");
@@ -161,7 +161,7 @@ const fakeHandler = async (request, response) => {
     return stream(response, { content: "Busy model resumed." });
   }
   if (user.includes("inspect acceptance directory") && !hasToolAfterLatestUser(body)) {
-    return stream(response, { tool_calls: [{ index: 0, id: "acceptance-shell", type: "function", function: { name: "shell", arguments: JSON.stringify({ command: `& "${gitPath}" status --short` }) } }] }, "tool_calls");
+    return stream(response, { tool_calls: [{ index: 0, id: "acceptance-shell", type: "function", function: { name: "shell", arguments: JSON.stringify({ command: `& "${gitPath}" -C "${bound}" status --short` }) } }] }, "tool_calls");
   }
   if (user.includes("inspect acceptance directory")) return stream(response, { content: "Acceptance answer rendered after the approved shell call." });
   if (user.includes("acceptance: queued follower")) return stream(response, { content: "Queued follower completed." });
@@ -604,8 +604,7 @@ if (realModel) {
     node.__agentbMutationObserver.observe(node, { attributes: true, childList: true, characterData: true, subtree: true });
   });
   assert.equal(await page.locator(".chat-tool-group-head").count(), 0, "active responses must not regroup live tool nodes");
-  await page.locator("button.tool-tick").first().waitFor({ state: "visible" });
-  const toolButton = page.locator("button.tool-tick").first();
+  const toolButton = page.locator('[data-entry-key*="menu-stream-0"] button.tool-tick');
   await toolButton.waitFor({ state: "visible" });
   await toolButton.hover();
   const toolButtonHandle = await toolButton.elementHandle();
@@ -624,7 +623,7 @@ if (realModel) {
   assert.equal(await toolButtonHandle.evaluate((node) => node.__agentbMutationCount), 0, "expanded tool button mutated during the active event stream");
   await toolButtonHandle.click();
   assert.equal(await toolButtonHandle.getAttribute("aria-expanded"), "true", "tool-tick did not expand from a trusted mid-stream click");
-  const toolRoot = page.locator("button.tool-tick").first().locator("..");
+  const toolRoot = toolButton.locator("..");
   const collapseArrow = toolRoot.locator("button.collapse-arrow");
   await collapseArrow.waitFor({ state: "visible" });
   await page.screenshot({ path: join(baselineDirectory, "chat-mid-run.png") });
@@ -637,8 +636,13 @@ if (realModel) {
   });
   const arrowBeforeScroll = await collapseArrow.boundingBox();
   assert.ok(arrowBeforeScroll, "collapse arrow must have a visible box after expansion");
-  await page.mouse.wheel(0, 400);
-  await page.waitForTimeout(50);
+  await page.mouse.wheel(0, 600);
+  await page.waitForFunction(() => {
+    const node = document.querySelector('[data-entry-key*="menu-stream-0"] .collapse-arrow');
+    const log = document.querySelector('#chat-log');
+    if (!node || !log) return false;
+    return Math.abs(node.getBoundingClientRect().top - (log.getBoundingClientRect().top + Number.parseFloat(getComputedStyle(node).top))) < 2;
+  });
   const arrowPinned = await collapseArrow.boundingBox();
   await page.mouse.wheel(0, 200);
   await page.waitForTimeout(50);
@@ -663,10 +667,12 @@ if (realModel) {
   record("tool-tick-node-lifecycle-active-run");
   await page.locator("#chat-stop").click();
   await waitEvent(sessionID, (event) => event.type === "run.stopped" && event.seq > lifecycleRunStarted.seq, "tool-tick lifecycle run stopped");
+  await browser.wait(`document.querySelector('#chat-stop').disabled`, "tool-tick lifecycle stop projected");
 
   const missingArgsInitial = await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
     const session = bus.store.sessions[${JSON.stringify(sessionID)}];
+    session.run = { ...session.run, status: 'idle' };
     session.chat = [
       { type: 'user', key: 'hotfix:user', text: 'before malformed tool' },
       { type: 'tool', key: 'hotfix:missing-args', name: 'read_file' },
@@ -678,6 +684,7 @@ if (realModel) {
     return { collapsed: summary?.innerText || '' };
   })()`);
   await page.locator(".chat-step-summary").last().click();
+  await page.waitForFunction(() => document.querySelectorAll('[data-entry-key^="hotfix:"]').length === 3);
   const missingArgsFixture = await page.evaluate(() => {
     const summary = document.querySelector('.chat-response-summary');
     return {
@@ -701,6 +708,7 @@ if (realModel) {
   await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
     const session = bus.store.sessions[${JSON.stringify(sessionID)}];
+    session.run = { ...session.run, status: 'idle' };
     const args = new Proxy({}, { ownKeys() { throw new Error('deliberate render failure'); } });
     session.chat = [
       { type: 'user', key: 'hotfix:kept', text: 'other entry remains' },
@@ -711,6 +719,7 @@ if (realModel) {
     return true;
   })()`);
   await page.locator(".chat-step-summary").click();
+  await page.waitForFunction(() => document.querySelector(".chat-render-failure")?.textContent.includes("deliberate render failure"));
   const throwingFixture = await browser.evaluate(`(async () => {
     const bus = await import('/static/js/bus.js');
     for (let index = 1; index < 32; index++) {
@@ -833,9 +842,10 @@ if (realModel) {
     return true;
   })()`);
   await page.locator(".chat-step-summary").click();
-  await page.locator(".file-chip a").waitFor({ state: "visible" });
+  await page.locator('.file-chips .file-chip a').last().waitFor({ state: "visible" });
   const deliveredChip = await page.evaluate(() => {
-    const chip = document.querySelector('.file-chip');
+    const chips = document.querySelectorAll('.file-chips .file-chip');
+    const chip = chips[chips.length - 1];
     return {
       text: chip?.innerText || '',
       links: chip?.querySelectorAll('a').length || 0,
@@ -968,26 +978,29 @@ if (realModel) {
   assert.ok(Math.abs(geometry.send.height - 24) < 0.01, JSON.stringify(geometry));
   record("composer-flex-width-expand-robot-tab-plus-equal-controls");
 
+  events = await sessionEvents(sessionID);
+  const beforePlanRegistration = events.at(-1)?.seq || 0;
   await setTask(`Add ${bound} as a plan`);
+	const planRegistrationApproval = await waitEvent(sessionID, (event) => event.seq > beforePlanRegistration && event.type === "approval.required" && event.data?.name === "plan registration", "plan registration approval.required");
+	await page.reload();
+	await browser.wait(`performance.getEntriesByType('navigation')[0]?.type==='reload' && document.querySelector('#chat-task')`, "pending approval refresh");
+	await waitFileContains(join(args.data, "OUTBOX.md"), "needs you: approval is waiting");
+	record("outbox-line-on-pause");
 	await browser.wait(`document.querySelector('.approval-card')`, "plan registration approval");
 	assert.equal(await clickText(".approval-card button", "Yes, for this chat"), true);
+	await waitEvent(sessionID, (event) => event.seq > planRegistrationApproval.seq && event.type === "run.stopped", "plan registration completed");
+	events = await sessionEvents(sessionID);
+	const beforeInspectionApproval = events.at(-1)?.seq || 0;
 	await setTask(`Please inspect acceptance directory "${bound}" and report.`);
-  await waitEvent(sessionID, (event) => event.type === "approval.required", "approval.required");
-  await page.reload();
-  await browser.wait(`performance.getEntriesByType('navigation')[0]?.type==='reload' && document.querySelector('#chat-task')`, "pending approval refresh");
-  await waitFileContains(join(args.data, "OUTBOX.md"), "needs you: approval is waiting");
-  record("outbox-line-on-pause");
-	await browser.wait(`document.querySelector('.approval-card')`, "shell approval card");
-  assert.equal(await clickText(".approval-card button", "Yes, for this chat"), true);
-  await waitProjectedChatText(sessionID, "Acceptance answer rendered after the approved shell call.", "answer rendered");
+	await waitProjectedChatText(sessionID, "Acceptance answer rendered after the approved shell call.", "answer rendered");
   events = await sessionEvents(sessionID);
-  assert.ok(events.some((event) => event.type === "shell.grant" && event.data.scope === "session"));
-  assert.ok(events.some((event) => event.type === "tool.result" && event.data.name === "shell" && event.data.ok === true));
+  assert.equal(events.some((event) => event.seq > beforeInspectionApproval && event.type === "approval.required"), false);
+  assert.ok(events.some((event) => event.type === "tool.result" && event.data.name === "shell" && event.data.ok === true), JSON.stringify(events.filter((event) => event.seq > beforeInspectionApproval && (event.type.startsWith("tool.") || event.type.startsWith("approval.") || event.type === "shell.grant")).map((event) => ({ seq: event.seq, type: event.type, data: event.data }))));
   const gutter = await browser.evaluate(`getComputedStyle(document.querySelector('.chat-entry')).gridTemplateColumns.split(' ')[0]`);
   assert.match(gutter, /^72px$/);
   const speakerHeads = await browser.evaluate(`({agent:document.querySelectorAll('.chat-agent .chat-speaker img').length,user:document.querySelectorAll('.chat-user .chat-speaker img').length})`);
   assert.ok(speakerHeads.agent > 0 && speakerHeads.user === 0, JSON.stringify(speakerHeads));
-  record("bind-run-as-you-tool-answer-72px-robot-rail");
+  record("plan-registration-tool-answer-72px-robot-rail");
 
   const beforeLiveTool = (await sessionEvents(sessionID)).at(-1)?.seq || 0;
   await setTask("acceptance: live tool");
@@ -1015,16 +1028,14 @@ if (realModel) {
   await page.locator(".shell-settings").click();
   await browser.wait(`!document.querySelector('#settings-page').hidden`, "Settings open");
   assert.equal(await clickText(".settings-nav button", "Security"), true);
-  await browser.wait(`!document.querySelector('#settings-page').hidden && document.querySelector('.settings-content')?.innerText.includes('Adopt repository instructions')`, "operator-file Security settings");
+  await browser.wait(`!document.querySelector('#settings-page').hidden && document.querySelector('.settings-content')?.innerText.includes('Docker Sandbox')`, "operator-file and sandbox Security settings");
   const folderSettings = await browserText(".settings-content");
-  for (const text of ["attachments", "Empty", "log retention (days)", "Adopt repository instructions", "Also remove AGENTS.md / CLAUDE.md"]) assert.ok(folderSettings.includes(text), `Security settings missing ${text}`);
+  for (const text of ["attachments", "Empty", "log retention (days)", "Docker Sandbox"]) assert.ok(folderSettings.includes(text), `Security settings missing ${text}`);
+  assert.equal(folderSettings.includes("Adopt repository instructions"), false);
   assert.equal(await page.locator('[data-path="operator_files.log_retention_days"]').inputValue(), "30");
-  assert.equal(await browser.evaluate(`document.querySelector('#adopt-instruction-cleanup')?.checked`), false);
   assert.equal(await browser.evaluate(`document.querySelector('[data-path="operator_files.allow_mailbox_approvals"]')?.getAttribute('aria-checked')`), "false");
-  assert.equal(await clickText(".settings-content button", "Adopt"), true);
-  await waitFileContains(join(bound, "AGENT_B.md"), "Use the acceptance rules.");
   assert.equal(await readFile(join(bound, "AGENTS.md"), "utf8"), "Use the acceptance rules.\n");
-  record("folder-operator-files-and-adopt");
+  record("scratch-operator-files-and-global-sandbox");
   assert.equal(await clickText(".settings-nav button", "Security"), true);
   await browser.wait(`document.querySelector('.settings-operator-status[data-action="operator-context"]')`, "Settings operator toggle");
   const operatorBefore = await browser.evaluate(`document.querySelector('.settings-operator-status').getAttribute('aria-pressed')`);
@@ -1441,17 +1452,15 @@ if (realModel) {
   assert.deepEqual(await roleChoices.allTextContents(), ["agent_b · Acceptance — chat", "agent_d · Acceptance — plan"]);
   await page.screenshot({ path: join(evidenceRun, "d-role-menu.png") });
   await roleChoices.nth(1).click();
-  await browser.wait(`[...document.querySelectorAll('.shell-new-menu .shell-new-choice')].some(item=>item.textContent==='Browser plan')`, "plan choices");
-  assert.equal(await page.locator(".shell-new-menu .shell-new-choice").first().innerText(), "none");
-  await page.screenshot({ path: join(evidenceRun, "d-plan-menu.png") });
-  await clickText(".shell-new-menu .shell-new-choice", "Browser plan");
-  await browser.wait(`document.querySelector('.agent-tab-wrap.selected .agent-tab')?.innerText.includes('agent_d') && document.title.endsWith('· plan: Browser plan')`, "d chat plan identity");
+  await browser.wait(`document.querySelector('.agent-tab-wrap.selected .agent-tab')?.innerText.includes('agent_d')`, "unbound d chat identity");
   const dState = await state();
-  const dSession = Object.values(dState.sessions).find((session) => session.role === "d" && session.plan_id === "browser-plan");
+  const dSession = Object.values(dState.sessions).find((session) => session.role === "d" && !session.plan_id);
   assert.ok(dSession, JSON.stringify(dState.sessions));
   assert.equal(dSession.server_id, "acceptance");
+  assert.equal(dSession.workspace_dir, join(args.data, "scratch", dSession.id));
+  assert.equal(await page.title(), `agent_d · ${dSession.b_profile || dSession.server_id}`);
   await page.screenshot({ path: join(evidenceRun, "d-plan.png") });
-  record("d-plus-plan-choice-tab-and-title");
+  record("d-plus-unbound-scratch-tab-and-title");
   record("fake-model-script-complete");
   await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID, shell_flip: shellFlipEvidence, shell_style_boundary: shellStyleBoundaryEvidence }, null, 2));
   const evidenceLogs = join(evidenceRun, "jsonl");
