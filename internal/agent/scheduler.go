@@ -176,7 +176,8 @@ func (s *Scheduler) startLocked(entry queuedRun) {
 	s.active[entry.s.ID] = active
 	armed := s.armedDetectors(entry.s)
 	entry.s.SetRun(session.RunState{Status: "running", RunID: entry.runID, MaxTurns: s.cfg().Run.MaxTurns, ArmedDetectors: armed})
-	s.bus.Publish(events.New(events.RunStarted, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "user_message_id": entry.userMessageID, "armed_detectors": armed, "thresholds_are_guesses": true}))
+	runCfg := s.cfg().Run
+	s.bus.Publish(events.New(events.RunStarted, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "user_message_id": entry.userMessageID, "armed_detectors": armed, "thresholds_are_guesses": true, "backstops": map[string]any{"wall_clock_seconds": runCfg.MaxWallClockSeconds, "tool_calls": runCfg.MaxToolCalls, "turn_ceiling": runCfg.MaxTurns}}))
 	go func() {
 		reason, detail, turns := s.runner.Run(ctx, entry.s, entry.runID)
 		s.finish(entry, reason, detail, turns)
@@ -213,7 +214,7 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 		state.QueuePosition = len(s.pending[entry.s.ID])
 	}
 	entry.s.SetRun(state)
-	s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": entry.runID, "reason": reason, "detail": detail, "turns": turns, "queue_held": queueHeld})))
+	s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": entry.runID, "reason": reason, "detail": detail, "turns": turns, "queue_held": queueHeld, "armed_detectors": state.ArmedDetectors})))
 	s.notifyAgentIdleLocked(entry.s.Snapshot().AgentID)
 	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
 		next := s.queue[0]

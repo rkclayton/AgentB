@@ -140,6 +140,27 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 	s.ResetRunTouches()
 	r.beginFlight(s.ID, runID)
 	defer r.endFlight(s.ID, runID)
+	runCfg := r.cfg().Run
+	if runCfg.MaxWallClockSeconds <= 0 {
+		runCfg.MaxWallClockSeconds = config.DefaultMaxWallClockSeconds
+	}
+	if runCfg.MaxToolCalls <= 0 {
+		runCfg.MaxToolCalls = config.DefaultMaxToolCalls
+	}
+	var wallExceeded atomic.Bool
+	wallContext, cancelWall := context.WithCancel(ctx)
+	wallTimer := time.AfterFunc(time.Duration(runCfg.MaxWallClockSeconds)*time.Second, func() {
+		wallExceeded.Store(true)
+		cancelWall()
+	})
+	defer func() { wallTimer.Stop(); cancelWall() }()
+	ctx = wallContext
+	contextStop := func(turn int, fallback string) (string, string, int) {
+		if wallExceeded.Load() {
+			return "wall_clock", fmt.Sprintf("guessed wall-clock backstop reached after %d seconds", runCfg.MaxWallClockSeconds), turn
+		}
+		return r.stopped(s, runID, turn, fallback)
+	}
 	produced := map[string]delivery.Source{}
 	defer func() {
 		result := delivery.Result{}
@@ -156,7 +177,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 	defer r.lapseFileRunGrant(s, runID)
 	if stop, detail := r.applyMailboxBoundary(ctx, s, runID, false); stop {
 		if ctx.Err() != nil {
-			return r.stopped(s, runID, 0, detail)
+			return contextStop(0, detail)
 		}
 		return "mailbox_stop", detail, 0
 	}
@@ -178,19 +199,19 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 		}
 	}()
 	turn := 0
+	toolCallsUsed := 0
 	lengthSeen := false
 	truncatedToolRetry := ""
 	accountingRepairTried := false
-	runCfg := r.cfg().Run
 	guards := newRunGuards(runCfg.CycleWindow, runCfg.MaxConsecutiveToolErrors)
 	currentReasoning := map[string]bool{}
 	for {
 		if ctx.Err() != nil {
-			return r.stopped(s, runID, turn, "cancellation requested")
+			return contextStop(turn, "cancellation requested")
 		}
 		if stop, detail := r.applyMailboxBoundary(ctx, s, runID, false); stop {
 			if ctx.Err() != nil {
-				return r.stopped(s, runID, turn, detail)
+				return contextStop(turn, detail)
 			}
 			return "mailbox_stop", detail, turn
 		}
@@ -270,7 +291,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 		}
 		if budgetErr != nil {
 			if ctx.Err() != nil {
-				return r.stopped(s, runID, turn-1, "budget accounting canceled")
+				return contextStop(turn-1, "budget accounting canceled")
 			}
 			r.operationalError(s, runID, "budget", budgetErr)
 			if !accountingRepairTried && r.repairMalformedToolCall(ctx, s, runID, profile, currentReasoning) {
@@ -332,7 +353,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 		}
 		if callErr != nil {
 			if ctx.Err() != nil {
-				return r.stopped(s, runID, turn, "model call canceled")
+				return contextStop(turn, "model call canceled")
 			}
 			if r.publishModelUnreachable(s, runID, profile, callErr) {
 				publishFinalBudget = false
@@ -421,6 +442,10 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 				results = append(results, result{call: call, durableCall: durableToolCalls[index], args: args, argErr: err})
 			}
 		})
+		if toolCallsUsed+len(results) > runCfg.MaxToolCalls {
+			return "tool_budget", fmt.Sprintf("guessed tool-call backstop of %d would be exceeded", runCfg.MaxToolCalls), turn
+		}
+		toolCallsUsed += len(results)
 		r.stage(s, runID, turn, "execute", func() {
 			remainingResultTokens := max(0, budget.NCtx-budget.Reserve-budget.UsedEst-toolResultContextMargin)
 			for index := range results {
@@ -464,7 +489,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 			}
 		})
 		if ctx.Err() != nil {
-			return r.stopped(s, runID, turn, "tool execution canceled")
+			return contextStop(turn, "tool execution canceled")
 		}
 		r.stage(s, runID, turn, "append", func() {
 			s.Append(assistant)
@@ -493,7 +518,7 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 				decision, err := r.gate.WaitCycleDecision(ctx, s, runID, item.call.ID+"-cycle", map[string]any{"tool": item.call.Name, "detail": detail})
 				if err != nil {
 					if ctx.Err() != nil {
-						return r.stopped(s, runID, turn, "approval wait canceled")
+						return contextStop(turn, "approval wait canceled")
 					}
 					return "cycle", err.Error(), turn
 				}

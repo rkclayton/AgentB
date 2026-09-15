@@ -219,6 +219,8 @@ const (
 
 type RunConfig struct {
 	MaxTurns                 int `json:"max_turns"`
+	MaxWallClockSeconds      int `json:"max_wall_clock_seconds"`
+	MaxToolCalls             int `json:"max_tool_calls"`
 	CycleWindow              int `json:"cycle_window"`
 	MaxConsecutiveToolErrors int `json:"max_consecutive_tool_errors"`
 	MaxConcurrent            int `json:"max_concurrent"`
@@ -226,6 +228,8 @@ type RunConfig struct {
 }
 
 const DefaultMaxTurns = 10000
+const DefaultMaxWallClockSeconds = 6 * 60 * 60
+const DefaultMaxToolCalls = 1000
 
 type Approval struct {
 	Mode string `json:"mode"`
@@ -416,7 +420,7 @@ func Defaults(workspace string) Config {
 		Servers: []Profile{profile}, Agents: []Agent{{Name: profile.Label, B: "local", Toolset: FullToolset()}}, Chat: defaultChat(),
 		Services: map[string]Service{},
 		Sandbox:  Sandbox{Enabled: true, initialized: true},
-		Run:      RunConfig{MaxTurns: DefaultMaxTurns, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(), OperatorFiles: OperatorFiles{LogRetentionDays: 30}, Notifications: Notifications{DiscordCredential: "discord-webhook"},
+		Run:      RunConfig{MaxTurns: DefaultMaxTurns, MaxWallClockSeconds: DefaultMaxWallClockSeconds, MaxToolCalls: DefaultMaxToolCalls, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(), OperatorFiles: OperatorFiles{LogRetentionDays: 30}, Notifications: Notifications{DiscordCredential: "discord-webhook"},
 		Tools:   Tools{ReadFile: ReadFileTool{DefaultLimit: 16 << 10, MaxLimit: 64 << 10}, Attachments: AttachmentTool{MaxBytes: 8 << 20}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Shell: ShellTool{OperatorCommands: []string{"git"}}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, DenyDomains: []string{"ipinfo.io", "ipapi.co", "ip-api.com", "ifconfig.me", "ipify.org", "geojs.io", "ipgeolocation.io", "icanhazip.com"}, AllowInternalHosts: []string{}}, FindFiles: FindFilesTool{SkipRoots: []string{"Windows", "$Recycle.Bin", "System Volume Information", `ProgramData\Microsoft\Windows Defender*`, `Program Files\Windows Defender*`}}},
 		Shell:   Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextIdleTimeoutMinutes: 20, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
 		Signing: Signing{TimestampURL: "http://timestamp.digicert.com"},
@@ -746,6 +750,12 @@ func (c Config) Validate() error {
 	if c.Run.MaxTurns < 1 {
 		return fmt.Errorf("run.max_turns: must be positive; zero is not unlimited (omit it for the default %d)", DefaultMaxTurns)
 	}
+	if c.Run.MaxWallClockSeconds < 1 {
+		return fmt.Errorf("run.max_wall_clock_seconds: must be positive")
+	}
+	if c.Run.MaxToolCalls < 1 {
+		return fmt.Errorf("run.max_tool_calls: must be positive")
+	}
 	if c.Run.MaxConcurrent < 1 {
 		return fmt.Errorf("run.max_concurrent: must be positive")
 	}
@@ -879,6 +889,12 @@ func applyDefaults(c *Config) {
 	}
 	if c.Run.MaxTurns == 0 {
 		c.Run.MaxTurns = d.Run.MaxTurns
+	}
+	if c.Run.MaxWallClockSeconds == 0 {
+		c.Run.MaxWallClockSeconds = d.Run.MaxWallClockSeconds
+	}
+	if c.Run.MaxToolCalls == 0 {
+		c.Run.MaxToolCalls = d.Run.MaxToolCalls
 	}
 	if c.Run.MaxConcurrent == 0 {
 		c.Run.MaxConcurrent = d.Run.MaxConcurrent
