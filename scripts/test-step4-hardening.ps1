@@ -94,10 +94,45 @@ try {
     Write-Host 'VERIFY credential storage and decryption'
     & (Join-Path $PSScriptRoot 'setup-service-account.ps1') -AccountName $account -CredentialStore $credentialPath -ValidateCredentialStore
 
-    Write-Host 'VERIFY root and exchange-folder ACL apply and verify'
+    Write-Host 'VERIFY upgraded-root ACL repair and shared apply/verify predicate'
     $aclAttempted = $true
-    & (Join-Path $PSScriptRoot 'apply-acls.ps1') -AccountName $account -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -NoPrompt -Confirm:$false
+    $accountSid = (Get-LocalUser -Name $account -ErrorAction Stop).SID
+    $legacyAcl = Get-Acl -LiteralPath $dataRoot
+    $legacyDataRule = [Security.AccessControl.FileSystemAccessRule]::new(
+        $accountSid,
+        [Security.AccessControl.FileSystemRights]::FullControl,
+        ([Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit),
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Deny
+    )
+    $legacyAcl.SetAccessRule($legacyDataRule)
+    Set-Acl -LiteralPath $dataRoot -AclObject $legacyAcl
+    $upgradeOutput = (& (Join-Path $PSScriptRoot 'apply-acls.ps1') -AccountName $account -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -NoPrompt -Confirm:$false 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $upgradeOutput -notmatch 'APPLIED: deny service identity access to operator data except traversal') {
+        throw "Upgraded-root policy did not replace the legacy FullControl deny ACE.`n$upgradeOutput"
+    }
     & (Join-Path $PSScriptRoot 'apply-acls.ps1') -AccountName $account -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -Verify
+    if ($LASTEXITCODE -ne 0) { throw 'Upgraded-root policy failed verification after apply.' }
+    $expectedDataRights = ([Security.AccessControl.FileSystemAccessRule]::new(
+        $accountSid,
+        [Security.AccessControl.FileSystemRights]([int][Security.AccessControl.FileSystemRights]::FullControl -band (-bnot [int][Security.AccessControl.FileSystemRights]::Traverse)),
+        ([Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit),
+        [Security.AccessControl.PropagationFlags]::None,
+        [Security.AccessControl.AccessControlType]::Deny
+    )).FileSystemRights
+    $dataRules = @((Get-Acl -LiteralPath $dataRoot).Access | Where-Object {
+        try { $ruleSid = $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]) } catch { return $false }
+        $ruleSid -eq $accountSid -and -not $_.IsInherited -and $_.AccessControlType -eq [Security.AccessControl.AccessControlType]::Deny -and
+            $_.InheritanceFlags -eq ([Security.AccessControl.InheritanceFlags]::ContainerInherit -bor [Security.AccessControl.InheritanceFlags]::ObjectInherit) -and
+            $_.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::None
+    })
+    if ($dataRules.Count -ne 1 -or $dataRules[0].FileSystemRights -ne $expectedDataRights) {
+        throw 'Upgraded-root policy did not leave exactly the verifier-approved data-root deny ACE.'
+    }
+
+    Write-Host 'VERIFY root and exchange-folder ACL idempotence'
+    & (Join-Path $PSScriptRoot 'apply-acls.ps1') -AccountName $account -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $exchangeRoot -NoPrompt -Confirm:$false
+    if ($LASTEXITCODE -ne 0) { throw 'Idempotent ACL reapply failed.' }
 
     Write-Host 'VERIFY service shell identity, workspace write, and application/data denial'
     $env:AGENTB_STEP4_LIVE_ACCOUNT = $account

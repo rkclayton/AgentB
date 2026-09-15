@@ -47,6 +47,8 @@ Select **Verify** at any time to detect missing or replaced ACL entries and fire
 
 The elevated installer preserves existing settings, retained chats, state, workspace contents, and protected top-level ACLs during upgrades. Retained chat journals live under `%LOCALAPPDATA%\Agent_b\chats`, outside the replaced Program Files application tree and outside operational-log retention. After the first installed launch, use **Apply protection** for that installed layout even if a source checkout was already hardened; continue to Verify after upgrades because a release that adds a new application artifact still needs the recursive policy verified.
 
+When an installed Agent_b is running, an upgrade applies and verifies the candidate ACL policy before stopping that process. It also copies the existing application tree to a guarded temporary rollback root before the stop. If any later installation or verification step fails, the elevated phase restores those application files and records `RESTART VERSION` / `RESTART REASON`; the original non-elevated installer wrapper then starts that restored version and appends `RESTARTED` to the same transcript. A failed pre-stop policy check never stops Agent_b, and a rollback or restart failure is reported explicitly rather than hidden.
+
 The network rule permits every loopback and Tailscale destination, not only the model server. It prevents ordinary public/LAN egress by this Windows identity; it is not a domain allowlist, protocol inspection, or protection against a kernel-level exploit.
 
 ## 4. RBAC demonstration checks

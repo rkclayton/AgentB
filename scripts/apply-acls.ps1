@@ -99,7 +99,24 @@ function New-ManagedRule {
     )
 }
 
-function Get-ExactManagedRules {
+function Get-ManagedRuleFamily {
+    param(
+        [Security.AccessControl.FileSystemSecurity]$Acl,
+        [Security.Principal.SecurityIdentifier]$Identity,
+        [Security.AccessControl.InheritanceFlags]$Inheritance,
+        [Security.AccessControl.AccessControlType]$Type
+    )
+    return @($Acl.Access | Where-Object {
+        try { $ruleSid = $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]) } catch { return $false }
+        return $ruleSid -eq $Identity -and
+            -not $_.IsInherited -and
+            $_.AccessControlType -eq $Type -and
+            $_.InheritanceFlags -eq $Inheritance -and
+            $_.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::None
+    })
+}
+
+function Test-ManagedRule {
     param(
         [Security.AccessControl.FileSystemSecurity]$Acl,
         [Security.Principal.SecurityIdentifier]$Identity,
@@ -108,24 +125,17 @@ function Get-ExactManagedRules {
         [Security.AccessControl.AccessControlType]$Type
     )
     # FileSystemAccessRule normalizes composite rights (notably Modify) by
-    # adding Synchronize. Compare against a constructed rule's effective
-    # rights rather than the unnormalized enum supplied by the caller.
+    # adding Synchronize. A managed rule is satisfied only when its family
+    # contains exactly the one effective ACE that apply would establish.
     $expected = New-ManagedRule -Identity $Identity -Rights $Rights -Inheritance $Inheritance -Type $Type
-    return @($Acl.Access | Where-Object {
-        try { $ruleSid = $_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]) } catch { return $false }
-        return $ruleSid -eq $Identity -and
-            -not $_.IsInherited -and
-            $_.AccessControlType -eq $Type -and
-            $_.FileSystemRights -eq $expected.FileSystemRights -and
-            $_.InheritanceFlags -eq $Inheritance -and
-            $_.PropagationFlags -eq [Security.AccessControl.PropagationFlags]::None
-    })
+    $family = @(Get-ManagedRuleFamily -Acl $Acl -Identity $Identity -Inheritance $Inheritance -Type $Type)
+    return $family.Count -eq 1 -and $family[0].FileSystemRights -eq $expected.FileSystemRights
 }
 
 function Set-ManagedRule {
     param([pscustomobject]$Target, [Security.Principal.SecurityIdentifier]$Identity)
     $acl = Get-Acl -LiteralPath $Target.Path
-    if ((Get-ExactManagedRules -Acl $acl -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type).Count -gt 0) {
+    if (Test-ManagedRule -Acl $acl -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type) {
         Write-Host "UNCHANGED: $($Target.Intent) :: $($Target.Path)"
         $script:unchanged++
         return
@@ -136,11 +146,15 @@ function Set-ManagedRule {
             # Set-Acl can trigger a costly inheritance recalculation across a
             # large user-profile tree. icacls adds this non-inheriting ACE to
             # the directory itself without walking its descendants.
-            & icacls.exe $Target.Path /grant ("*$($Identity.Value):(X,S)") | Out-Host
+            & icacls.exe $Target.Path /grant:r ("*$($Identity.Value):(X,S)") | Out-Host
             if ($LASTEXITCODE -ne 0) { throw "icacls failed for parent traverse path: $($Target.Path)" }
         } else {
-            $null = $acl.AddAccessRule((New-ManagedRule -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type))
+            $acl.SetAccessRule((New-ManagedRule -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type))
             Set-Acl -LiteralPath $Target.Path -AclObject $acl
+        }
+        $appliedAcl = Get-Acl -LiteralPath $Target.Path
+        if (-not (Test-ManagedRule -Acl $appliedAcl -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type)) {
+            throw "ACL apply did not establish its verification predicate: $($Target.Intent) :: $($Target.Path)"
         }
         Write-Host "APPLIED: $($Target.Intent) :: $($Target.Path)"
         $script:changed++
@@ -150,7 +164,7 @@ function Set-ManagedRule {
 function Remove-ManagedRule {
     param([pscustomobject]$Target, [Security.Principal.SecurityIdentifier]$Identity)
     $acl = Get-Acl -LiteralPath $Target.Path
-    $rules = Get-ExactManagedRules -Acl $acl -Identity $Identity -Rights $Target.Rights -Inheritance $Target.Inheritance -Type $Target.Type
+    $rules = @(Get-ManagedRuleFamily -Acl $acl -Identity $Identity -Inheritance $Target.Inheritance -Type $Target.Type)
     if ($rules.Count -eq 0) {
         Write-Host "UNCHANGED: managed ACE already absent :: $($Target.Path)"
         $script:unchanged++
@@ -335,7 +349,7 @@ if ($Verify -or $Inspect) {
             continue
         }
         $acl = Get-Acl -LiteralPath $target.Path
-        $present = (Get-ExactManagedRules -Acl $acl -Identity $serviceSid -Rights $target.Rights -Inheritance $target.Inheritance -Type $target.Type).Count -gt 0
+        $present = Test-ManagedRule -Acl $acl -Identity $serviceSid -Rights $target.Rights -Inheritance $target.Inheritance -Type $target.Type
         if (-not $present) { $drift++ }
         if ($Verify) { Write-Host "$(if ($present) { 'PASS' } else { 'DRIFT' }): $($target.Intent) :: $($target.Path)" }
     }

@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 
 if not defined AGENT_B_INSTALL_LOG (
@@ -20,6 +20,30 @@ powershell.exe -NoLogo -NoProfile -File "%~dp0scripts\install-Agent_b.ps1" -Tran
 set "AGENT_B_EXIT=%ERRORLEVEL%"
 echo.
 if not "%AGENT_B_EXIT%"=="0" (
+  for /f "tokens=1,* delims=:" %%A in ('findstr.exe /b /c:"RESTART VERSION: " "%AGENT_B_INSTALL_LOG%"') do set "AGENT_B_RESTART_VERSION=%%B"
+  for /f "tokens=1,* delims=:" %%A in ('findstr.exe /b /c:"RESTART REASON: " "%AGENT_B_INSTALL_LOG%"') do set "AGENT_B_RESTART_REASON=%%B"
+  for /f "tokens=1,* delims=:" %%A in ('findstr.exe /b /c:"Application: " "%AGENT_B_INSTALL_LOG%"') do set "AGENT_B_INSTALLED_ROOT=%%B"
+  for /f "tokens=1,* delims=:" %%A in ('findstr.exe /b /c:"Operator data: " "%AGENT_B_INSTALL_LOG%"') do set "AGENT_B_INSTALLED_DATA=%%B"
+  for /f "tokens=* delims= " %%I in ("!AGENT_B_RESTART_VERSION!") do set "AGENT_B_RESTART_VERSION=%%I"
+  for /f "tokens=* delims= " %%I in ("!AGENT_B_RESTART_REASON!") do set "AGENT_B_RESTART_REASON=%%I"
+  for /f "tokens=* delims= " %%I in ("!AGENT_B_INSTALLED_ROOT!") do set "AGENT_B_INSTALLED_ROOT=%%I"
+  for /f "tokens=* delims= " %%I in ("!AGENT_B_INSTALLED_DATA!") do set "AGENT_B_INSTALLED_DATA=%%I"
+  if defined AGENT_B_RESTART_VERSION (
+    set "AGENT_B_INSTALLED_LAUNCHER=!AGENT_B_INSTALLED_ROOT!\Agent_b.cmd"
+    if exist "!AGENT_B_INSTALLED_LAUNCHER!" (
+      set "AGENT_B_RESTART_BROWSER="
+      if defined AGENT_B_INSTALL_NO_BROWSER set "AGENT_B_RESTART_BROWSER=-NoBrowser"
+      powershell.exe -NoLogo -NoProfile -Command "$launchArgs=@('-Detached','-NoPause','-DataDirectory',$env:AGENT_B_INSTALLED_DATA); if($env:AGENT_B_RESTART_BROWSER){$launchArgs += $env:AGENT_B_RESTART_BROWSER}; $output=@(& $env:AGENT_B_INSTALLED_LAUNCHER @launchArgs); $code=$LASTEXITCODE; foreach($line in $output){Write-Output $line}; if($output.Count){[IO.File]::AppendAllText($env:AGENT_B_INSTALL_LOG,(($output -join [Environment]::NewLine)+[Environment]::NewLine),[Text.UTF8Encoding]::new($false))}; exit $code"
+      set "AGENT_B_RESTART_EXIT=!ERRORLEVEL!"
+      if "!AGENT_B_RESTART_EXIT!"=="0" (
+        set "AGENT_B_INSTALL_RECORD=RESTARTED: !AGENT_B_RESTART_VERSION! after !AGENT_B_RESTART_REASON!."
+      ) else (
+        set "AGENT_B_INSTALL_RECORD=RESTART FAILED: !AGENT_B_RESTART_VERSION! exited !AGENT_B_RESTART_EXIT! after !AGENT_B_RESTART_REASON!."
+      )
+      powershell.exe -NoLogo -NoProfile -Command "[IO.File]::AppendAllText($env:AGENT_B_INSTALL_LOG,$env:AGENT_B_INSTALL_RECORD+[Environment]::NewLine,[Text.UTF8Encoding]::new($false))"
+      echo !AGENT_B_INSTALL_RECORD!
+    )
+  )
   echo Agent_b installation failed with exit code %AGENT_B_EXIT%. Transcript: %AGENT_B_INSTALL_LOG%
   if not defined AGENT_B_INSTALL_NO_PAUSE pause
   exit /b %AGENT_B_EXIT%

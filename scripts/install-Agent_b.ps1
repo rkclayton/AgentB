@@ -12,6 +12,7 @@ param(
     [switch]$SkipBuild,
     [string]$SigningThumbprint,
     [switch]$TestMode,
+    [switch]$ForcePostStopVerificationFailure,
     [string]$TranscriptPath
 )
 
@@ -188,6 +189,47 @@ function Copy-ProgramDirectory {
     }
 }
 
+function Copy-ApplicationTree {
+    param([string]$Source, [string]$Destination, [string[]]$AllowedRemovalRoots)
+    if (-not (Test-Path -LiteralPath $Source -PathType Container)) { throw "Application-tree source is missing: $Source" }
+    $null = New-Item -ItemType Directory -Path $Destination -Force
+    foreach ($item in Get-ChildItem -LiteralPath $Destination -Force) {
+        if (-not (Test-Path -LiteralPath (Join-Path $Source $item.Name))) {
+            $removalPath = Assert-RemovalWithinAllowedRoots -Path $item.FullName -AllowedRoots $AllowedRemovalRoots -Purpose 'installer application-tree restore cleanup'
+            Remove-Item -LiteralPath $removalPath -Recurse -Force
+        }
+    }
+    foreach ($item in Get-ChildItem -LiteralPath $Source -Force) {
+        if ($item.PSIsContainer) {
+            Copy-ProgramDirectory -Name $item.Name -Source $Source -Destination $Destination -AllowedRemovalRoots $AllowedRemovalRoots
+        } else {
+            Copy-Item -LiteralPath $item.FullName -Destination (Join-Path $Destination $item.Name) -Force
+        }
+    }
+}
+
+function Get-InstalledDisplayVersion {
+    param([string]$ApplicationRoot)
+    $installerPath = Join-Path $ApplicationRoot 'scripts\install-Agent_b.ps1'
+    if (-not (Test-Path -LiteralPath $installerPath -PathType Leaf)) { return 'unknown version' }
+    $source = Get-Content -Raw -LiteralPath $installerPath
+    $match = [regex]::Match($source, "(?m)^\`$displayVersion\s*=\s*'([^']+)'")
+    if (-not $match.Success) { return 'unknown version' }
+    return 'v' + $match.Groups[1].Value
+}
+
+function Remove-InstallerRollbackRoot {
+    param([string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) { return }
+    $full = Get-FullPath $Path
+    $temporary = Get-FullPath ([IO.Path]::GetTempPath())
+    if (-not $full.StartsWith($temporary + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        -not (Split-Path -Leaf $full).StartsWith('Agent_b-install-rollback-', [StringComparison]::Ordinal)) {
+        throw "Refusing to remove unexpected installer rollback root: $full"
+    }
+    Remove-Item -LiteralPath $full -Recurse -Force
+}
+
 function Set-PrivateDirectoryAcl {
     param([string]$Path, [Security.Principal.SecurityIdentifier]$Owner)
     $acl = [Security.AccessControl.DirectorySecurity]::new()
@@ -231,11 +273,27 @@ function Set-ApplicationDirectoryAcl {
 
 $script:installTranscriptStarted = $false
 $script:installTranscriptPath = $null
+$script:stoppedInstalledVersion = $false
+$script:rollbackRoot = $null
+$script:rollbackVersion = $null
+$script:rollbackApplicationRoot = $null
+$script:rollbackDataRoot = $null
 trap {
     $reason = $_.Exception.Message
     if (-not $script:installTranscriptStarted -and $script:installTranscriptPath) {
         try { Start-InstallTranscript -Path $script:installTranscriptPath } catch { }
     }
+    if ($script:stoppedInstalledVersion -and $script:rollbackRoot -and (Test-Path -LiteralPath $script:rollbackRoot -PathType Container)) {
+        try {
+            Copy-ApplicationTree -Source $script:rollbackRoot -Destination $script:rollbackApplicationRoot -AllowedRemovalRoots @($script:rollbackApplicationRoot)
+            Write-Host "ROLLBACK: restored $($script:rollbackVersion) application files after installation failure."
+            Write-Host "RESTART VERSION: $($script:rollbackVersion)"
+            Write-Host "RESTART REASON: $(if ($reason -match 'verif') { 'verification failure' } else { 'installation failure' })"
+        } catch {
+            Write-Host "ROLLBACK FAILED: $($_.Exception.Message)"
+        }
+    }
+    try { Remove-InstallerRollbackRoot -Path $script:rollbackRoot } catch { Write-Host "ROLLBACK CLEANUP FAILED: $($_.Exception.Message)" }
     Write-Host "INSTALLATION FAILED: $reason"
     if ($script:installTranscriptPath) { Write-Host "Transcript: $script:installTranscriptPath" }
     Stop-InstallTranscript
@@ -263,6 +321,7 @@ Assert-SafeRegistryPath $UninstallRegistryPath
 Assert-TestPath $applicationRoot
 Assert-TestPath $dataRoot
 Assert-TestPath $workspaceRoot
+if ($ForcePostStopVerificationFailure -and -not $TestMode) { throw 'ForcePostStopVerificationFailure is available only with TestMode.' }
 Assert-DisjointRoots @($applicationRoot, $dataRoot, $workspaceRoot)
 if ($sourceRoot.Equals($applicationRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'SourceDirectory and ApplicationDirectory must be different.' }
 if (-not $TestMode) {
@@ -290,8 +349,9 @@ try { $null = [Security.Principal.SecurityIdentifier]::new($OperatorSid) } catch
     throw "OperatorSid is not a valid Windows SID: $OperatorSid"
 }
 $preflightConfigPath = Join-Path $dataRoot 'harness.json'
+$preflightConfig = $null
 if (Test-Path -LiteralPath $preflightConfigPath -PathType Leaf) {
-    try { $null = Get-Content -Raw -LiteralPath $preflightConfigPath | ConvertFrom-Json } catch {
+    try { $preflightConfig = Get-Content -Raw -LiteralPath $preflightConfigPath | ConvertFrom-Json } catch {
         throw "Existing operator configuration is not valid JSON: $preflightConfigPath ($($_.Exception.Message))"
     }
 }
@@ -367,7 +427,28 @@ if ($WhatIfPreference) {
 }
 
 $installedProcesses = @(Get-InstalledProcesses $installedBinary)
+$preflightAclEnabled = $preflightConfig -and ($Alpha -or ($preflightConfig.shell.service_account -and [bool]$preflightConfig.shell.service_account.enabled))
+if ($preflightAclEnabled) {
+    $preflightAclAccount = if ($preflightConfig.shell.service_account.account) { [string]$preflightConfig.shell.service_account.account } else { 'agentb-svc' }
+    $preflightExchangeRoot = Get-FullPath $(if ($preflightConfig.deliver -and $preflightConfig.deliver.exchange_folder) { [string]$preflightConfig.deliver.exchange_folder } else { '%USERPROFILE%\Agent_b' })
+    $sourceAclScript = Join-Path $sourceRoot 'scripts\apply-acls.ps1'
+    Write-Host 'PRESTOP POLICY: applying and verifying host policy before stopping Agent_b.'
+    & $sourceAclScript -AccountName $preflightAclAccount -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $preflightExchangeRoot -NoPrompt -Confirm:$false
+    if ($LASTEXITCODE -ne 0) { throw "Pre-stop ACL policy apply failed with exit code $LASTEXITCODE." }
+    & $sourceAclScript -AccountName $preflightAclAccount -ApplicationDirectory $applicationRoot -DataDirectory $dataRoot -WorkspaceDirectory $workspaceRoot -ExchangeDirectory $preflightExchangeRoot -Verify
+    if ($LASTEXITCODE -ne 0) { throw "Pre-stop ACL policy verification failed with exit code $LASTEXITCODE." }
+    Write-Host 'PRESTOP POLICY PASS: Agent_b is still running.'
+}
+if ($installedProcesses.Count) {
+    $script:rollbackRoot = Join-Path ([IO.Path]::GetTempPath()) ('Agent_b-install-rollback-' + [Guid]::NewGuid().ToString('N'))
+    $script:rollbackVersion = Get-InstalledDisplayVersion -ApplicationRoot $applicationRoot
+    $script:rollbackApplicationRoot = $applicationRoot
+    $script:rollbackDataRoot = $dataRoot
+    Copy-Item -LiteralPath $applicationRoot -Destination $script:rollbackRoot -Recurse -Force
+    Write-Host "ROLLBACK READY: preserved $($script:rollbackVersion) application files before stop."
+}
 Stop-InstalledProcesses -Processes $installedProcesses
+if ($installedProcesses.Count) { $script:stoppedInstalledVersion = $true }
 
 if ($SkipBuild) {
 	Write-Host 'BUILD: using the commit-stamped binary supplied by deploy-alpha.ps1.'
@@ -493,6 +574,7 @@ if ($Alpha -or ($config.shell.service_account -and [bool]$config.shell.service_a
 	if ($LASTEXITCODE -ne 0) { throw "Installed ACL policy verification failed with exit code $LASTEXITCODE." }
 	Write-Host 'PASS: installed root, plans/scratch exceptions, workspace, and exchange-folder ACL policy'
 }
+if ($ForcePostStopVerificationFailure) { throw 'Forced post-stop verification failure.' }
 
 $iconPath = Join-Path $applicationRoot 'web\assets\Agent_b.ico'
 if (-not (Test-Path -LiteralPath $iconPath -PathType Leaf)) { throw "Installed icon is missing: $iconPath" }
@@ -548,6 +630,9 @@ $null = New-ItemProperty -Path $UninstallRegistryPath -Name NoModify -Value 1 -P
 $null = New-ItemProperty -Path $UninstallRegistryPath -Name NoRepair -Value 1 -PropertyType DWord -Force
 
 Write-Host ''
+Remove-InstallerRollbackRoot -Path $script:rollbackRoot
+$script:rollbackRoot = $null
+$script:stoppedInstalledVersion = $false
 Write-Host 'INSTALLATION COMPLETE'
 Write-Host "Start Menu: $shortcutPath"
 Write-Host 'Registration: HKCU and the operator Start Menu, matching the LocalAppData configuration and user-scoped DPAPI owner.'

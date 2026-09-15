@@ -181,6 +181,11 @@ try {
         $installedInstallerSource -notmatch 'PASS: installed root, plans/scratch exceptions, workspace, and exchange-folder ACL policy') {
 		throw 'Installed elevated installer does not self-verify the plans/scratch host-policy exceptions.'
     }
+    $preStopPolicyPosition = $installedInstallerSource.IndexOf("Write-Host 'PRESTOP POLICY: applying and verifying host policy before stopping Agent_b.'")
+    $stopCallPosition = $installedInstallerSource.LastIndexOf('Stop-InstalledProcesses -Processes $installedProcesses')
+    if ($preStopPolicyPosition -lt 0 -or $stopCallPosition -lt 0 -or $preStopPolicyPosition -ge $stopCallPosition) {
+        throw 'Installed elevated installer does not apply and verify host policy before its process-stop call.'
+    }
     $sourceBatchLauncher = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $PSScriptRoot) 'start-Agent_b.cmd')
     if ($sourceBatchLauncher -notmatch 'AGENTB_HIDDEN_REENTRY' -or
         $sourceBatchLauncher -notmatch '"-Console"' -or
@@ -443,6 +448,55 @@ try {
         if ($afterLength -lt $entry.Length -or (Get-FilePrefixHash -Path $entry.Path -Length $entry.Length) -ne $entry.PrefixSHA256) {
             throw "Upgrade changed an existing log prefix: $($entry.Path)"
         }
+    }
+
+    $rollbackSentinel = Join-Path $webDirectory 'rollback-sentinel.txt'
+    [IO.File]::WriteAllText($rollbackSentinel, 'restore the previously installed application tree', [Text.UTF8Encoding]::new($false))
+    $installedVersionMatch = [regex]::Match((Get-Content -Raw -LiteralPath (Join-Path $testApplication 'scripts\install-Agent_b.ps1')), "(?m)^\`$displayVersion\s*=\s*'([^']+)'")
+    if (-not $installedVersionMatch.Success) { throw 'Could not read the installed version for the forced-failure rollback proof.' }
+    $expectedRollbackVersion = 'v' + $installedVersionMatch.Groups[1].Value
+    $forcedTranscriptPath = Join-Path $testData 'logs\forced-failure-transcript.log'
+    $savedInstallLog = $env:AGENT_B_INSTALL_LOG
+    $savedNoPause = $env:AGENT_B_INSTALL_NO_PAUSE
+    $savedNoBrowser = $env:AGENT_B_INSTALL_NO_BROWSER
+    $env:AGENT_B_INSTALL_LOG = $forcedTranscriptPath
+    $env:AGENT_B_INSTALL_NO_PAUSE = '1'
+    $env:AGENT_B_INSTALL_NO_BROWSER = '1'
+    try {
+        $forcedOutput = (& $installerWrapper -SourceDirectory (Split-Path -Parent $PSScriptRoot) -ApplicationDirectory $testApplication -DataDirectory $testData -WorkspaceDirectory $testWorkspace -StartMenuDirectory $testStart -UninstallRegistryPath $testRegistry -TestMode -SkipBuild -ForcePostStopVerificationFailure 2>&1 | Out-String)
+        $forcedExit = $LASTEXITCODE
+    } finally {
+        $env:AGENT_B_INSTALL_LOG = $savedInstallLog
+        $env:AGENT_B_INSTALL_NO_PAUSE = $savedNoPause
+        $env:AGENT_B_INSTALL_NO_BROWSER = $savedNoBrowser
+    }
+    if ($forcedExit -eq 0) { throw "Forced post-stop verification failure unexpectedly succeeded.`n$forcedOutput" }
+    $forcedTranscript = $strictUtf8.GetString([IO.File]::ReadAllBytes($forcedTranscriptPath))
+    foreach ($requiredLine in @(
+        "ROLLBACK: restored $expectedRollbackVersion application files after installation failure.",
+        "RESTART VERSION: $expectedRollbackVersion",
+        'RESTART REASON: verification failure',
+        "RESTARTED: $expectedRollbackVersion after verification failure."
+    )) {
+        if ($forcedTranscript -notmatch [regex]::Escape($requiredLine)) { throw "Forced-failure transcript is missing: $requiredLine`n$forcedTranscript" }
+        Write-Host "PROOF forced-failure transcript: $requiredLine"
+    }
+    if (-not (Test-Path -LiteralPath $rollbackSentinel -PathType Leaf)) { throw 'Forced-failure rollback did not restore the previous application tree.' }
+    $stoppedForFailure = $afterProcesses[0]
+    $stoppedForFailure.WaitForExit(15000) | Out-Null
+    if (-not $stoppedForFailure.HasExited) { throw 'Forced-failure upgrade did not stop the pre-existing disposable instance.' }
+    $deadline = [DateTime]::UtcNow.AddSeconds(20)
+    do {
+        $afterProcesses = @(Get-AgentBProcessesAtPath -Executable $installedBinary)
+        if ($afterProcesses.Count -eq 1 -and $afterProcesses[0].Id -ne $stoppedForFailure.Id) { break }
+        Start-Sleep -Milliseconds 200
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if ($afterProcesses.Count -ne 1 -or $afterProcesses[0].Id -eq $stoppedForFailure.Id) {
+        throw "Forced-failure rollback did not restart exactly one previous-version instance: $(@($afterProcesses.Id) -join ', ')"
+    }
+    $rollbackState = Invoke-RestMethod -Uri "http://127.0.0.1:$testPort/api/state" -TimeoutSec 5
+    if ($rollbackState.build.commit -ne $afterState.build.commit -or [bool]$rollbackState.build.dirty -ne [bool]$afterState.build.dirty) {
+        throw 'Forced-failure restart identity does not match the previously installed build.'
     }
     & (Join-Path $env:SystemRoot 'System32\taskkill.exe') /PID $afterProcesses[0].Id | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not stop the restarted disposable Agent_b.' }
