@@ -350,6 +350,15 @@ func TestRunStoppingAndHeldQueueReplay(t *testing.T) {
 	}
 }
 
+func TestRunResultLabelReplay(t *testing.T) {
+	state := Empty("main")
+	state.Run = Run{Status: "idle", LastStopReason: "done", ArmedDetectors: []string{"novel_action"}}
+	next, _, err := Next(state, Record{Cursor: Cursor{Generation: "main.events", Offset: 10}, Event: events.New(events.RunLabeled, "main", "r1", map[string]any{"label": "mixed"})})
+	if err != nil || next.Run.ResultLabel != "mixed" || next.Run.LastStopReason != "done" || len(next.Run.ArmedDetectors) != 1 {
+		t.Fatalf("run=%+v err=%v", next.Run, err)
+	}
+}
+
 func TestReadFileUsesDurableByteBoundary(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "main-a.jsonl")

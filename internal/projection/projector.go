@@ -349,6 +349,8 @@ func Next(previous Snapshot, record Record) (Snapshot, Patch, error) {
 		if next.PendingApproval != nil && next.PendingApproval.RunID == record.Event.RunID {
 			next.PendingApproval = nil
 		}
+	case events.RunLabeled:
+		next.Run.ResultLabel = stringValue(data["label"])
 	case events.ModelUnreachable:
 		next.ModelUnreachable = &ModelAvailability{Host: stringValue(data["host"]), Detail: stringValue(data["detail"])}
 		next.ModelBusy = nil

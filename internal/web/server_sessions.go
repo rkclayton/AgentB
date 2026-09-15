@@ -229,6 +229,33 @@ func (s *Server) session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := parts[0]
+	if len(parts) == 2 && parts[1] == "result-label" && r.Method == http.MethodPost {
+		item, ok := s.registry.Get(id)
+		if !ok {
+			writeError(w, http.StatusNotFound, "session not found", "session_id")
+			return
+		}
+		var body struct {
+			Label string `json:"label"`
+		}
+		if !decode(w, r, &body) {
+			return
+		}
+		if body.Label != "productive" && body.Label != "stuck" && body.Label != "mixed" {
+			writeError(w, http.StatusBadRequest, "label must be productive, stuck, or mixed", "label")
+			return
+		}
+		run := item.Snapshot().Run
+		if run.Status == "running" || run.Status == "queued" || run.Status == "stopping" || run.LastStopReason == "" {
+			writeError(w, http.StatusConflict, "a completed run is required", "session_id")
+			return
+		}
+		run.ResultLabel = body.Label
+		item.SetRun(run)
+		s.bus.Publish(events.New(events.RunLabeled, id, "", map[string]any{"label": body.Label}))
+		writeJSON(w, http.StatusOK, map[string]any{"session_id": id, "label": body.Label})
+		return
+	}
 	if len(parts) == 3 && parts[1] == "grants" && parts[2] == "revoke" && r.Method == http.MethodPost {
 		if err := s.operatorRequest(r); err != nil {
 			writeError(w, http.StatusForbidden, "Run as you can be revoked only by the verified local operator process", "session_id")

@@ -68,6 +68,15 @@ test("Console tool rows show an execution target carried by tool.result", () => 
   assert.match(timeline, /result\.target \? `\$\{result\.target\} · `/);
 });
 
+test("Console adds only the completed-run stop line and optional three-way label", () => {
+  assert.match(index, /id="console-run-result"[^>]+hidden/);
+  assert.match(index, /id="console-run-stop"/);
+  assert.match(index, /id="console-run-label"[^>]+aria-label="Label this run"/);
+  assert.match(script, /Ended: \$\{run\.last_stop_reason\}/);
+  assert.match(script, /\["productive", "stuck", "mixed"\]/);
+  assert.match(script, /\/result-label/);
+});
+
 test("Drop last message is relocated beside the latest History turn and Clear is absent", () => {
   assert.match(index, /id="drop-last-message"/);
   assert.match(script, /target\.append\(dropLastMessage\)/);

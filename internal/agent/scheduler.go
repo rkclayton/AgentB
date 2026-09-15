@@ -127,7 +127,7 @@ func (s *Scheduler) SubmitAttachments(ctx context.Context, sessionID, text strin
 			s.startLocked(next)
 		} else {
 			s.queue = append(s.queue, next)
-			item.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.queue)})
+			item.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.queue), ArmedDetectors: s.armedDetectors(item)})
 			s.bus.Publish(events.New(events.RunQueued, sessionID, next.runID, map[string]any{"run_id": next.runID, "position": len(s.queue)}))
 		}
 		return SubmitResult{Queued: true, Position: position}, nil
@@ -203,7 +203,7 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 		s.pending[entry.s.ID] = waiting[1:]
 		entry.s.SetQueuedMessages(len(waiting) - 1)
 		next.runID = fmt.Sprintf("r%d", s.ids.Add(1))
-		next.s.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns})
+		next.s.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns, ArmedDetectors: s.armedDetectors(next.s)})
 		s.queue = append(s.queue, next)
 	}
 	priorRun := entry.s.Snapshot().Run
@@ -271,7 +271,7 @@ func (s *Scheduler) ReleaseModel(profileID string) {
 			s.startLocked(next)
 		} else {
 			s.queue = append(s.queue, next)
-			item.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.queue)})
+			item.SetRun(session.RunState{Status: "queued", RunID: next.runID, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.queue), ArmedDetectors: s.armedDetectors(item)})
 			s.bus.Publish(events.New(events.RunQueued, sessionID, next.runID, map[string]any{"run_id": next.runID, "position": len(s.queue)}))
 		}
 	}
@@ -334,8 +334,9 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 			if s.held[entry.s.ID] {
 				status = "held"
 			}
-			entry.s.SetRun(session.RunState{Status: status, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.pending[entry.s.ID]), LastStopReason: "done"})
-			s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": entry.runID, "reason": "done", "detail": "stopped before dispatch", "turns": 0, "queue_held": s.held[entry.s.ID]})))
+			armed := append([]string(nil), entry.s.Snapshot().Run.ArmedDetectors...)
+			entry.s.SetRun(session.RunState{Status: status, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.pending[entry.s.ID]), LastStopReason: "done", LastStopDetail: "stopped before dispatch", ArmedDetectors: armed})
+			s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": entry.runID, "reason": "done", "detail": "stopped before dispatch", "turns": 0, "queue_held": s.held[entry.s.ID], "armed_detectors": armed})))
 			stopped = append(stopped, entry.s.ID)
 		} else {
 			kept = append(kept, entry)
@@ -375,14 +376,15 @@ func (s *Scheduler) forceFinish(sessionID string, expected *activeRun, detail st
 	if item == nil {
 		return
 	}
-	turn := item.Snapshot().Run.Turn
-	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: active.stopReason}
+	priorRun := item.Snapshot().Run
+	turn := priorRun.Turn
+	state := session.RunState{Status: "idle", MaxTurns: s.cfg().Run.MaxTurns, LastStopReason: active.stopReason, LastStopDetail: detail, ArmedDetectors: append([]string(nil), priorRun.ArmedDetectors...)}
 	queueHeld := (s.held[sessionID] || s.unreachable[sessionID]) && len(s.pending[sessionID]) > 0
 	if queueHeld {
 		state.Status, state.QueuePosition = "held", len(s.pending[sessionID])
 	}
 	item.SetRun(state)
-	s.bus.Publish(events.New(events.RunStopped, sessionID, active.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": active.runID, "reason": active.stopReason, "detail": detail, "turns": turn, "queue_held": queueHeld})))
+	s.bus.Publish(events.New(events.RunStopped, sessionID, active.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": active.runID, "reason": active.stopReason, "detail": detail, "turns": turn, "queue_held": queueHeld, "armed_detectors": state.ArmedDetectors})))
 	s.notifyAgentIdleLocked(item.Snapshot().AgentID)
 	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
 		next := s.queue[0]

@@ -28,6 +28,9 @@ const agentServerCancel = document.getElementById("console-agent-server-cancel")
 const feedback = document.getElementById("console-feedback");
 const consoleStop = document.getElementById("console-stop");
 const consoleLiveCompactions = document.getElementById("console-live-compactions");
+const consoleRunResult = document.getElementById("console-run-result");
+const consoleRunStop = document.getElementById("console-run-stop");
+const consoleRunLabel = document.getElementById("console-run-label");
 
 const dropControl = createMessageDropController(dropLastMessage, {
   session: () => store.sessions[store.active], interactive: () => !store.replay,
@@ -52,6 +55,11 @@ document.getElementById("flush-memory").addEventListener("click", () => void flu
 document.getElementById("console-tools").addEventListener("change", (event) => void toggleTool(event));
 document.getElementById("console-tools-link").addEventListener("click", (event) => { event.preventDefault(); document.getElementById("console-tools-panel").scrollIntoView({block:"start"}); });
 consoleStop.addEventListener("click", () => { const id=store.selection.session_id; if(id&&!store.replay) void api("/api/stop",{session_id:id}); });
+consoleRunLabel.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-label]");
+  const id = store.selection.session_id;
+  if (button && id && !store.replay) void api(`/api/sessions/${encodeURIComponent(id)}/result-label`, { label: button.dataset.label }).catch((error) => showError(error.message));
+});
 
 subscribe((_state, event) => {
   if (event.type === "snapshot" && initialSession && store.sessions[initialSession]) {
@@ -108,10 +116,25 @@ function renderConsole() {
   consoleLiveCompactions.textContent = hasSelectedChat ? compactionFigures(session) : "";
   consoleLiveCompactions.hidden = !hasSelectedChat;
   document.getElementById("console-live-state").textContent = !hasSelectedChat ? "no open chat" : session.pending_approval ? "waiting for you" : liveActivityText(session) || session.run?.status || "idle";
+  renderRunResult(hasSelectedChat ? session : null);
   if (hasSelectedChat) {
     renderRail(); renderFlow(); renderRack(); renderState(); renderTimeline(); placeDropLastMessage(); dropControl.render(); renderPendingApproval(session);
   }
   navigationSurfaceReady("console", store);
+}
+
+function renderRunResult(session) {
+  const run = session?.run;
+  const ended = !!run?.last_stop_reason && !["running", "queued", "stopping"].includes(run.status);
+  consoleRunResult.hidden = !ended;
+  if (!ended) { consoleRunStop.textContent = ""; consoleRunLabel.replaceChildren(); return; }
+  const armed = run.armed_detectors?.length ? run.armed_detectors.join(", ") : "none";
+  consoleRunStop.textContent = `Ended: ${run.last_stop_reason}${run.last_stop_detail ? ` — ${run.last_stop_detail}` : ""} · armed: ${armed}`;
+  consoleRunLabel.replaceChildren(...["productive", "stuck", "mixed"].map((label) => {
+    const button = node("button", run.result_label === label ? "selected" : "");
+    button.type = "button"; button.dataset.label = label; button.textContent = label; button.disabled = store.replay;
+    return button;
+  }));
 }
 
 export function mountConsole() {

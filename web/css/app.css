@@ -1882,9 +1882,15 @@
 .console-feedback.alarm { color: var(--alarm); }
 .settings-operator-status { min-height:28px; display:inline-flex; align-items:center; gap:7px; padding:2px 7px; background:transparent; box-shadow:inset 0 0 0 1px rgba(125,135,148,.28); }
 .settings-operator-status img { display:block; width:24px; height:24px; }
-.console-live { display:grid; grid-template-rows:32px minmax(0,1fr); }
+.console-live { display:grid; grid-template-rows:32px auto minmax(0,1fr); }
 .console-live-actions { margin-left:auto; display:flex; align-items:center; gap:8px; }
 #console-live-compactions { flex:0 1 auto; min-width:0; overflow:hidden; color:var(--mute); text-overflow:ellipsis; white-space:nowrap; }
+.console-run-result { min-width:0; min-height:24px; padding:2px 6px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:8px; color:var(--mute); font:12px var(--mono); }
+.console-run-result[hidden] { display:none; }
+.console-run-result > span:first-child { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.console-run-label { flex:0 0 auto; display:flex; gap:4px; }
+.console-run-label button { min-height:20px; padding:1px 5px; border:1px solid var(--line); background:var(--well); color:var(--mute); font:11px var(--mono); }
+.console-run-label button.selected { border-color:var(--trace); color:var(--ink); }
 .console-live-content { min-height:0; display:grid; grid-template-rows:40px minmax(0,1fr); }
 .console-live-content[hidden] { display:none; }
 .console-live > .console-empty { margin:0; }

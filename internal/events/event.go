@@ -40,6 +40,7 @@ const (
 	RunStarted           = "run.started"
 	RunStopping          = "run.stopping"
 	RunStopped           = "run.stopped"
+	RunLabeled           = "run.labeled"
 	RunAborted           = "run.aborted"
 	ItemDone             = "item.done"
 	PlanDone             = "plan.done"
