@@ -21,6 +21,29 @@ function toolArguments(event) {
   try { return JSON.parse(value || "{}"); } catch { return {}; }
 }
 
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+}
+
+function sameCall(left, right) {
+  if (!left || !right) return false;
+  const leftName = left.data?.name ?? left.data?.tool_call?.name;
+  const rightName = right.data?.name ?? right.data?.tool_call?.name;
+  return leftName === rightName && JSON.stringify(stableValue(toolArguments(left))) === JSON.stringify(stableValue(toolArguments(right)));
+}
+
+export function classifyToolError(value) {
+  const text = String(value || "");
+  if (/outside (?:the )?(?:workspace|allowed root|jail)|workspace boundary|jail (?:refused|denied)|path is not under/i.test(text)) return "outside jail";
+  if (/timed? out|timeout|deadline exceeded/i.test(text)) return "timeout";
+  if (/syntax|parse error|parsererror|unexpected token|unterminated|invalid character/i.test(text)) return "syntax";
+  if (/invalid (?:argument|arguments|input)|missing (?:argument|required)|required (?:argument|field)|unknown (?:argument|field)|cannot unmarshal|expects?\b|must (?:be|include|provide)|unsupported (?:argument|field|shape)/i.test(text)) return "bad argument";
+  if (/no match|not found|does not exist|cannot find|could not find|is not recognized as (?:the name of )?a/i.test(text)) return "no match";
+  return "other";
+}
+
 export function selectRun(records, { sessionID, runID } = {}) {
   return records.filter((event) => (!sessionID || event.session_id === sessionID) && (!runID || event.run_id === runID));
 }
@@ -32,6 +55,26 @@ export function extractRun(records, filter = {}) {
   const modelResponses = selected.filter((event) => event.type === "model.response");
   const toolCalls = selected.filter((event) => event.type === "tool.call");
   const toolResults = selected.filter((event) => event.type === "tool.result");
+  const resultByCall = new Map(toolResults.map((event) => [event.data?.call_id, event]));
+  const toolErrorDetails = toolResults.filter((event) => event.data?.ok === false).map((event) => {
+    const call = toolCalls.find((candidate) => candidate.data?.call_id === event.data?.call_id);
+    const nextCall = selected.find((candidate) => candidate.type === "tool.call" && Number(candidate.seq) > Number(event.seq));
+    const nextResult = nextCall ? resultByCall.get(nextCall.data?.call_id) : undefined;
+    const preview = String(event.data?.preview || event.data?.error || "");
+    return {
+      call_id: event.data?.call_id || "",
+      tool: event.data?.name ?? call?.data?.name ?? call?.data?.tool_call?.name ?? "",
+      turn: Number(event.data?.turn ?? call?.data?.turn ?? 0),
+      class: classifyToolError(preview),
+      arguments: toolArguments(call || {}),
+      preview,
+      repeated_next: sameCall(call, nextCall),
+      recovered_next: nextResult?.data?.ok === true,
+      next_tool: nextCall?.data?.name ?? nextCall?.data?.tool_call?.name ?? "",
+      next_call_id: nextCall?.data?.call_id || "",
+    };
+  });
+  const errorClassCounts = Object.fromEntries([...new Set(toolErrorDetails.map((entry) => entry.class))].sort().map((name) => [name, toolErrorDetails.filter((entry) => entry.class === name).length]));
   const seenReads = new Set();
   let rereads = 0;
   for (const event of toolCalls) {
@@ -52,9 +95,16 @@ export function extractRun(records, filter = {}) {
     run_id: filter.runID || stopped?.run_id || selected.find((event) => event.run_id)?.run_id || "",
     completion: stopped?.data?.reason === "done",
     stop_reason: stopped?.data?.reason || "missing",
+    stop: {
+      reason: stopped?.data?.reason || "missing",
+      detail: stopped?.data?.detail || "",
+      turn: Number(stopped?.data?.turns || 0),
+    },
     turns: Number(stopped?.data?.turns ?? Math.max(0, ...selected.filter((event) => event.type === "model.request").map((event) => Number(event.data?.turn || 0)))),
     tool_calls: toolCalls.length,
     tool_errors: toolResults.filter((event) => event.data?.ok === false).length,
+    error_class_counts: errorClassCounts,
+    tool_error_details: toolErrorDetails,
     rereads,
     elapsed_ms: Number.isFinite(firstMS) && Number.isFinite(lastMS) ? Math.max(0, lastMS - firstMS) : null,
     prompt_tokens: promptTokens,
