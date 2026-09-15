@@ -84,6 +84,7 @@ type Session struct {
 	ProjectNotes                                         []string
 	PendingRepoPolicy                                    *workspaceinfo.PolicyState
 	RepoPolicy                                           *workspaceinfo.PolicyState
+	PlanRepos                                            func() []string
 	ProjectTouch                                         func(string)
 	EnsurePlan                                           func(string)
 	AgentName, BProfile                                  string
@@ -150,6 +151,14 @@ func (s *Session) ReadRoot(path string) (string, error) {
 		if !filepath.IsAbs(candidate) || pathWithin(s.PlanDir, candidate) {
 			return s.PlanDir, nil
 		}
+		if s.PlanRepo != "" && pathWithin(s.PlanRepo, candidate) {
+			return s.PlanRepo, nil
+		}
+	}
+	if s.Role == "b" && filepath.IsAbs(candidate) {
+		if root := s.planRepoRootLocked(candidate); root != "" {
+			return root, nil
+		}
 	}
 	return s.Workspace, nil
 }
@@ -162,11 +171,19 @@ func (s *Session) WriteRoot(path string) (string, error) {
 		return "", fmt.Errorf("path is outside the folder")
 	}
 	if s.Role != "d" {
+		if filepath.IsAbs(candidate) {
+			if root := s.planRepoRootLocked(candidate); root != "" {
+				return root, nil
+			}
+		}
 		return s.Workspace, nil
 	}
 	if s.PlanDir != "" {
 		if err := s.validatePlanDirLocked(); err != nil {
 			return "", err
+		}
+		if filepath.IsAbs(candidate) && !pathWithin(s.PlanDir, candidate) {
+			return "", fmt.Errorf("path is outside the plan")
 		}
 		return s.PlanDir, nil
 	}
@@ -198,6 +215,20 @@ func (s *Session) WriteRoot(path string) (string, error) {
 	}
 	s.PlanID, s.PlanName, s.PlanDir = planID, "Untitled plan", planDir
 	return s.PlanDir, nil
+}
+
+func (s *Session) planRepoRootLocked(candidate string) string {
+	if s.PlanRepos == nil {
+		return ""
+	}
+	best := ""
+	for _, root := range s.PlanRepos() {
+		root = filepath.Clean(root)
+		if root != "." && pathWithin(root, candidate) && len(root) > len(best) {
+			best = root
+		}
+	}
+	return best
 }
 
 func (s *Session) validatePlanDirLocked() error {

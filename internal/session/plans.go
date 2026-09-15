@@ -147,6 +147,20 @@ func (r *Registry) planListLocked() []Plan {
 	return values
 }
 
+func (r *Registry) planRepos() []string {
+	values, err := ListPlans(r.plansRoot)
+	if err != nil {
+		return nil
+	}
+	repos := make([]string, 0, len(values))
+	for _, value := range values {
+		if value.Repo != "" {
+			repos = append(repos, filepath.Clean(value.Repo))
+		}
+	}
+	return repos
+}
+
 func allocatePlanDir(root string) (string, string, error) {
 	for attempt := 0; attempt < 8; attempt++ {
 		random := make([]byte, 8)
