@@ -118,6 +118,25 @@ func TestRetainedChatRestoresPreviousFolder(t *testing.T) {
 	}
 }
 
+func TestEnsurePlanImmediatelyAddsRepoToBSessionUnion(t *testing.T) {
+	registry, _, profile := testPlanRegistry(t)
+	item, err := registry.Create("", profile, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := filepath.Join(t.TempDir(), "approved-repo")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	plan, created, err := registry.EnsurePlan(repo)
+	if err != nil || !created || !samePath(plan.Repo, repo) {
+		t.Fatalf("plan=%+v created=%v err=%v", plan, created, err)
+	}
+	if root, err := item.WriteRoot(filepath.Join(repo, "ready.txt")); err != nil || !samePath(root, repo) {
+		t.Fatalf("new repo root=%q err=%v", root, err)
+	}
+}
+
 func TestPlansTreeReadEverywhereWriteOnlyBoundPlan(t *testing.T) {
 	root := t.TempDir()
 	plans := filepath.Join(root, "plans")

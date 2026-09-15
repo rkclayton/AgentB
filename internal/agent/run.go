@@ -100,7 +100,13 @@ func (r *Runner) QueueUserAttachments(ctx context.Context, s *session.Session, t
 	}
 	attachments = prepareNativeAttachmentsWithBudget(profile, attachments, remainingNativeAttachmentBudget(profile, s.MessagesCopy()))
 	message := events.Message{ID: r.id("m"), Role: "user", Content: text, Category: "history", Attachments: append([]events.Attachment(nil), attachments...)}
-	tokens, estimated := r.count(ctx, profile, renderedUserText(profile, s, message))
+	var tokens int
+	var estimated bool
+	if _, requested := requestedPlanPath(text); requested {
+		tokens, estimated = estimatedTokenCount(renderedUserText(profile, s, message)), true
+	} else {
+		tokens, estimated = r.count(ctx, profile, renderedUserText(profile, s, message))
+	}
 	message.Tokens, message.Estimated = tokens, estimated
 	return message, nil
 }
@@ -139,6 +145,9 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 	snapshot := s.Snapshot()
 	if !snapshot.Runnable {
 		return "profile_not_runnable", snapshot.NotRunnableReason, 0
+	}
+	if handled, registrationDetail := r.handlePlanRegistration(ctx, s, runID); handled {
+		return "done", registrationDetail, 0
 	}
 	publishFinalBudget := true
 	defer func() {
@@ -816,7 +825,11 @@ func (r *Runner) count(ctx context.Context, p *config.Profile, text string) (int
 			return count, false
 		}
 	}
-	return int(math.Ceil(float64(len([]rune(text))) / 3.6)), true
+	return estimatedTokenCount(text), true
+}
+
+func estimatedTokenCount(text string) int {
+	return int(math.Ceil(float64(len([]rune(text))) / 3.6))
 }
 
 func modelUnavailable(profile *config.Profile, err error) (string, bool) {

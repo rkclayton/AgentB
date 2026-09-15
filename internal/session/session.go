@@ -85,6 +85,7 @@ type Session struct {
 	PendingRepoPolicy                                    *workspaceinfo.PolicyState
 	RepoPolicy                                           *workspaceinfo.PolicyState
 	PlanRepos                                            func() []string
+	RegisterPlan                                         func(string) (Plan, bool, error)
 	ProjectTouch                                         func(string)
 	EnsurePlan                                           func(string)
 	AgentName, BProfile                                  string
