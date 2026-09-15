@@ -166,6 +166,9 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	if err := renderer.LoadPlanner(filepath.Join(paths.Application, "prompts", "planner.md")); err != nil {
+		log.Fatal(err)
+	}
 	workspaces := session.NewWorkspaceRegistry()
 	coordinator := tools.NewFileCoordinator(workspaces, registry.Label, bus)
 	credentialStore := credential.New(paths.Data)

@@ -230,7 +230,7 @@ function buildEntries(session) {
 function changeBound(value) {
   const previous = selectedID();
   if (previous) attachmentQueues.set(previous, queuedAttachments);
-  setSelection("agent_b", value);
+  setSelection(`agent_${store.sessions[value]?.role === "d" ? "d" : "b"}`, value);
   queuedAttachments = attachmentQueues.get(value) || [];
 }
 

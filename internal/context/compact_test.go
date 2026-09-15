@@ -64,6 +64,17 @@ func TestRepeatedSuccessfulReadElidesImmediatelyWithExistingStubAndEvent(t *test
 	}
 }
 
+func TestSettleElidesOnlyChosenDesignTurns(t *testing.T) {
+	item := &session.Session{ID: "plan", Messages: []events.Message{{ID: "u1", Role: "user", Content: "ramble", Tokens: 20}, {ID: "a1", Role: "assistant", Content: "answer", Tokens: 20}, {ID: "u2", Role: "user", Content: "keep", Tokens: 10}}}
+	if !New(events.NewBus()).Settle(item, "run", "[settled → plan item 2t]", []string{"u1", "a1", "missing"}, func(text string) (int, bool) { return 7, false }) {
+		t.Fatal("settle reported no change")
+	}
+	messages := item.MessagesCopy()
+	if messages[0].Content != "[settled → plan item 2t]" || !messages[0].Elided || messages[1].Content != "[settled → plan item 2t]" || messages[2].Content != "keep" {
+		t.Fatalf("messages=%+v", messages)
+	}
+}
+
 func TestRepeatedReadNeverElidesFailedOrUnknownOutcome(t *testing.T) {
 	for _, test := range []struct {
 		name           string

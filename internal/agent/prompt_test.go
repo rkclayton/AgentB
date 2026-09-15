@@ -56,3 +56,21 @@ func TestNetworkBoundaryIsSessionStable(t *testing.T) {
 		t.Fatalf("session prompt changed: before=%q after=%q", before, after)
 	}
 }
+
+func TestPlannerPromptLoadsForDAndPlanPageFallbackAndStaysStable(t *testing.T) {
+	renderer := &PromptRenderer{text: "system", planner: "planner rules"}
+	profile := &config.Profile{}
+	d := &session.Session{Role: "d"}
+	if got := renderer.Render(profile, d, nil, ""); got != "system\n\nplanner rules" {
+		t.Fatalf("d prompt=%q", got)
+	}
+	b := &session.Session{Role: "b"}
+	if got := renderer.Render(profile, b, nil, ""); got != "system" {
+		t.Fatalf("ordinary b prompt=%q", got)
+	}
+	b.SetPlanPage(true)
+	before, after := renderer.Render(profile, b, nil, ""), renderer.Render(profile, b, nil, "")
+	if before != after || before != "system\n\nplanner rules" {
+		t.Fatalf("fallback prompt before=%q after=%q", before, after)
+	}
+}

@@ -26,6 +26,9 @@ func (*EditFile) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "old_string": map[string]any{"type": "string"}, "new_string": map[string]any{"type": "string"}}, "required": []string{"path", "old_string", "new_string"}}
 }
 func (e *EditFile) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
+	if s.Role == "d" && !s.PlanWriteAllowed() {
+		return "", fmt.Errorf("plan-page writes require accepting a proposal")
+	}
 	path, _ := args["path"].(string)
 	old, oldOK := args["old_string"].(string)
 	replacement, newOK := args["new_string"].(string)

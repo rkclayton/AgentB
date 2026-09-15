@@ -90,10 +90,11 @@ test("Operator mode lives only in Settings Security and states the defeated boun
   assert.doesNotMatch(shell, /shell-operator-status/);
 });
 
-test("No-agent and blank Plan wells are explicit and Console links to active tools", () => {
+test("No-agent and empty Plan invitations are explicit and Console links to active tools", () => {
   assert.match(chat, /No agent connected — add one in/);
   assert.match(chat, /operator-off-48\.png/);
-  assert.match(plan, />No plan yet\.<\/span>/);
+  assert.match(plan, />Tell me what you want to do\.<\/span>/);
+  assert.match(plan, /idle\.svg/);
   assert.match(consoleHTML, /id="console-tools-link"[^>]*>0 tools active<\/a>/);
 });
 

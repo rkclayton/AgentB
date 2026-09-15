@@ -78,7 +78,28 @@ func (r *Runner) SetMailboxBoundary(fn func(context.Context, string, bool) Bound
 	r.mailboxBoundary = fn
 }
 func (r *Runner) SetModelUnreachable(fn func(string, string)) { r.modelUnreachable = fn }
-func (r *Runner) id(prefix string) string                     { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
+func (r *Runner) AcceptPlanEdit(ctx context.Context, s *session.Session, path, oldText, newText string) tools.CallOutcome {
+	if !s.BeginPlanAccept() {
+		return tools.CallOutcome{Content: "error: plan acceptance is available only on the Plan page"}
+	}
+	defer s.EndPlanAccept()
+	args := map[string]any{"path": path, "old_string": oldText, "new_string": newText}
+	outcome := r.tools.CallDetailed(ctx, s, "edit_file", args)
+	if outcome.OperatorOverrideAvailable {
+		content, ok := r.tools.CallAsOperator(ctx, s, "edit_file", args)
+		return tools.CallOutcome{Content: content, OK: ok, OperatorContext: true}
+	}
+	return outcome
+}
+func (r *Runner) SettlePlanTurns(ctx context.Context, s *session.Session, itemID string, ids []string) bool {
+	pointer := fmt.Sprintf("[settled → plan item %s]", itemID)
+	p, ok := r.profile(s.ServerID)
+	if !ok {
+		return false
+	}
+	return r.compact.Settle(s, "", pointer, ids, func(text string) (int, bool) { return r.count(ctx, p, text) })
+}
+func (r *Runner) id(prefix string) string { return fmt.Sprintf("%s-%d", prefix, r.ids.Add(1)) }
 func (r *Runner) AddUser(ctx context.Context, s *session.Session, text string) (events.Message, error) {
 	return r.AddUserAttachments(ctx, s, text, nil)
 }
@@ -357,16 +378,20 @@ func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (rea
 				return "length", "model output was truncated", turn
 			}
 			r.stage(s, runID, turn, "append", func() {
-				message, _ := r.makeMessage(ctx, profile, "assistant", response.Content, "history", turn)
+				visible, proposals := parsePlanProposals(response.Content)
+				message, _ := r.makeMessage(ctx, profile, "assistant", visible, "history", turn)
 				message.Reasoning = response.Reasoning
+				message.PlanProposals = bindPlanProposalSources(s.MessagesCopy(), proposals, message.ID)
 				currentReasoning[message.ID] = true
 				s.Append(message)
 				r.bus.Publish(events.New(events.MessageAppended, s.ID, runID, map[string]any{"message": message}))
 			})
 			return "done", "", turn
 		}
-		assistant, _ := r.makeMessage(ctx, profile, "assistant", response.Content, "history", turn)
+		visible, proposals := parsePlanProposals(response.Content)
+		assistant, _ := r.makeMessage(ctx, profile, "assistant", visible, "history", turn)
 		assistant.Reasoning = response.Reasoning
+		assistant.PlanProposals = bindPlanProposalSources(s.MessagesCopy(), proposals, assistant.ID)
 		currentReasoning[assistant.ID] = true
 		assistant.ToolCalls = durableToolCalls
 		type result struct {

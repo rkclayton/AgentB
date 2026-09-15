@@ -119,6 +119,8 @@ type Session struct {
 	compactionPrompt                                     int
 	compactionCompletion                                 int
 	submitting                                           int
+	planPage                                             bool
+	planAccept                                           bool
 	mu                                                   sync.Mutex
 }
 
@@ -539,6 +541,44 @@ func (s *Session) ReplaceMessages(messages []events.Message) {
 	s.mu.Lock()
 	s.Messages = append([]events.Message(nil), messages...)
 	s.mu.Unlock()
+}
+
+// SetPlanPage marks a chat as using the operator-governed Plan surface. It is
+// deliberately session-local: the browser reasserts it when the surface opens.
+func (s *Session) SetPlanPage(enabled bool) {
+	s.mu.Lock()
+	s.planPage = enabled
+	s.mu.Unlock()
+}
+
+// BeginPlanAccept opens the narrow write gate used by the Plan tray. Model
+// tool calls never call this method.
+func (s *Session) BeginPlanAccept() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.planPage {
+		return false
+	}
+	s.planAccept = true
+	return true
+}
+
+func (s *Session) EndPlanAccept() {
+	s.mu.Lock()
+	s.planAccept = false
+	s.mu.Unlock()
+}
+
+func (s *Session) PlanWriteAllowed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return !s.planPage || s.planAccept
+}
+
+func (s *Session) IsPlanPage() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.planPage
 }
 
 func (s *Session) DropLastMessage() (events.Message, bool) {

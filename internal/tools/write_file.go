@@ -95,6 +95,9 @@ func (*WriteFile) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{"path": map[string]any{"type": "string"}, "content": map[string]any{"type": "string"}}, "required": []string{"path", "content"}}
 }
 func (w *WriteFile) Call(ctx context.Context, s *session.Session, args map[string]any) (string, error) {
+	if s.Role == "d" && !s.PlanWriteAllowed() {
+		return "", fmt.Errorf("plan-page writes require accepting a proposal")
+	}
 	path, ok := args["path"].(string)
 	if !ok || path == "" {
 		return "", fmt.Errorf("path is required")

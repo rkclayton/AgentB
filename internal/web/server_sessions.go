@@ -36,12 +36,13 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 			ServerID        string `json:"server_id"`
 			SourceSessionID string `json:"source_session_id"`
 			Role            string `json:"role"`
+			PlanID          string `json:"plan_id"`
 		}
 		if !decode(w, r, &body) {
 			return
 		}
 		if body.SourceSessionID != "" {
-			if body.Label != "" || body.AgentID != "" || body.ServerID != "" || body.Role != "" {
+			if body.Label != "" || body.AgentID != "" || body.ServerID != "" || body.Role != "" || body.PlanID != "" {
 				writeError(w, 400, "source_session_id cannot be combined with overrides", "session")
 				return
 			}
@@ -75,11 +76,15 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request) {
 		if role == "" {
 			role = "b"
 		}
+		if role != "d" && body.PlanID != "" {
+			writeError(w, 400, "plan_id is available only for role d", "plan_id")
+			return
+		}
 		if runnable, reason := s.registry.AgentRoleRunnable(body.AgentID, role); !runnable {
 			writeError(w, 400, reason, "agent_id")
 			return
 		}
-		item, err := s.registry.CreateRole(body.Label, body.AgentID, "", body.Role, "")
+		item, err := s.registry.CreateRole(body.Label, body.AgentID, "", role, body.PlanID)
 		if err != nil {
 			writeError(w, 400, err.Error(), "session")
 			return

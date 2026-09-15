@@ -87,6 +87,37 @@ func TestDSessionFileBoundarySeparatesPlanWritesFromRepositoryReads(t *testing.T
 	}
 }
 
+func TestPlanPageModelWritesRefuseUntilAcceptGate(t *testing.T) {
+	root := t.TempDir()
+	plan := filepath.Join(root, "plans", "one")
+	if err := os.MkdirAll(plan, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(plan, "plan.md"), []byte("[ ] old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	edit, write, _, _ := testTools(root)
+	item := testSession(root, "d-plan", "Planner")
+	item.Role, item.PlansRoot, item.PlanDir = "d", filepath.Dir(plan), plan
+	item.SetPlanPage(true)
+	if _, err := edit.Call(context.Background(), item, map[string]any{"path": "plan.md", "old_string": "old", "new_string": "new"}); err == nil || !strings.Contains(err.Error(), "accepting a proposal") {
+		t.Fatalf("direct edit err=%v", err)
+	}
+	if _, err := write.Call(context.Background(), item, map[string]any{"path": "other.md", "content": "no"}); err == nil || !strings.Contains(err.Error(), "accepting a proposal") {
+		t.Fatalf("direct write err=%v", err)
+	}
+	if !item.BeginPlanAccept() {
+		t.Fatal("accept gate did not open")
+	}
+	if _, err := edit.Call(context.Background(), item, map[string]any{"path": "plan.md", "old_string": "old", "new_string": "new"}); err != nil {
+		t.Fatal(err)
+	}
+	item.EndPlanAccept()
+	if got, err := os.ReadFile(filepath.Join(plan, "plan.md")); err != nil || string(got) != "[ ] new\n" {
+		t.Fatalf("plan=%q err=%v", got, err)
+	}
+}
+
 func TestModelFileToolsRefuseRepoPolicyDirectoryByNamedRule(t *testing.T) {
 	root := t.TempDir()
 	edit, write, _, _ := testTools(root)

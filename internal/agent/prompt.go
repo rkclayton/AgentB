@@ -14,6 +14,26 @@ import (
 type PromptRenderer struct {
 	mu         sync.RWMutex
 	path, text string
+	planner    string
+}
+
+func (r *PromptRenderer) LoadPlanner(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("planner prompt %s: %w", path, err)
+	}
+	text := string(data)
+	const start = "## Session prompt"
+	if index := strings.Index(text, start); index >= 0 {
+		text = text[index+len(start):]
+		if end := strings.Index(text, "\n## "); end >= 0 {
+			text = text[:end]
+		}
+	}
+	r.mu.Lock()
+	r.planner = strings.TrimSpace(text)
+	r.mu.Unlock()
+	return nil
 }
 
 func LoadTemplate(path string) (*PromptRenderer, error) {
@@ -42,6 +62,7 @@ func (r *PromptRenderer) RenderParts(profile *config.Profile, s *session.Session
 func (r *PromptRenderer) RenderMemoryParts(profile *config.Profile, s *session.Session, toolNames []string, project, workspaceMemory, agentMemory string) string {
 	r.mu.RLock()
 	template := r.text
+	planner := r.planner
 	r.mu.RUnlock()
 	if profile.SystemPromptOverride != "" {
 		template = profile.SystemPromptOverride
@@ -68,6 +89,9 @@ func (r *PromptRenderer) RenderMemoryParts(profile *config.Profile, s *session.S
 	value = strings.ReplaceAll(value, "{{memory}}", memory)
 	value = strings.ReplaceAll(value, "{{os_context}}", operatingSystemContext())
 	value = strings.ReplaceAll(value, "{{date}}", time.Now().Format("2006-01-02"))
+	if planner != "" && (s.Role == "d" || s.IsPlanPage()) {
+		value = strings.TrimRight(value, "\r\n") + "\n\n" + planner
+	}
 	if memory == "" && project == "" {
 		value = strings.TrimRight(value, "\r\n")
 	}

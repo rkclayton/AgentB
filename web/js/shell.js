@@ -323,6 +323,9 @@ export function initShell(options = {}) {
     if (session) query.set("session", session.id);
     const suffix = query.size ? `?${query}` : "";
     for (const link of pages.children) link.href = link.dataset.page === "console" ? `/${suffix}` : `/${link.dataset.page}${suffix}`;
+    const configured = configuredAgent(session);
+    const planLink = pages.querySelector('[data-page="plan"]');
+    if (planLink) planLink.hidden = !session || (session.role !== "d" && !!String(configured?.d || "").trim());
     settings.href = `/${suffix}#settings/servers`;
     options.syncLocation?.(page);
   }

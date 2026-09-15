@@ -7,11 +7,37 @@
   <link rel="icon" href="/static/assets/Agent_b.ico" type="image/x-icon">
   <link rel="stylesheet" href="/static/css/tokens.css">
   <link rel="stylesheet" href="/static/css/app.css">
+  <link rel="stylesheet" href="/static/css/chat.css">
+  <link rel="stylesheet" href="/static/css/plan.css">
 </head>
-<body class="plan-page">
+<body class="plan-page" data-page="plan">
   <header id="app-shell" class="app-shell window-titlebar" data-page="plan"></header>
-  <main class="plan-surface" aria-label="Plan"><span>No plan yet.</span></main>
-  <footer class="plan-controls"><span id="plan-state" role="status"></span><button id="plan-stop" class="stop-sign" type="button" aria-label="Stop"><span aria-hidden="true"></span></button></footer>
+  <main class="plan-workspace" aria-label="Plan">
+    <section class="plan-chat" aria-label="Design chat">
+      <div id="chat-budget" class="chat-budget" aria-label="Context budget"><span class="chat-budget-fill"></span><span class="chat-budget-tip"></span></div>
+      <div id="plan-empty" class="plan-empty" hidden><img src="/static/assets/idle.svg" alt=""><span>Tell me what you want to do.</span></div>
+      <div id="chat-log" class="chat-log" tabindex="0" aria-live="polite"></div>
+      <footer id="chat-composer" class="chat-composer">
+        <div id="chat-pending-approval" class="pending-approval" hidden></div>
+        <div class="chat-status-strip"><span id="chat-notice" class="chat-notice" role="status"></span><span id="plan-hint" role="status"></span><button id="chat-retry-model" class="chat-retry" type="button" hidden>Retry</button></div>
+        <div class="chat-composer-row">
+          <input id="chat-file-picker" type="file" multiple hidden>
+          <div id="chat-attachments" class="chat-pending-attachments" aria-live="polite"></div>
+          <div class="chat-input-wrap">
+            <textarea id="chat-task" rows="5" aria-label="Task"></textarea>
+            <button id="chat-expand" type="button" aria-label="Expand composer">↥</button>
+            <span class="chat-input-actions"><span class="chat-attach-wrap"><button id="chat-attach" class="chat-attach" type="button" aria-label="Attach">📎</button><span id="chat-attach-menu" class="chat-attach-menu" hidden><button id="chat-attach-browse" type="button">Browse…</button><button id="chat-attach-exchange" type="button">From attachments</button><span id="chat-exchange-files" class="chat-exchange-files"></span></span></span><span class="chat-submit-actions"><button id="chat-stop" class="stop-sign" type="button" aria-label="Stop"><span aria-hidden="true"></span></button><button id="chat-send" type="button" aria-label="Send">↵</button></span></span>
+          </div>
+        </div>
+      </footer>
+    </section>
+    <section class="plan-panel" aria-label="Plan document">
+      <header class="plan-panel-head"><span id="plan-name">Plan</span><span id="plan-cubes" class="plan-cubes" aria-label="Milestone progress"></span></header>
+      <div id="plan-current" class="plan-current"></div>
+      <div id="plan-items" class="plan-items"></div>
+    </section>
+    <aside id="plan-tray" class="plan-tray" aria-label="Proposed edits"><header>Proposed edits</header><div id="plan-proposals"></div></aside>
+  </main>
   <script type="module" src="/static/js/plan.js"></script>
 </body>
 </html>

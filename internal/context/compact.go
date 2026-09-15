@@ -136,6 +136,44 @@ func (c *Compactor) Summarize(s *session.Session, runID string, summary events.M
 	return true
 }
 
+// Settle replaces an operator-selected design-chat span with one readable
+// pointer after its proposal is accepted. It never selects the span itself.
+func (c *Compactor) Settle(s *session.Session, runID, pointer string, ids []string, count Counter) bool {
+	wanted := map[string]bool{}
+	for _, id := range ids {
+		if strings.TrimSpace(id) != "" {
+			wanted[id] = true
+		}
+	}
+	if len(wanted) == 0 {
+		return false
+	}
+	messages := s.MessagesCopy()
+	affected := []string{}
+	before := tokenSum(messages)
+	for index, message := range messages {
+		if !wanted[message.ID] || message.Elided || (message.Role != "user" && message.Role != "assistant") {
+			continue
+		}
+		message.Content = pointer
+		message.ToolCalls = nil
+		message.Reasoning = ""
+		message.Elided = true
+		message.Tokens, message.Estimated = count(pointer)
+		messages[index] = message
+		c.updated(s, runID, message)
+		affected = append(affected, message.ID)
+	}
+	if len(affected) == 0 {
+		return false
+	}
+	s.ReplaceMessages(messages)
+	after := tokenSum(messages)
+	s.RecordCompaction(after - before)
+	c.bus.Publish(events.New(events.Compaction, s.ID, runID, map[string]any{"kind": "settled", "before": before, "after": after, "affected_ids": affected}))
+	return true
+}
+
 func (c *Compactor) updated(s *session.Session, runID string, message events.Message) {
 	c.bus.Publish(events.New(events.MessageUpdated, s.ID, runID, map[string]any{"id": message.ID, "patch": map[string]any{"content": message.Content, "tokens": message.Tokens, "elided": true}}))
 }

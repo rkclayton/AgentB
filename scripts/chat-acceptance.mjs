@@ -174,6 +174,11 @@ const fakeHandler = async (request, response) => {
   }
   if (user.includes("acceptance: slow accounting")) { await sleep(700); return stream(response, { content: "Slow accounting recovered with an estimate." }); }
   if (user.includes("acceptance: compaction")) return stream(response, { content: `Compaction answer ${"stable ".repeat(180)}` });
+  if (user.includes("acceptance: plan proposals")) return stream(response, { content: `Plan candidates.\n\`\`\`agentb-plan-proposals\n${JSON.stringify({ version: 1, proposals: [
+    { id: "browser-accept", kind: "add", path: "plan.md", old_text: "# Browser plan", new_text: "# Browser plan\n[ ] 2t accepted via tray", item_id: "2t" },
+    { id: "browser-dismiss", kind: "reword", path: "plan.md", old_text: "# Browser plan", new_text: "# Dismissed plan", item_id: "2t" },
+    { id: "browser-quote", kind: "reword", path: "plan.md", old_text: "# Browser plan", new_text: "# Quoted plan", item_id: "2t" },
+  ] })}\n\`\`\`` });
   return stream(response, { content: "Acceptance response." });
 };
 const startFake = async (port = 0) => {
@@ -1461,6 +1466,28 @@ if (realModel) {
   assert.equal(await page.title(), `agent_d · ${dSession.b_profile || dSession.server_id}`);
   await page.screenshot({ path: join(evidenceRun, "d-plan.png") });
   record("d-plus-unbound-scratch-tab-and-title");
+  const boundCreated = await json(`http://127.0.0.1:${appPort}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-AgentB-Mutation-Token": dState.mutation_token },
+    body: JSON.stringify({ agent_id: "acceptance", role: "d", plan_id: "browser-plan" }),
+  });
+  const boundD = boundCreated.session;
+  await page.goto(`http://127.0.0.1:${appPort}/plan?session=${encodeURIComponent(boundD.id)}`);
+  await browser.wait(`document.querySelector('#plan-empty') && !document.querySelector('#plan-empty').hidden`, "empty Plan invitation");
+  await page.screenshot({ path: join(evidenceRun, "plan-empty.png") });
+  await page.locator("#chat-task").fill("acceptance: plan proposals");
+  await page.locator("#chat-task").press("Enter");
+  await browser.wait(`document.querySelectorAll('.plan-proposal').length === 3`, "three inert Plan proposals");
+  await page.screenshot({ path: join(evidenceRun, "plan-proposals.png") });
+  await page.locator('.plan-proposal').nth(2).click();
+  assert.match(await page.locator("#chat-task").inputValue(), /Quoted plan/, "clicking a proposal quotes it");
+  await page.locator('.plan-proposal').nth(1).getByRole('button', { name: 'Dismiss' }).click();
+  assert.equal(await page.locator('.plan-proposal').count(), 2, "Dismiss removes only that proposal");
+  await page.locator('.plan-proposal').nth(0).getByRole('button', { name: 'Accept' }).click();
+  await browser.wait(`document.querySelector('#plan-items')?.innerText.includes('2t accepted via tray')`, "accepted Plan edit rendered");
+  assert.equal(await readFile(join(browserPlanDir, "plan.md"), "utf8"), "# Browser plan\n[ ] 2t accepted via tray\n");
+  await page.screenshot({ path: join(evidenceRun, "plan-accepted.png") });
+  record("plan-empty-propose-dismiss-quote-accept");
   record("fake-model-script-complete");
   await writeFile(join(evidenceRun, "result.json"), JSON.stringify({ scenarios, duration_ms: Date.now() - startedAt, session_id: sessionID, shell_flip: shellFlipEvidence, shell_style_boundary: shellStyleBoundaryEvidence }, null, 2));
   const evidenceLogs = join(evidenceRun, "jsonl");
