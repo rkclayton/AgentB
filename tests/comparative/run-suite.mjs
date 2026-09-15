@@ -115,7 +115,7 @@ try {
   profile.id = args.profile;
   profile.label = args.profile === "homepc" ? "HomePC" : "Slumberland";
   if (args.profile === "slumberland") profile.base_url = "https://ai.slumberland.com/vllm/v1";
-  profile.probe_mode = "off";
+  profile.probe_mode = args.profile === "slumberland" ? "full" : "off";
   profile.system_prompt_override = "You are the coding worker in a disposable evaluation repository. Complete the operator's brief autonomously using the available tools. Inspect before editing, change only the named implementation target, run the stated verifier, and report the changed file and result. Never edit tests or verifier files.";
   const toolset = ["read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "find_files"];
   const config = {
@@ -146,8 +146,11 @@ try {
   const headers = { "Content-Type": "application/json", "X-AgentB-Mutation-Token": token };
 
   if (args.profile === "slumberland" || !profile.capabilities?.tool_calls) {
-    await json(`${base}/api/servers/${profile.id}/probe`, { method: "POST", headers, body: "{}" });
-    state = await waitState(base, (value) => value.servers?.find((item) => item.id === profile.id)?.capabilities?.probed_at !== profile.capabilities?.probed_at, "profile probe", 180_000);
+    if (args.profile !== "slumberland") await json(`${base}/api/servers/${profile.id}/probe`, { method: "POST", headers, body: "{}" });
+    state = await waitState(base, (value) => {
+      const capabilities = value.servers?.find((item) => item.id === profile.id)?.capabilities;
+      return capabilities?.probed_at !== profile.capabilities?.probed_at || JSON.stringify(capabilities?.findings || []) !== JSON.stringify(profile.capabilities?.findings || []);
+    }, "profile probe", 180_000);
   }
   const liveProfile = state.servers.find((item) => item.id === profile.id);
   assert.ok(liveProfile?.capabilities?.tool_calls, `${profile.label} does not advertise tool calls after probe`);
