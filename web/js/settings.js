@@ -401,15 +401,6 @@ async function click(event) {
 	catch(error){errors.set("workspace",error.message);render()}
 	return;
   }
-  if (action === "sandbox-workspace-toggle") {
-	const workspaces={...currentValue("sandbox.workspaces",store.config.sandbox?.workspaces||{})};
-	workspaces[id]=workspaces[id]!==true;
-	drafts.set("sandbox.workspaces",workspaces);
-	draftKinds.set("sandbox.workspaces","object");
-	settingsSaveMessage="Unsaved changes";
-	settingsSaveAlarm=false;
-	return render();
-  }
   if (action === "adopt-instructions") {
 	const cleanup=sheet.querySelector("#adopt-instruction-cleanup")?.checked===true;
 	try{await api("/api/operator-files",{action:"adopt_instructions",dir:id,cleanup,confirm_cleanup:cleanup});await refreshOperatorFileState();await refreshWorkspaceState()}

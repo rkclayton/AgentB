@@ -116,6 +116,7 @@ func (r *Runner) AppendUser(s *session.Session, message events.Message) {
 }
 
 func (r *Runner) Run(ctx context.Context, s *session.Session, runID string) (reason string, detail string, turns int) {
+	s.ResetRunTouches()
 	r.beginFlight(s.ID, runID)
 	defer r.endFlight(s.ID, runID)
 	produced := map[string]delivery.Source{}
@@ -731,7 +732,7 @@ func sandboxResultMetadata(cfg config.Config, s *session.Session, name string, a
 			return nil
 		}
 	}
-	if target, ok := cfg.SandboxForWorkspace(s.Workspace); ok {
+	if target, ok := cfg.SandboxTarget(s.ID, s.SandboxMounts()); ok {
 		return map[string]any{"target": "sandbox " + target}
 	}
 	return nil

@@ -78,7 +78,7 @@ func TestProducedFileMetadataTracksOnlyJailedFileTools(t *testing.T) {
 func TestSandboxExecutionTargetIsToolResultMetadata(t *testing.T) {
 	workspace := t.TempDir()
 	cfg := config.Defaults(workspace)
-	cfg.Sandbox.Workspaces[workspace] = true
+	cfg.Sandbox.Enabled = true
 	s := &session.Session{Workspace: workspace}
 	for _, test := range []struct {
 		name string

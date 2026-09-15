@@ -192,6 +192,7 @@ func TestShellServiceAccountSpawnFailureRequiresOperatorApproval(t *testing.T) {
 func TestShellRejectsExecutionPolicyBypassBeforeProcessStart(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.Defaults(root)
+	cfg.Sandbox.Enabled = false
 	cfg.Shell.ServiceAccount.Enabled = true
 	fileRoutingGuard := false
 	cfg.Shell.FileRoutingGuard = &fileRoutingGuard

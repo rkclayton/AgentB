@@ -65,6 +65,9 @@ function shell(active) {
 	const signingAllowed = signingStatus.can_manage && !signingBusy;
 	const operatorView = operatorStatusView(store.shell_identity);
 	const lanEnabled = !!store.config.shell?.allow_local_network;
+	const sandboxEnabled = store.config.sandbox?.enabled !== false;
+	const sandboxStatus = store.sandbox || {};
+	const sandboxState = sandboxStatus.available ? "ready" : `inert · ${sandboxStatus.reason || "Docker Sandbox is unavailable"}`;
 	const confirmedSubnets = new Set(store.config.shell?.confirmed_local_subnets || []);
 	const detectedSubnets = hardeningStatus.detected_local_subnets || [];
 	const subnetChoices = detectedSubnets.length
@@ -73,6 +76,10 @@ function shell(active) {
   return `<div class="settings-subhead">Operator mode</div>
 	${row("identity", `<button type="button" class="settings-operator-status" data-action="operator-context" aria-pressed="${operatorView.active}" aria-label="${attr(operatorView.label)}"><img src="${operatorView.src}" srcset="${operatorView.srcset}" width="24" height="24" alt=""><span>${operatorView.active ? "Stop running everything as me" : "Run everything as me for 20 minutes"}</span></button>`)}
 	<p class="settings-note">This defeats the service-account OS boundary for every tool in every chat until it expires.</p>
+	<div class="settings-subhead">Docker Sandbox</div>
+	${toggle("sandbox.enabled", "Docker Sandbox", sandboxEnabled)}
+	${row("status", `<span class="account-status"><span class="lamp ${sandboxStatus.available ? "live" : ""}"></span>${html(sandboxState)}</span>`)}
+	<p class="settings-note">This install-wide setting routes shell and bash through Docker Sandbox. When Docker Sandbox is unavailable, the setting stays on but is inert and reports why.</p>
 	<div class="settings-subhead">Service identity</div>
     ${row("status", `<span class="account-status"><span class="lamp ${serviceAccountStatus.administrator ? "alarm" : serviceAccountStatus.exists ? "live" : ""}"></span>${html(accountState)}</span>`)}
     ${row("credential", `<span class="account-status">${html(stored)}</span>`)}

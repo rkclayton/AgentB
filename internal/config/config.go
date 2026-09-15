@@ -354,18 +354,43 @@ type ShellServiceAccount struct {
 }
 
 type Sandbox struct {
-	Workspaces map[string]bool `json:"workspaces"`
+	Enabled     bool `json:"enabled"`
+	initialized bool
 }
 
-func (c Config) SandboxForWorkspace(workspace string) (string, bool) {
-	wanted := filepath.Clean(workspace)
-	for configured, enabled := range c.Sandbox.Workspaces {
-		if enabled && strings.EqualFold(filepath.Clean(configured), wanted) {
-			digest := sha256.Sum256([]byte(strings.ToLower(wanted)))
-			return fmt.Sprintf("agentb-%x", digest[:6]), true
+func (s *Sandbox) UnmarshalJSON(data []byte) error {
+	var legacy struct {
+		Enabled    *bool           `json:"enabled"`
+		Workspaces map[string]bool `json:"workspaces"`
+	}
+	if err := json.Unmarshal(data, &legacy); err != nil {
+		return err
+	}
+	s.initialized = true
+	if legacy.Enabled != nil {
+		s.Enabled = *legacy.Enabled
+		return nil
+	}
+	if legacy.Workspaces == nil {
+		s.Enabled = true
+		return nil
+	}
+	for _, enabled := range legacy.Workspaces {
+		if enabled {
+			s.Enabled = true
+			break
 		}
 	}
-	return "", false
+	return nil
+}
+
+func (c Config) SandboxTarget(sessionID string, mounts []string) (string, bool) {
+	if !c.Sandbox.Enabled {
+		return "", false
+	}
+	identity := strings.ToLower(strings.TrimSpace(sessionID)) + "\x00" + strings.Join(mounts, "\x00")
+	digest := sha256.Sum256([]byte(identity))
+	return fmt.Sprintf("agentb-%x", digest[:6]), true
 }
 
 type Signing struct {
@@ -385,7 +410,7 @@ func Defaults(workspace string) Config {
 		Listen:        "127.0.0.1:8790", Workspace: abs, LogDir: "logs",
 		Servers: []Profile{profile}, Agents: []Agent{{Name: profile.Label, B: "local", Toolset: FullToolset()}}, Chat: defaultChat(),
 		Services: map[string]Service{},
-		Sandbox:  Sandbox{Workspaces: map[string]bool{}},
+		Sandbox:  Sandbox{Enabled: true, initialized: true},
 		Run:      RunConfig{MaxTurns: DefaultMaxTurns, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(), OperatorFiles: OperatorFiles{LogRetentionDays: 30},
 		Tools:   Tools{ReadFile: ReadFileTool{DefaultLimit: 16 << 10, MaxLimit: 64 << 10}, Attachments: AttachmentTool{MaxBytes: 8 << 20}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Shell: ShellTool{OperatorCommands: []string{"git"}}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, DenyDomains: []string{"ipinfo.io", "ipapi.co", "ip-api.com", "ifconfig.me", "ipify.org", "geojs.io", "ipgeolocation.io", "icanhazip.com"}, AllowInternalHosts: []string{}}, FindFiles: FindFilesTool{SkipRoots: []string{"Windows", "$Recycle.Bin", "System Volume Information", `ProgramData\Microsoft\Windows Defender*`, `Program Files\Windows Defender*`}}},
 		Shell:   Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextIdleTimeoutMinutes: 20, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
@@ -587,11 +612,6 @@ func (c Config) Validate() error {
 		prefix, err := netip.ParsePrefix(raw)
 		if err != nil || !prefix.Addr().Is4() || !prefix.Masked().Addr().IsPrivate() || prefix.Bits() < 8 || prefix.Bits() > 32 || prefix.String() != prefix.Masked().String() {
 			return fmt.Errorf("shell.confirmed_local_subnets: %q must be a canonical private IPv4 prefix", raw)
-		}
-	}
-	for workspace, enabled := range c.Sandbox.Workspaces {
-		if enabled && !filepath.IsAbs(workspace) {
-			return fmt.Errorf("sandbox.workspaces: %q must be an absolute path", workspace)
 		}
 	}
 	seen := map[string]bool{}
@@ -873,8 +893,8 @@ func applyDefaults(c *Config) {
 	if c.Services == nil {
 		c.Services = map[string]Service{}
 	}
-	if c.Sandbox.Workspaces == nil {
-		c.Sandbox.Workspaces = map[string]bool{}
+	if !c.Sandbox.initialized {
+		c.Sandbox = d.Sandbox
 	}
 	if len(c.Servers) == 0 {
 		c.Agents = []Agent{}

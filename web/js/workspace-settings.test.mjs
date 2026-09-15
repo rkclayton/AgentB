@@ -31,7 +31,10 @@ test("Settings Security owns operator attachments mailbox approvals retention an
 	assert.match(settings, /\/api\/operator-files/);
 });
 
-test("per-folder Docker Sandbox control moved out of Settings", () => {
-  assert.doesNotMatch(settings, /Docker Sandbox execution/);
+test("Security has one install-wide Docker Sandbox switch and no per-folder control", () => {
+  assert.match(settings, /toggle\("sandbox\.enabled", "Docker Sandbox"/);
+  assert.match(settings, /install-wide setting/);
+  assert.match(settings, /inert/);
   assert.doesNotMatch(settings, /data-action="sandbox-workspace-toggle"/);
+  assert.doesNotMatch(settings, /sandbox\.workspaces/);
 });

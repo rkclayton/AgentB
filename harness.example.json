@@ -47,7 +47,7 @@
     "service_account": { "enabled": false, "account": "agentb-svc", "domain": "." },
     "deny": ["rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"]
   },
-  "sandbox": { "workspaces": {} },
+  "sandbox": { "enabled": true },
   "signing": {
     "thumbprint": "",
     "timestamp_url": "http://timestamp.digicert.com"

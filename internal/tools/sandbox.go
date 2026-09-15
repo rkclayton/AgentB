@@ -41,15 +41,15 @@ func (s *Shell) SandboxStatus() SandboxStatus {
 	return status
 }
 
-func (s *Shell) sandboxTarget(workspace string) (string, bool) {
+func (s *Shell) sandboxTarget(item *session.Session) (string, bool) {
 	s.mu.RLock()
 	configured := config.Config{Sandbox: s.sandbox}
 	s.mu.RUnlock()
-	return configured.SandboxForWorkspace(workspace)
+	return configured.SandboxTarget(item.ID, item.SandboxMounts())
 }
 
-func (s *Shell) sandboxExecution(workspace string) (string, SandboxStatus, bool) {
-	target, configured := s.sandboxTarget(workspace)
+func (s *Shell) sandboxExecution(item *session.Session) (string, SandboxStatus, bool) {
+	target, configured := s.sandboxTarget(item)
 	return target, s.SandboxStatus(), configured
 }
 
@@ -173,7 +173,9 @@ func (s *Shell) ensureSandbox(ctx context.Context, item *session.Session, execut
 		return fmt.Errorf("sandbox target is unavailable: %w", err)
 	} else if !linePresent(output, sandboxID) {
 		var createOutput lockedBuffer
-		createProcess, _, err := s.startInput(cfg, executable, []string{"create", "--name", sandboxID, "shell", item.Workspace}, nil, item.Workspace, &createOutput, true)
+		createArgs := []string{"create", "--name", sandboxID, "shell"}
+		createArgs = append(createArgs, item.SandboxMounts()...)
+		createProcess, _, err := s.startInput(cfg, executable, createArgs, nil, item.Workspace, &createOutput, true)
 		if err != nil {
 			return fmt.Errorf("create sandbox %s: %w", sandboxID, err)
 		}

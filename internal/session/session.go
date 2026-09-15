@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,7 @@ type Session struct {
 	ToolsEnabled                                         map[string]bool
 	ToolCalls                                            map[string]int
 	LastSeen                                             map[string]time.Time
+	TouchedPlanRepos                                     map[string]bool
 	CreatedAt                                            time.Time
 	LogPath                                              string
 	Runnable                                             bool
@@ -153,11 +155,13 @@ func (s *Session) ReadRoot(path string) (string, error) {
 			return s.PlanDir, nil
 		}
 		if s.PlanRepo != "" && pathWithin(s.PlanRepo, candidate) {
+			s.touchPlanRepoLocked(s.PlanRepo)
 			return s.PlanRepo, nil
 		}
 	}
 	if s.Role == "b" && filepath.IsAbs(candidate) {
 		if root := s.planRepoRootLocked(candidate); root != "" {
+			s.touchPlanRepoLocked(root)
 			return root, nil
 		}
 	}
@@ -174,6 +178,7 @@ func (s *Session) WriteRoot(path string) (string, error) {
 	if s.Role != "d" {
 		if filepath.IsAbs(candidate) {
 			if root := s.planRepoRootLocked(candidate); root != "" {
+				s.touchPlanRepoLocked(root)
 				return root, nil
 			}
 		}
@@ -230,6 +235,32 @@ func (s *Session) planRepoRootLocked(candidate string) string {
 		}
 	}
 	return best
+}
+
+func (s *Session) touchPlanRepoLocked(root string) {
+	if s.TouchedPlanRepos == nil {
+		s.TouchedPlanRepos = map[string]bool{}
+	}
+	s.TouchedPlanRepos[filepath.Clean(root)] = true
+}
+
+func (s *Session) ResetRunTouches() {
+	s.mu.Lock()
+	s.TouchedPlanRepos = map[string]bool{}
+	s.mu.Unlock()
+}
+
+func (s *Session) SandboxMounts() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	mounts := []string{filepath.Clean(s.Workspace)}
+	for root := range s.TouchedPlanRepos {
+		if !pathWithin(s.Workspace, root) && !pathWithin(root, s.Workspace) {
+			mounts = append(mounts, root)
+		}
+	}
+	sort.Strings(mounts[1:])
+	return mounts
 }
 
 func (s *Session) validatePlanDirLocked() error {

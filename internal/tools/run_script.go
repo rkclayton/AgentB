@@ -15,7 +15,7 @@ type RunScript struct{ shell *Shell }
 func NewRunScript(shell *Shell) *RunScript { return &RunScript{shell: shell} }
 func (*RunScript) Name() string            { return "run_script" }
 func (*RunScript) Description() string {
-	return "Run source from standard input without creating a script file. Use powershell for multi-line PowerShell, python/node for host interpreter source, or bash for a folder configured with a Docker Sandbox; script files are not created or executed."
+	return "Run source from standard input without creating a script file. Use powershell for multi-line PowerShell, python/node for host interpreter source, or bash when the global Docker Sandbox setting is enabled; script files are not created or executed."
 }
 func (*RunScript) Schema() map[string]any {
 	return map[string]any{
@@ -57,12 +57,12 @@ func (t *RunScript) call(ctx context.Context, item *session.Session, args map[st
 		return CallDetail{Err: fmt.Errorf("source blocked: %s", reason)}
 	}
 	if strings.EqualFold(strings.TrimSpace(language), "bash") {
-		sandboxID, sandboxStatus, sandboxed := t.shell.sandboxExecution(item.Workspace)
+		sandboxID, sandboxStatus, sandboxed := t.shell.sandboxExecution(item)
 		if !sandboxed {
-			return CallDetail{Err: fmt.Errorf("bash requires this folder to declare a Docker Sandbox target")}
+			return CallDetail{Err: fmt.Errorf("bash requires the global Docker Sandbox setting")}
 		}
 		if !sandboxStatus.Available {
-			return CallDetail{Err: fmt.Errorf("target: sandbox %s; sandbox setting is inert: %s", sandboxID, sandboxStatus.Reason), Metadata: map[string]any{"target": "sandbox " + sandboxID}}
+			return CallDetail{Err: fmt.Errorf("Docker Sandbox is enabled but inert: %s", sandboxStatus.Reason)}
 		}
 		if !forceOperator && !cfg.OperatorContext {
 			reason := "sandbox execution uses the operator's Docker session, outside the agentb-svc identity and firewall boundary"

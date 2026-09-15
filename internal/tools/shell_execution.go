@@ -86,9 +86,9 @@ func (s *Shell) call(ctx context.Context, item *session.Session, args map[string
 	if reason := forbiddenShellCommand(command, item, s.fileCoordinatorSnapshot()); reason != "" {
 		return CallDetail{Err: fmt.Errorf("command blocked: %s", reason)}
 	}
-	sandboxID, sandboxStatus, sandboxed := s.sandboxExecution(item.Workspace)
+	sandboxID, sandboxStatus, sandboxed := s.sandboxExecution(item)
 	if sandboxed && !sandboxStatus.Available {
-		return CallDetail{Err: fmt.Errorf("target: sandbox %s; sandbox setting is inert: %s", sandboxID, sandboxStatus.Reason), Metadata: map[string]any{"target": "sandbox " + sandboxID}}
+		sandboxed = false
 	}
 	if sandboxed && !forceOperator && !cfg.OperatorContext {
 		reason := "sandbox execution uses the operator's Docker session, outside the agentb-svc identity and firewall boundary"
