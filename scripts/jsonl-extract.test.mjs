@@ -30,7 +30,8 @@ try {
     tool_error_details: [{
       call_id: "bad", tool: "read_file", turn: 1, class: "outside jail",
       arguments: { path: "LOGIC\\logic.go" }, preview: "error: path is outside workspace",
-      repeated_next: false, recovered_next: true, next_tool: "read_file", next_call_id: "fixed",
+      protected_refusal: true, repeated_next: false, identical_next: false,
+      recovered_next: true, next_tool: "read_file", next_call_id: "fixed",
     }],
     rereads: 2, elapsed_ms: 7000,
     prompt_tokens: 100, completion_tokens: 20, tokens: 120, cached_tokens: 60, cache_hit: 0.6, records: 10,

@@ -6,6 +6,7 @@ import { createServer } from "node:http";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { extractRun, readJSONL, selectRun } from "../../scripts/jsonl-extract.mjs";
+import { EVAL_SYSTEM_PROMPT } from "./eval-system-prompt.mjs";
 
 const suiteRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(suiteRoot, "..", "..");
@@ -116,7 +117,7 @@ try {
   profile.label = args.profile === "homepc" ? "HomePC" : "Slumberland";
   if (args.profile === "slumberland") profile.base_url = "https://ai.slumberland.com/vllm/v1";
   profile.probe_mode = args.profile === "slumberland" ? "full" : "off";
-  profile.system_prompt_override = "You are the coding worker in a disposable evaluation repository. Complete the operator's brief autonomously using the available tools. Inspect before editing, change only the named implementation target, run the stated verifier, and report the changed file and result. Never edit tests or verifier files.";
+  profile.system_prompt_override = EVAL_SYSTEM_PROMPT;
   const toolset = ["read_file", "list_dir", "write_file", "edit_file", "search_text", "shell", "find_files"];
   const config = {
     config_version: 6, listen: `127.0.0.1:${port}`, workspace: path.join(dataRoot, "scratch"), log_dir: path.join(dataRoot, "logs"),

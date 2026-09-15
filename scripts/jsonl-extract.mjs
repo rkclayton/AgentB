@@ -36,7 +36,7 @@ function sameCall(left, right) {
 
 export function classifyToolError(value) {
   const text = String(value || "");
-  if (/outside (?:the )?(?:workspace|allowed root|jail)|workspace boundary|jail (?:refused|denied)|path is not under/i.test(text)) return "outside jail";
+  if (/outside (?:the )?(?:workspace|folder|allowed root|jail)|workspace boundary|jail (?:refused|denied)|path is not under/i.test(text)) return "outside jail";
   if (/timed? out|timeout|deadline exceeded/i.test(text)) return "timeout";
   if (/syntax|parse error|parsererror|unexpected token|unterminated|invalid character/i.test(text)) return "syntax";
   if (/invalid (?:argument|arguments|input)|missing (?:argument|required)|required (?:argument|field)|unknown (?:argument|field)|cannot unmarshal|expects?\b|must (?:be|include|provide)|unsupported (?:argument|field|shape)/i.test(text)) return "bad argument";
@@ -68,7 +68,9 @@ export function extractRun(records, filter = {}) {
       class: classifyToolError(preview),
       arguments: toolArguments(call || {}),
       preview,
-      repeated_next: sameCall(call, nextCall),
+      protected_refusal: /\"refused\"\s*:\s*true|outside (?:the )?(?:workspace|folder|allowed root|jail)|workspace boundary|jail (?:refused|denied)/i.test(preview),
+      repeated_next: nextResult?.data?.ok === false,
+      identical_next: sameCall(call, nextCall),
       recovered_next: nextResult?.data?.ok === true,
       next_tool: nextCall?.data?.name ?? nextCall?.data?.tool_call?.name ?? "",
       next_call_id: nextCall?.data?.call_id || "",
