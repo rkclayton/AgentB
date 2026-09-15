@@ -585,6 +585,14 @@ if (realModel) {
   await page.screenshot({ path: join(baselineDirectory, "tab-menu-open.png") });
   await page.goto(`http://127.0.0.1:${appPort}/?session=${sessionID}`);
   await page.locator("#console-lifetime").waitFor({ state: "visible" });
+  await page.locator("#console-run-result").waitFor({ state: "visible" });
+  const runResultText = await page.locator("#console-run-stop").innerText();
+  assert.match(runResultText, /^Ended: done/);
+  for (const detector of ["novel_action", "result_repetition", "repeated_timeouts", "model_says_stuck", "error_success_ratio", "baseline_deviation"]) assert.match(runResultText, new RegExp(detector));
+  await page.locator('#console-run-label button[data-label="mixed"]').click();
+  await page.locator('#console-run-label button[data-label="mixed"].selected').waitFor({ state: "visible" });
+  assert.equal((await state()).sessions[sessionID].run.result_label, "mixed");
+  record("console-run-result-and-label");
   await page.screenshot({ path: join(baselineDirectory, "console.png") });
   await page.locator(".shell-settings").click();
   await page.locator("#settings-page").waitFor({ state: "visible" });
