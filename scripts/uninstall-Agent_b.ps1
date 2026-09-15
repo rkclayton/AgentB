@@ -14,6 +14,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'removal-guard.ps1')
 
 function Get-FullPath {
     param([string]$Path)
@@ -99,10 +100,12 @@ if ([string]::IsNullOrWhiteSpace($WorkspaceDirectory)) { $WorkspaceDirectory = J
 $applicationRoot = Assert-SafePath $ApplicationDirectory @('Agent_b') 'application removal'
 $dataRoot = Assert-SafePath $DataDirectory @('Agent_b') 'operator-data removal'
 $workspaceRoot = Assert-SafePath $WorkspaceDirectory @('workspace') 'workspace removal'
+$startMenuRoot = Get-FullPath $StartMenuDirectory
 Assert-SafeRegistryPath $UninstallRegistryPath
 Assert-TestPath $applicationRoot
 Assert-TestPath $dataRoot
 Assert-TestPath $workspaceRoot
+Assert-TestPath $startMenuRoot
 Assert-DisjointRoots @($applicationRoot, $dataRoot, $workspaceRoot)
 
 $launchingSid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
@@ -154,7 +157,7 @@ if (-not $currentSid.Equals($ExpectedOperatorSid, [StringComparison]::OrdinalIgn
 }
 
 $installedBinary = Join-Path $applicationRoot 'Agent_b.exe'
-$shortcutPath = Join-Path $StartMenuDirectory 'Agent_b.lnk'
+$shortcutPath = Join-Path $startMenuRoot 'Agent_b.lnk'
 $purge = $PurgeData.IsPresent
 Write-Host 'Agent_b uninstall'
 Write-Host "Application: $applicationRoot"
@@ -195,17 +198,30 @@ if ($WhatIfPreference) {
     exit 0
 }
 
-if (Test-Path -LiteralPath $shortcutPath) { Remove-Item -LiteralPath $shortcutPath -Force }
+if (Test-Path -LiteralPath $shortcutPath) {
+    $removalPath = Assert-RemovalWithinAllowedRoots -Path $shortcutPath -AllowedRoots @($startMenuRoot) -Purpose 'Start Menu shortcut cleanup'
+    Remove-Item -LiteralPath $removalPath -Force
+}
 if (Test-Path -LiteralPath $UninstallRegistryPath) { Remove-Item -LiteralPath $UninstallRegistryPath -Recurse -Force }
 Set-Location ([IO.Path]::GetTempPath())
-if (Test-Path -LiteralPath $applicationRoot) { Remove-Item -LiteralPath $applicationRoot -Recurse -Force }
+if (Test-Path -LiteralPath $applicationRoot) {
+    $removalPath = Assert-RemovalWithinAllowedRoots -Path $applicationRoot -AllowedRoots @($applicationRoot) -Purpose 'application cleanup'
+    Remove-Item -LiteralPath $removalPath -Recurse -Force
+}
 
 if ($purge) {
-    if (Test-Path -LiteralPath $dataRoot) { Remove-Item -LiteralPath $dataRoot -Recurse -Force }
-    if (Test-Path -LiteralPath $workspaceRoot) { Remove-Item -LiteralPath $workspaceRoot -Recurse -Force }
+    if (Test-Path -LiteralPath $dataRoot) {
+        $removalPath = Assert-RemovalWithinAllowedRoots -Path $dataRoot -AllowedRoots @($dataRoot) -Purpose 'operator-data cleanup'
+        Remove-Item -LiteralPath $removalPath -Recurse -Force
+    }
+    if (Test-Path -LiteralPath $workspaceRoot) {
+        $removalPath = Assert-RemovalWithinAllowedRoots -Path $workspaceRoot -AllowedRoots @($workspaceRoot) -Purpose 'workspace cleanup'
+        Remove-Item -LiteralPath $removalPath -Recurse -Force
+    }
     $workspaceParent = Split-Path -Parent $workspaceRoot
     if ((Split-Path -Leaf $workspaceParent) -eq 'Agent_b' -and (Test-Path -LiteralPath $workspaceParent) -and -not (Get-ChildItem -LiteralPath $workspaceParent -Force | Select-Object -First 1)) {
-        Remove-Item -LiteralPath $workspaceParent -Force
+        $removalPath = Assert-RemovalWithinAllowedRoots -Path $workspaceParent -AllowedRoots @($workspaceParent) -Purpose 'empty workspace-parent cleanup'
+        Remove-Item -LiteralPath $removalPath -Force
     }
     Write-Host 'REMOVED: program files, operator data, and service workspace'
 } else {

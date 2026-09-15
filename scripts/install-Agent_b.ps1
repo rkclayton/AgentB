@@ -17,6 +17,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $displayVersion = '0.55.0'
+. (Join-Path $PSScriptRoot 'removal-guard.ps1')
 
 function Get-FullPath {
     param([string]$Path)
@@ -170,7 +171,7 @@ function Stop-InstalledProcesses {
 }
 
 function Copy-ProgramDirectory {
-    param([string]$Name, [string]$Source, [string]$Destination)
+    param([string]$Name, [string]$Source, [string]$Destination, [string[]]$AllowedRemovalRoots)
     $from = Join-Path $Source $Name
     $to = Join-Path $Destination $Name
     if (-not (Test-Path -LiteralPath $from -PathType Container)) { throw "Required program directory is missing: $from" }
@@ -178,7 +179,8 @@ function Copy-ProgramDirectory {
         $null = New-Item -ItemType Directory -Path $to -Force
     } else {
         foreach ($item in Get-ChildItem -LiteralPath $to -Force) {
-            Remove-Item -LiteralPath $item.FullName -Recurse -Force
+            $removalPath = Assert-RemovalWithinAllowedRoots -Path $item.FullName -AllowedRoots $AllowedRemovalRoots -Purpose 'installer program-directory cleanup'
+            Remove-Item -LiteralPath $removalPath -Recurse -Force
         }
     }
     foreach ($item in Get-ChildItem -LiteralPath $from -Force) {
@@ -394,7 +396,7 @@ $dataCreated = -not (Test-Path -LiteralPath $dataRoot -PathType Container)
 $null = New-Item -ItemType Directory -Path $applicationRoot -Force
 if ($applicationCreated) { Set-ApplicationDirectoryAcl -Path $applicationRoot -Owner $currentSid }
 foreach ($directory in @('web', 'prompts', 'scripts', 'docs')) {
-    Copy-ProgramDirectory -Name $directory -Source $sourceRoot -Destination $applicationRoot
+    Copy-ProgramDirectory -Name $directory -Source $sourceRoot -Destination $applicationRoot -AllowedRemovalRoots @($applicationRoot)
 }
 foreach ($file in @('Agent_b.exe', 'harness.example.json', 'SECURITY.md', 'LICENSE')) {
     $from = Join-Path $sourceRoot $file

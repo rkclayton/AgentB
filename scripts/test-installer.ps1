@@ -2,6 +2,7 @@
 param()
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'removal-guard.ps1')
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('Agent_b-installer-test-' + [Guid]::NewGuid().ToString('N'))
 $testApplication = Join-Path $testRoot 'Application\Agent_b'
 $testData = Join-Path $testRoot 'Data\Agent_b'
@@ -481,7 +482,8 @@ try {
         $tempRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\')
         if ((Split-Path -Parent $resolvedTranscript).Equals($tempRoot, [StringComparison]::OrdinalIgnoreCase) -and
             (Split-Path -Leaf $resolvedTranscript) -like 'Agent_b-whatif-installer-*.log') {
-            Remove-Item -LiteralPath $resolvedTranscript -Force
+            $removalPath = Assert-RemovalWithinAllowedRoots -Path $resolvedTranscript -AllowedRoots @($whatIfTranscript) -Purpose 'WhatIf transcript cleanup'
+            Remove-Item -LiteralPath $removalPath -Force
         }
     }
     if (Test-Path -LiteralPath $testRegistry) { Remove-Item -LiteralPath $testRegistry -Recurse -Force }
@@ -493,7 +495,8 @@ try {
     }
     if (Test-Path -LiteralPath $testRoot) {
         Assert-TemporaryTestPath $testRoot
-        Remove-Item -LiteralPath $testRoot -Recurse -Force
+        $removalPath = Assert-RemovalWithinAllowedRoots -Path $testRoot -AllowedRoots @($testRoot) -Purpose 'installer-suite disposable-root cleanup'
+        Remove-Item -LiteralPath $removalPath -Recurse -Force
     }
 }
 
