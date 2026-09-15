@@ -1,0 +1,12 @@
+[
+  {"id":"max-turns","name":"Long task stops at forty turns","source":"2cp","named_paths":["logic/logic.go"],"verifier":{"command":"go","args":["test","./logic","-run","^TestDefaultMaxTurns$"]},"oracle":"oracles/max-turns.diff"},
+  {"id":"b-plan-write","name":"B can write a protected plan file","source":"2dk,2dw","named_paths":["logic/logic.go"],"verifier":{"command":"go","args":["test","./logic","-run","^TestBPlanWriteRefusal$"]},"oracle":"oracles/b-plan-write.diff"},
+  {"id":"touched-roots","name":"Second touched plan repository is missing","source":"2dw","named_paths":["logic/logic.go"],"verifier":{"command":"go","args":["test","./logic","-run","^TestTouchedPlanRoots$"]},"oracle":"oracles/touched-roots.diff"},
+  {"id":"abort-role","name":"Abort record is attributed to system","source":"2dg","named_paths":["logic/logic.go"],"verifier":{"command":"go","args":["test","./logic","-run","^TestAbortRecordRole$"]},"oracle":"oracles/abort-role.diff"},
+  {"id":"retention-evidence","name":"Retention deletes nested evidence logs","source":"v0.53.0/W5","named_paths":["logic/logic.go"],"verifier":{"command":"go","args":["test","./logic","-run","^TestRetentionPreservesNestedEvidence$"]},"oracle":"oracles/retention-evidence.diff"},
+  {"id":"idle-close","name":"Closing an idle chat asks for confirmation","source":"2dq","named_paths":["src/behavior.mjs"],"verifier":{"command":"node","args":["test/verify.mjs","idle-close"]},"oracle":"oracles/idle-close.diff"},
+  {"id":"svg-text","name":"SVG attachment is classified as an image","source":"2dt","named_paths":["src/behavior.mjs"],"verifier":{"command":"node","args":["test/verify.mjs","svg-text"]},"oracle":"oracles/svg-text.diff"},
+  {"id":"retry-reachable","name":"Successful Retry never emits reachable","source":"2do","named_paths":["src/behavior.mjs"],"verifier":{"command":"node","args":["test/verify.mjs","retry-reachable"]},"oracle":"oracles/retry-reachable.diff"},
+  {"id":"html-probe","name":"HTML probe exposes a JSON decoder error","source":"2dv","named_paths":["src/behavior.mjs"],"verifier":{"command":"node","args":["test/verify.mjs","html-probe"]},"oracle":"oracles/html-probe.diff"},
+  {"id":"folder-header","name":"Chat header still exposes its folder","source":"2dw","named_paths":["src/behavior.mjs"],"verifier":{"command":"node","args":["test/verify.mjs","folder-header"]},"oracle":"oracles/folder-header.diff"}
+]

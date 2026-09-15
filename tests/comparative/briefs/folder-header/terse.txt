@@ -1,0 +1,5 @@
+intent: Repair a chat header that still exposes its folder.
+do: Inspect and repair src/behavior.mjs.
+accept: node test/verify.mjs folder-header passes.
+not: Do not edit tests or verifier files. Do not change unrelated files.
+after: Report the changed file and verification result.

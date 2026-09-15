@@ -1,0 +1,6 @@
+diff --git a/src/behavior.mjs b/src/behavior.mjs
+--- a/src/behavior.mjs
++++ b/src/behavior.mjs
+@@ -2 +2 @@
+-  return { closed: false, confirmation: true };
++  return { closed: true, confirmation: false };

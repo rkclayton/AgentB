@@ -1,0 +1,1 @@
+Repair a chat header that still exposes its folder. Inspect and repair src/behavior.mjs. Acceptance requires `node test/verify.mjs folder-header` to pass. Do not edit tests or verifier files, and do not change unrelated files. Afterward, report the changed file and verification result.

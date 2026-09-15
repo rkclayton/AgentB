@@ -1,0 +1,6 @@
+diff --git a/src/behavior.mjs b/src/behavior.mjs
+--- a/src/behavior.mjs
++++ b/src/behavior.mjs
+@@ -19 +19 @@
+-  return `${role} · ${profile} · ${folder}`;
++  return `${role} · ${profile}`;

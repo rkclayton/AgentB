@@ -1,0 +1,6 @@
+diff --git a/logic/logic.go b/logic/logic.go
+--- a/logic/logic.go
++++ b/logic/logic.go
+@@ -5 +5 @@
+-func DefaultMaxTurns() int { return 40 }
++func DefaultMaxTurns() int { return 10000 }

@@ -1,0 +1,1 @@
+Repair the policy that lets B write a protected plan file. Inspect and repair logic/logic.go. Acceptance requires `go test ./logic -run ^TestBPlanWriteRefusal$` to pass. Do not edit tests or verifier files, and do not change unrelated files. Afterward, report the changed file and verification result.

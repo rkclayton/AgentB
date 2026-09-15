@@ -1,0 +1,6 @@
+diff --git a/logic/logic.go b/logic/logic.go
+--- a/logic/logic.go
++++ b/logic/logic.go
+@@ -9 +9 @@
+-func PlanRoots(scratch string, touched []string) []string { return []string{scratch} }
++func PlanRoots(scratch string, touched []string) []string { return append([]string{scratch}, touched...) }

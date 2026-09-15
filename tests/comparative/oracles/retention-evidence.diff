@@ -1,0 +1,6 @@
+diff --git a/logic/logic.go b/logic/logic.go
+--- a/logic/logic.go
++++ b/logic/logic.go
+@@ -13 +13 @@
+-func ShouldDeleteWorkingLog(relative string) bool { return strings.HasSuffix(strings.ToLower(relative), ".jsonl") }
++func ShouldDeleteWorkingLog(relative string) bool { return !strings.ContainsAny(relative, "/\\") && strings.HasSuffix(strings.ToLower(relative), ".jsonl") }

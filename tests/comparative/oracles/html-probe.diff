@@ -1,0 +1,6 @@
+diff --git a/src/behavior.mjs b/src/behavior.mjs
+--- a/src/behavior.mjs
++++ b/src/behavior.mjs
+@@ -14 +14 @@
+-  if (status === 200 && contentType.includes("text/html")) return "invalid character '<' looking for beginning of value";
++  if (status === 200 && contentType.includes("text/html")) return "Connection returned a web page, not model API JSON. Add the API path to base_url.";

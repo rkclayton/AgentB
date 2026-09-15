@@ -1,0 +1,5 @@
+intent: Repair retention deleting nested evidence logs.
+do: Inspect and repair logic/logic.go.
+accept: go test ./logic -run ^TestRetentionPreservesNestedEvidence$ passes.
+not: Do not edit tests or verifier files. Do not change unrelated files.
+after: Report the changed file and verification result.

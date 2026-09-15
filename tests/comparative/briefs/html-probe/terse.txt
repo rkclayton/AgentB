@@ -1,0 +1,5 @@
+intent: Repair an HTML probe exposing a JSON decoder error.
+do: Inspect and repair src/behavior.mjs.
+accept: node test/verify.mjs html-probe passes.
+not: Do not edit tests or verifier files. Do not change unrelated files.
+after: Report the changed file and verification result.

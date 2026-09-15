@@ -1,0 +1,6 @@
+diff --git a/src/behavior.mjs b/src/behavior.mjs
+--- a/src/behavior.mjs
++++ b/src/behavior.mjs
+@@ -6 +6 @@
+-  return extension.toLowerCase() === ".svg" ? "image" : "text";
++  return "text";

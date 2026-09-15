@@ -1,0 +1,5 @@
+intent: Repair a successful Retry that never emits reachable.
+do: Inspect and repair src/behavior.mjs.
+accept: node test/verify.mjs retry-reachable passes.
+not: Do not edit tests or verifier files. Do not change unrelated files.
+after: Report the changed file and verification result.

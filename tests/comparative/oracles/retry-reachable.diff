@@ -1,0 +1,6 @@
+diff --git a/src/behavior.mjs b/src/behavior.mjs
+--- a/src/behavior.mjs
++++ b/src/behavior.mjs
+@@ -10 +10 @@
+-  return { reachableEvent: false, probeSucceeded };
++  return { reachableEvent: probeSucceeded, probeSucceeded };

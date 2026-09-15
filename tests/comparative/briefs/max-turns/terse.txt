@@ -1,0 +1,5 @@
+intent: Repair the long task that stops at forty turns.
+do: Inspect and repair logic/logic.go.
+accept: go test ./logic -run ^TestDefaultMaxTurns$ passes.
+not: Do not edit tests or verifier files. Do not change unrelated files.
+after: Report the changed file and verification result.

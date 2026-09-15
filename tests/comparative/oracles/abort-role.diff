@@ -1,0 +1,6 @@
+diff --git a/logic/logic.go b/logic/logic.go
+--- a/logic/logic.go
++++ b/logic/logic.go
+@@ -11 +11 @@
+-func AbortRecordRole() string { return "system" }
++func AbortRecordRole() string { return "assistant" }
