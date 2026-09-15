@@ -35,6 +35,7 @@ type Config struct {
 	Sandbox       Sandbox            `json:"sandbox"`
 	Deliver       Deliver            `json:"deliver"`
 	OperatorFiles OperatorFiles      `json:"operator_files"`
+	Notifications Notifications      `json:"notifications"`
 	Signing       Signing            `json:"signing"`
 	LoadNotices   []string           `json:"-"`
 }
@@ -241,6 +242,10 @@ type OperatorFiles struct {
 	LogRetentionDays      int  `json:"log_retention_days"`
 }
 
+type Notifications struct {
+	DiscordCredential string `json:"discord_credential"`
+}
+
 func defaultDeliver() Deliver {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
@@ -411,7 +416,7 @@ func Defaults(workspace string) Config {
 		Servers: []Profile{profile}, Agents: []Agent{{Name: profile.Label, B: "local", Toolset: FullToolset()}}, Chat: defaultChat(),
 		Services: map[string]Service{},
 		Sandbox:  Sandbox{Enabled: true, initialized: true},
-		Run:      RunConfig{MaxTurns: DefaultMaxTurns, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(), OperatorFiles: OperatorFiles{LogRetentionDays: 30},
+		Run:      RunConfig{MaxTurns: DefaultMaxTurns, CycleWindow: 8, MaxConsecutiveToolErrors: 3, MaxConcurrent: 2}, Approval: Approval{Mode: ApprovalModeBoundaryOnly}, Context: GlobalContext{SoftPct: .75, SummaryPct: .85, Accounting: "auto"}, Memory: Memory{Enabled: true, Dir: "memory", MaxTokens: 1500}, Deliver: defaultDeliver(), OperatorFiles: OperatorFiles{LogRetentionDays: 30}, Notifications: Notifications{DiscordCredential: "discord-webhook"},
 		Tools:   Tools{ReadFile: ReadFileTool{DefaultLimit: 16 << 10, MaxLimit: 64 << 10}, Attachments: AttachmentTool{MaxBytes: 8 << 20}, ListDir: ListDirTool{MaxEntries: 300, Ignore: []string{".git", "node_modules", "__pycache__", "vendor", "bin", "obj", "dist", ".venv"}}, Grep: GrepTool{MaxMatches: 50, MaxLineChars: 200}, Shell: ShellTool{OperatorCommands: []string{"git"}}, Fetch: FetchTool{TimeoutS: 20, MaxBytes: 2 << 20, MaxRedirects: 5, DefaultLimit: 16 << 10, MaxLimit: 64 << 10, AllowDomains: []string{}, DenyDomains: []string{"ipinfo.io", "ipapi.co", "ip-api.com", "ifconfig.me", "ipify.org", "geojs.io", "ipgeolocation.io", "icanhazip.com"}, AllowInternalHosts: []string{}}, FindFiles: FindFilesTool{SkipRoots: []string{"Windows", "$Recycle.Bin", "System Volume Information", `ProgramData\Microsoft\Windows Defender*`, `Program Files\Windows Defender*`}}},
 		Shell:   Shell{Command: []string{"powershell", "-NoProfile", "-NonInteractive", "-Command"}, TimeoutS: 60, MaxTimeoutS: 600, MaxOutputLinesHead: 60, MaxOutputLinesTail: 40, OperatorContextIdleTimeoutMinutes: 20, Deny: []string{"rm -rf /", "format ", "diskpart", "shutdown", "Remove-Item -Recurse -Force C:\\"}, FileRoutingGuard: boolPointer(true), ServiceAccount: ShellServiceAccount{Account: "agentb-svc", Domain: "."}},
 		Signing: Signing{TimestampURL: "http://timestamp.digicert.com"},
@@ -834,6 +839,9 @@ func (c Config) Validate() error {
 	if c.OperatorFiles.LogRetentionDays < 1 || c.OperatorFiles.LogRetentionDays > 3650 {
 		return fmt.Errorf("operator_files.log_retention_days: must be between 1 and 3650")
 	}
+	if _, err := credential.NewNamed(".", c.Notifications.DiscordCredential); err != nil {
+		return fmt.Errorf("notifications.discord_credential: %w", err)
+	}
 	if _, err := c.ResolvedExchangeFolder(); err != nil {
 		return err
 	}
@@ -907,6 +915,9 @@ func applyDefaults(c *Config) {
 	}
 	if c.OperatorFiles.LogRetentionDays == 0 {
 		c.OperatorFiles.LogRetentionDays = d.OperatorFiles.LogRetentionDays
+	}
+	if c.Notifications.DiscordCredential == "" {
+		c.Notifications.DiscordCredential = d.Notifications.DiscordCredential
 	}
 	if c.Tools.ReadFile.DefaultLimit == 0 {
 		c.Tools = d.Tools

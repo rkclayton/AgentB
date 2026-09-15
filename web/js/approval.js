@@ -13,6 +13,14 @@ export function approvalChoices(data = {}) {
 }
 
 export function approvalText(data = {}) {
+	const human = data.human && typeof data.human === "object" ? data.human : null;
+	if (human?.happened && human?.harness_action) return {
+		title: data.kind === "cycle" || data.name === "run.cycle" ? "Loop check" : (data.boundary_escape ? "Run as you" : "Allow this"),
+		request: human.happened,
+		reason: human.harness_action,
+		question: human.question || "",
+		detail: data.args?.path ?? data.args?.command ?? data.args?.pattern ?? "",
+	};
 	const boundary = typeof data.boundary_escape === "boolean"
 		? data.boundary_escape
 		: data.name?.endsWith(".operator_override");
@@ -72,6 +80,12 @@ export function createApprovalCard(document, entry = {}, options = {}) {
 	const reason = document.createElement("span");
 	reason.textContent = wording.reason;
 	content.append(title, request, reason);
+	if (wording.question) {
+		const question = document.createElement("span");
+		question.className = "approval-question";
+		question.textContent = wording.question;
+		content.append(question);
+	}
 	const technical = document.createElement("details");
 	const summary = document.createElement("summary");
 	summary.textContent = "Technical detail";

@@ -48,6 +48,8 @@ type Server struct {
 	projector         *projection.Store
 	writers           *events.Writers
 	credential        *credential.Store
+	notifications     notificationManager
+	notificationStore *credential.Store
 	shell             *tools.Shell
 	account           serviceaccount.Manager
 	hardening         hardening.Manager
@@ -142,6 +144,9 @@ func (s *Server) SetShellSecurity(store *credential.Store, shell *tools.Shell) {
 	s.shell = shell
 	s.shellTest = shell.TestServiceAccount
 }
+func (s *Server) SetNotifications(manager notificationManager, store *credential.Store) {
+	s.notifications, s.notificationStore = manager, store
+}
 func (s *Server) SetServiceAccountManager(manager serviceaccount.Manager) { s.account = manager }
 func (s *Server) SetHardeningManager(manager hardening.Manager)           { s.hardening = manager }
 func (s *Server) SetSigningManager(manager signing.Manager)               { s.signing = manager }
@@ -211,6 +216,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/servers", s.servers)
 	mux.HandleFunc("/api/servers/", s.replayGuard(s.server))
 	mux.HandleFunc("/api/config", s.replayGuard(s.config))
+	mux.HandleFunc("/api/notifications", s.replayGuard(s.notificationSettings))
 	mux.HandleFunc("/api/shell-credential", s.replayGuard(s.shellCredential))
 	mux.HandleFunc("/api/service-account", s.replayGuard(s.serviceAccount))
 	mux.HandleFunc("/api/hardening", s.replayGuard(s.hostHardening))

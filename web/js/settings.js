@@ -6,6 +6,7 @@ import { renderAboutPage } from "./settings-about.js";
 import { renderContextPage } from "./settings-context.js";
 import { renderDeliveryPage } from "./settings-delivery.js";
 import { renderGeneralPage } from "./settings-general.js";
+import { renderNotificationsPage } from "./settings-notifications.js";
 import { renderRunPage } from "./settings-run.js";
 import { renderSecurityPage } from "./settings-security.js";
 import { renderWorkspacePage } from "./settings-workspace.js";
@@ -35,6 +36,10 @@ let signingStatus = { loaded: false, supported: true, configured: false, can_man
 let signingBusy = false;
 let signingMessage = "";
 let signingAlarm = false;
+let notificationStatus = { configured: false, host: "" };
+let notificationBusy = false;
+let notificationMessage = "";
+let notificationAlarm = false;
 let settingsSaving = false;
 let settingsSaveMessage = "All changes saved";
 let settingsSaveAlarm = false;
@@ -49,6 +54,7 @@ const sectionLabels = [
   ["context", "Context"],
   ["run", "Run & approval"],
   ["delivery", "Delivery"],
+  ["notifications", "Notifications"],
   ["shell", "Security"],
   ["about", "About"],
 ];
@@ -80,6 +86,7 @@ export function initSettings() {
     }
   });
   subscribe((_state, event) => {
+	if (event.type === "notification.changed") notificationStatus = event.data || notificationStatus;
     if (event.type === "server.probed") {
       const profileID = event.data?.server_id || "";
       const findings = event.data?.capabilities?.findings || event.data?.findings || [];
@@ -93,6 +100,7 @@ export function initSettings() {
         "snapshot",
         "active.changed",
         "config.changed",
+		"notification.changed",
 		"shell.identity",
 		"shell.credential",
         "server.probed",
@@ -104,6 +112,7 @@ export function initSettings() {
       refreshServiceAccountStatus();
       refreshHardeningStatus();
 	  refreshSigningStatus();
+	  refreshNotificationStatus();
 	  refreshOperatorFileState();
     }
   });
@@ -126,6 +135,7 @@ function openSettings(section = "") {
   refreshServiceAccountStatus();
 	refreshHardeningStatus();
 	refreshSigningStatus();
+	refreshNotificationStatus();
   refreshWorkspaceState();
   refreshOperatorFileState();
   requestAnimationFrame(() => sheet.querySelector(".settings-nav button.selected")?.focus());
@@ -162,6 +172,7 @@ function render() {
     context: () => renderContextPage(active, settingsPageContext(active)),
     run: () => renderRunPage(settingsPageContext(active)),
     delivery: () => renderDeliveryPage(settingsPageContext(active)),
+    notifications: () => renderNotificationsPage(settingsPageContext(active)),
     shell: () => renderSecurityPage("shell", active, settingsPageContext(active)) + renderWorkspacePage(settingsPageContext(active)),
     about: () => renderAboutPage(settingsPageContext(active)),
     session: () => renderSecurityPage("session", active, settingsPageContext(active)),
@@ -197,6 +208,7 @@ function settingsPageContext(active) {
     shellCredentialMessage, shellCredentialAlarm, serviceAccountStatus, serviceAccountBusy,
     serviceAccountMessage, serviceAccountAlarm, hardeningStatus, hardeningBusy, hardeningMessage,
     hardeningAlarm, signingStatus, signingBusy, signingMessage, signingAlarm, serverProfiles,
+    notificationStatus, notificationBusy, notificationMessage, notificationAlarm,
     row, field, text, number, numberControl, textarea, secret, toggle, choices, approvalChoices,
     copyRow, currentValue, issue, profileReason, html, attr, selectedHardeningServerID, operatorStatusView,
   };
@@ -429,6 +441,9 @@ async function click(event) {
 	if (action === "apply-hardening") return hardeningAction("apply");
 	if (action === "verify-hardening") return hardeningAction("verify");
 	if (action === "refresh-hardening") return refreshHardeningStatus();
+	if (action === "save-notification") return notificationAction("save");
+	if (action === "test-notification") return notificationAction("test");
+	if (action === "clear-notification") return notificationAction("clear");
 	if (action === "remove-hardening") {
 		if (!armed.has("hardening:remove")) {
 			armed.add("hardening:remove");
@@ -536,6 +551,38 @@ async function hardeningAction(action) {
 		await refreshHardeningStatus(true);
 	} finally {
 		hardeningBusy = hardeningStatus.operation?.state === "running";
+		if (open) render();
+	}
+}
+
+async function refreshNotificationStatus() {
+	try {
+		notificationStatus = await api("/api/notifications", undefined, "GET");
+	} catch (error) {
+		notificationStatus = { configured: false, host: "" };
+		notificationMessage = error.message;
+		notificationAlarm = true;
+	}
+	if (open && activeSection === "notifications") render();
+}
+
+async function notificationAction(action) {
+	const input = sheet.querySelector("#discord-webhook-url");
+	const value = input?.value || "";
+	notificationBusy = true;
+	notificationAlarm = false;
+	notificationMessage = action === "test" ? "Sending test…" : "Saving…";
+	if (input) input.value = "";
+	render();
+	try {
+		const result = await api("/api/notifications", action === "save" ? { action, url: value } : { action });
+		notificationStatus = result.notifications || notificationStatus;
+		notificationMessage = action === "test" ? "Test sent." : action === "clear" ? "Discord notifications disabled." : "Discord webhook saved.";
+	} catch (error) {
+		notificationMessage = error.message;
+		notificationAlarm = true;
+	} finally {
+		notificationBusy = false;
 		if (open) render();
 	}
 }

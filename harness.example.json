@@ -11,6 +11,7 @@
   "approval": { "mode": "boundary-only" },
   "deliver": { "mode": "both", "exchange_folder": "%USERPROFILE%\\Agent_b" },
   "operator_files": { "allow_mailbox_approvals": false, "log_retention_days": 30 },
+  "notifications": { "discord_credential": "discord-webhook" },
   "context": { "soft_pct": 0.75, "summary_pct": 0.85, "accounting": "auto" },
   "memory": { "enabled": true, "dir": "memory", "max_tokens": 1500 },
   "tools": {

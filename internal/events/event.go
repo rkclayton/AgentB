@@ -41,6 +41,8 @@ const (
 	RunStopping          = "run.stopping"
 	RunStopped           = "run.stopped"
 	RunAborted           = "run.aborted"
+	ItemDone             = "item.done"
+	PlanDone             = "plan.done"
 	Stage                = "stage"
 	ModelRequest         = "model.request"
 	ModelProgress        = "model.progress"
@@ -77,6 +79,8 @@ const (
 	NavigationStarted    = "navigation.started"
 	NavigationMeasured   = "navigation.measured"
 	NavigationSuppressed = "navigation.suppressed"
+	NotificationFailed   = "notification.failed"
+	NotificationChanged  = "notification.changed"
 )
 
 const (

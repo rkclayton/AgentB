@@ -125,9 +125,9 @@ func (g *Gate) WaitBoundaryDecision(ctx context.Context, s *session.Session, run
 func (g *Gate) WaitCycleDecision(ctx context.Context, s *session.Session, runID, callID string, args map[string]any) (string, error) {
 	g.sequenceMu.Lock()
 	wait, cleanup := g.beginWait(s, runID, callID, approvalCycle)
-	g.bus.Publish(events.New(events.ApprovalRequired, s.ID, runID, map[string]any{
+	g.bus.Publish(events.New(events.ApprovalRequired, s.ID, runID, events.WithHuman(events.ApprovalRequired, map[string]any{
 		"call_id": callID, "name": "run.cycle", "kind": "cycle", "args": args, "boundary_escape": false,
-	}))
+	})))
 	g.sequenceMu.Unlock()
 	defer cleanup()
 	return g.awaitDecision(ctx, s, runID, callID, wait)
@@ -169,21 +169,21 @@ func (g *Gate) beginWait(s *session.Session, runID, callID string, kind approval
 }
 
 func (g *Gate) publishPolicyApprovalRequired(s *session.Session, runID, callID, name string, args map[string]any) {
-	g.bus.Publish(events.New(events.ApprovalRequired, s.ID, runID, map[string]any{
+	g.bus.Publish(events.New(events.ApprovalRequired, s.ID, runID, events.WithHuman(events.ApprovalRequired, map[string]any{
 		"call_id":         callID,
 		"name":            name,
 		"args":            args,
 		"boundary_escape": false,
-	}))
+	})))
 }
 
 func (g *Gate) publishBoundaryEscapeRequired(s *session.Session, runID, callID, name string, args map[string]any) {
-	g.bus.Publish(events.New(events.ApprovalRequired, s.ID, runID, map[string]any{
+	g.bus.Publish(events.New(events.ApprovalRequired, s.ID, runID, events.WithHuman(events.ApprovalRequired, map[string]any{
 		"call_id":         callID,
 		"name":            name,
 		"args":            args,
 		"boundary_escape": true,
-	}))
+	})))
 }
 
 func (g *Gate) awaitDecision(ctx context.Context, s *session.Session, runID, callID string, wait *approvalWait) (string, error) {

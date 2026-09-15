@@ -210,7 +210,7 @@ func (s *Scheduler) finish(entry queuedRun, reason, detail string, turns int) {
 		state.QueuePosition = len(s.pending[entry.s.ID])
 	}
 	entry.s.SetRun(state)
-	s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": reason, "detail": detail, "turns": turns, "queue_held": queueHeld}))
+	s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": entry.runID, "reason": reason, "detail": detail, "turns": turns, "queue_held": queueHeld})))
 	s.notifyAgentIdleLocked(entry.s.Snapshot().AgentID)
 	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
 		next := s.queue[0]
@@ -321,7 +321,7 @@ func (s *Scheduler) Stop(sessionID string, all bool) []string {
 				status = "held"
 			}
 			entry.s.SetRun(session.RunState{Status: status, MaxTurns: s.cfg().Run.MaxTurns, QueuePosition: len(s.pending[entry.s.ID]), LastStopReason: "done"})
-			s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, map[string]any{"run_id": entry.runID, "reason": "done", "detail": "stopped before dispatch", "turns": 0, "queue_held": s.held[entry.s.ID]}))
+			s.bus.Publish(events.New(events.RunStopped, entry.s.ID, entry.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": entry.runID, "reason": "done", "detail": "stopped before dispatch", "turns": 0, "queue_held": s.held[entry.s.ID]})))
 			stopped = append(stopped, entry.s.ID)
 		} else {
 			kept = append(kept, entry)
@@ -368,7 +368,7 @@ func (s *Scheduler) forceFinish(sessionID string, expected *activeRun, detail st
 		state.Status, state.QueuePosition = "held", len(s.pending[sessionID])
 	}
 	item.SetRun(state)
-	s.bus.Publish(events.New(events.RunStopped, sessionID, active.runID, map[string]any{"run_id": active.runID, "reason": active.stopReason, "detail": detail, "turns": turn, "queue_held": queueHeld}))
+	s.bus.Publish(events.New(events.RunStopped, sessionID, active.runID, events.WithHuman(events.RunStopped, map[string]any{"run_id": active.runID, "reason": active.stopReason, "detail": detail, "turns": turn, "queue_held": queueHeld})))
 	s.notifyAgentIdleLocked(item.Snapshot().AgentID)
 	for len(s.queue) > 0 && len(s.active) < s.cfg().Run.MaxConcurrent {
 		next := s.queue[0]

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ import (
 	"harness/internal/hardening"
 	"harness/internal/llm"
 	"harness/internal/memory"
+	"harness/internal/notifications"
 	"harness/internal/operatorfiles"
 	"harness/internal/projection"
 	"harness/internal/serviceaccount"
@@ -135,6 +137,21 @@ func main() {
 	registry.SetAgentMemoryLoader(memoryManager.LoadAgent)
 	registry.SetWorkspaceManager(workspaceManager)
 	web.SetRegistry(registry)
+	notificationStore, err := credential.NewNamed(paths.Data, cfg.Notifications.DiscordCredential)
+	if err != nil {
+		log.Fatal(err)
+	}
+	notificationManager := notifications.New(bus, registry.Label, "http://"+cfg.Listen)
+	if value, readErr := notificationStore.Read(); readErr == nil {
+		if configureErr := notificationManager.Configure(string(value)); configureErr != nil {
+			log.Printf("Discord notification credential is invalid; notifications disabled: %v", configureErr)
+		}
+	} else if !errors.Is(readErr, credential.ErrNotStored) {
+		log.Printf("load Discord notification credential: %v", readErr)
+	}
+	notificationManager.Start(context.Background())
+	defer notificationManager.Close()
+	web.SetNotifications(notificationManager, notificationStore)
 	web.SetWorkspaceState(workspaceManager, memoryManager)
 	operatorFiles := operatorfiles.New(paths.Data, logDir, web.ConfigSnapshot)
 	operatorFiles.SetEventPublisher(func(event events.Event) { bus.Publish(event) })

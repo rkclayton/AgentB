@@ -28,6 +28,23 @@ test("approval wording stays direct and identifies the operation", () => {
 	assert.equal(policy.detail, "note.txt");
 });
 
+test("pending cards consume the shared human sentence order", () => {
+	const wording = approvalText({
+		name: "write_file",
+		boundary_escape: false,
+		args: { path: "note.txt" },
+		human: {
+			happened: "write_file needs your approval before it can continue.",
+			harness_action: "The harness paused before running the action.",
+			question: "Allow this action?",
+		},
+	});
+	assert.equal(wording.request, "write_file needs your approval before it can continue.");
+	assert.equal(wording.reason, "The harness paused before running the action.");
+	assert.equal(wording.question, "Allow this action?");
+	assert.equal(wording.detail, "note.txt");
+});
+
 test("every resolved approval is one decided line and never a pending card", () => {
 	const document = {
 		createTextNode: (text) => ({ text }),
